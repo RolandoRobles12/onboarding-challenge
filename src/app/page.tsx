@@ -33,8 +33,8 @@ export default function Home() {
 
         <Card className="hover:shadow-lg transition-shadow duration-300">
           <CardHeader>
-            <CardTitle className="text-2xl font-headline">Promotores y Gerentes</CardTitle>
-            <CardDescription>Para Aviva Tu Negocio y Aviva Contigo.</CardDescription>
+            <CardTitle className="text-2xl font-headline">Aviva Tu Negocio y Aviva Contigo</CardTitle>
+            <CardDescription>Para Promotores y Gerentes.</CardDescription>
           </CardHeader>
           <CardContent>
             <p className="mb-6">
