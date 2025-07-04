@@ -1,11 +1,14 @@
-import { Suspense } from 'react';
-import { notFound } from 'next/navigation';
+'use client'
+
+import { Suspense, useEffect, useState } from 'react';
+import { notFound, useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Star, MessageSquareQuote } from 'lucide-react';
 import Link from 'next/link';
-import { generateMotivationalFeedback } from '@/ai/flows/motivational-feedback';
+import { generateMotivationalFeedback, MotivationalFeedbackOutput } from '@/ai/flows/motivational-feedback';
 import { getAvatarComponent } from '@/lib/avatars';
+import ProtectedRoute from '@/components/ProtectedRoute';
 
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
@@ -19,26 +22,51 @@ function getLevel(score: number, total: number): { name: string; description: st
   return { name: 'Explorador Novato', description: 'Has completado el primer paso. ¡El conocimiento es tu próxima conquista!' };
 }
 
-async function ResultsContent({ searchParams }: Props) {
-  const quizType = searchParams.quizType as string;
-  const fullName = searchParams.fullName as string;
-  const scoreStr = searchParams.score as string;
-  const totalQuestionsStr = searchParams.totalQuestions as string;
-  const avatarKey = searchParams.avatar as string;
+function ResultsContent() {
+    const searchParams = useSearchParams();
+    const router = useRouter();
 
-  if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
-    return notFound();
-  }
+    const quizType = searchParams.get('quizType');
+    const fullName = searchParams.get('fullName');
+    const scoreStr = searchParams.get('score');
+    const totalQuestionsStr = searchParams.get('totalQuestions');
+    const avatarKey = searchParams.get('avatar');
 
-  const score = parseInt(scoreStr, 10);
-  const totalQuestions = parseInt(totalQuestionsStr, 10);
-  const level = getLevel(score, totalQuestions);
-  const Avatar = getAvatarComponent(avatarKey);
+    const [feedback, setFeedback] = useState<MotivationalFeedbackOutput | null>(null);
+    const [loadingFeedback, setLoadingFeedback] = useState(true);
 
-  const aiFeedback = await generateMotivationalFeedback({
-    quizTopic: quizType === 'ba' ? 'Aviva Tu Compra' : 'Aviva Tu Negocio',
-    score: score,
-  });
+    useEffect(() => {
+        if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
+            router.push('/');
+            return;
+        }
+
+        async function getFeedback() {
+            try {
+                const score = parseInt(scoreStr!, 10);
+                const aiFeedback = await generateMotivationalFeedback({
+                    quizTopic: quizType === 'ba' ? 'Aviva Tu Compra' : 'Aviva Tu Negocio',
+                    score: score,
+                });
+                setFeedback(aiFeedback);
+            } catch (error) {
+                console.error("Failed to get AI feedback", error);
+                setFeedback({ message: "¡Gran esfuerzo! Sigue así y alcanzarás la maestría." });
+            } finally {
+                setLoadingFeedback(false);
+            }
+        }
+        getFeedback();
+    }, [quizType, fullName, scoreStr, totalQuestionsStr, router]);
+
+    if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
+        return null;
+    }
+
+    const score = parseInt(scoreStr, 10);
+    const totalQuestions = parseInt(totalQuestionsStr, 10);
+    const level = getLevel(score, totalQuestions);
+    const Avatar = getAvatarComponent(avatarKey);
 
   return (
     <Card className="text-center animate-fade-in bg-card shadow-lg rounded-lg border-accent/20">
@@ -65,9 +93,13 @@ async function ResultsContent({ searchParams }: Props) {
 
         <div className="text-center p-4 border rounded-lg bg-card">
           <MessageSquareQuote className="mx-auto h-8 w-8 text-accent" />
-          <blockquote className="mt-2 text-lg italic">
-            "{aiFeedback.message}"
-          </blockquote>
+          {loadingFeedback ? (
+            <p>Generando mensaje de motivación...</p>
+          ) : (
+            <blockquote className="mt-2 text-lg italic">
+              "{feedback?.message}"
+            </blockquote>
+          )}
         </div>
 
         <Button asChild size="lg" className="w-full rounded-lg">
@@ -79,8 +111,9 @@ async function ResultsContent({ searchParams }: Props) {
 }
 
 
-export default function ResultsPage({ searchParams }: Props) {
+export default function ResultsPage() {
   return (
+    <ProtectedRoute>
       <Suspense fallback={
           <Card className="rounded-lg">
               <CardHeader>
@@ -91,7 +124,8 @@ export default function ResultsPage({ searchParams }: Props) {
               </CardContent>
           </Card>
       }>
-          <ResultsContent searchParams={searchParams} />
+          <ResultsContent />
       </Suspense>
+    </ProtectedRoute>
   )
 }

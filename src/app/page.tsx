@@ -1,62 +1,84 @@
+'use client';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AvivaLogo } from '@/components/AvivaLogo';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { useAuth } from '@/context/AuthContext';
+import { LogOut } from 'lucide-react';
 
 export default function Home() {
+  const { user, logout } = useAuth();
+  
   return (
-    <div className="flex flex-col min-h-screen bg-background">
-      <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
-        <div className="max-w-7xl mx-auto flex flex-col items-center text-center">
-            <AvivaLogo className="h-12 sm:h-16 w-auto mb-3" />
+    <ProtectedRoute>
+      <div className="flex flex-col min-h-screen bg-background">
+        <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
+          <div className="max-w-7xl mx-auto text-center">
+            <div className="w-full relative flex justify-center items-center mb-3">
+              <Link href="/" className="flex-grow flex justify-center">
+                <AvivaLogo className="h-12 sm:h-16 w-auto" />
+              </Link>
+              <div className="absolute right-0">
+                  {user && (
+                      <Button variant="ghost" onClick={logout} className="text-accent-foreground hover:bg-accent/20">
+                          <LogOut className="mr-2 h-4 w-4" />
+                          Salir
+                      </Button>
+                  )}
+              </div>
+            </div>
             <h1 className="text-3xl sm:text-5xl font-bold font-headline">Desafío Aviva</h1>
-            <p className="mt-2 text-base sm:text-lg text-accent-foreground/80">Tu aventura de conocimiento ha comenzado.</p>
-        </div>
-      </header>
+            <p className="mt-2 text-base sm:text-lg text-accent-foreground/80">
+              { user ? `Bienvenido de nuevo, ${user.displayName?.split(' ')[0]}` : 'Tu aventura de conocimiento ha comenzado.'}
+            </p>
+          </div>
+        </header>
 
-      <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
-            <CardHeader>
-              <CardTitle className="text-2xl font-headline text-accent">Promotores BA</CardTitle>
-              <CardDescription>Para el producto Aviva Tu Compra.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-6 text-card-foreground/80">
-                Comienza tu misión para dominar los secretos de Aviva Tu Compra y prepárate para el éxito.
-              </p>
-              <Button asChild size="lg" className="w-full rounded-lg">
-                <Link href="/ba">
-                  Iniciar Misión BA <span role="img" aria-label="cohete" className="ml-2">🚀</span>
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
+        <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8">
+          <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+            <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
+              <CardHeader>
+                <CardTitle className="text-2xl font-headline text-accent">Promotores BA</CardTitle>
+                <CardDescription>Para el producto Aviva Tu Compra.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-6 text-card-foreground/80">
+                  Comienza tu misión para dominar los secretos de Aviva Tu Compra y prepárate para el éxito.
+                </p>
+                <Button asChild size="lg" className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90">
+                  <Link href="/ba">
+                    Iniciar Misión BA <span role="img" aria-label="cohete" className="ml-2">🚀</span>
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
-            <CardHeader>
-              <CardTitle className="text-2xl font-headline text-accent">Aviva Tu Negocio y Aviva Contigo</CardTitle>
-              <CardDescription>Para Promotores y Gerentes.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="mb-6 text-card-foreground/80">
-                Embárcate en esta aventura para convertirte en un experto de Aviva Tu Negocio y Aviva Contigo.
-              </p>
-              <Button asChild size="lg" className="w-full rounded-lg">
-                <Link href="/atn">
-                  Iniciar Misión Aviva Contigo o Aviva Tu Negocio <span role="img" aria-label="cohete" className="ml-2">🚀</span>
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
+            <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
+              <CardHeader>
+                <CardTitle className="text-2xl font-headline text-accent">Aviva Tu Negocio y Aviva Contigo</CardTitle>
+                <CardDescription>Para Promotores y Gerentes.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-6 text-card-foreground/80">
+                  Embárcate en esta aventura para convertirte en un experto de Aviva Tu Negocio y Aviva Contigo.
+                </p>
+                <Button asChild size="lg" className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90">
+                  <Link href="/atn">
+                    Iniciar Misión Aviva Contigo o Aviva Tu Negocio <span role="img" aria-label="cohete" className="ml-2">🚀</span>
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
 
-      <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8 md:mt-12">
-        <div className="max-w-7xl mx-auto text-center text-sm">
-            <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
-        </div>
-      </footer>
-    </div>
-  );
+        <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8 md:mt-12">
+          <div className="max-w-7xl mx-auto text-center text-sm">
+              <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
+          </div>
+        </footer>
+      </div>
+    </ProtectedRoute>
+  )
 }

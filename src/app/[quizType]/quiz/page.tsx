@@ -23,6 +23,7 @@ import {
 import { getAvatarComponent } from '@/lib/avatars';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
+import ProtectedRoute from '@/components/ProtectedRoute';
 
 
 function QuizComponent() {
@@ -452,8 +453,10 @@ function QuizComponent() {
 
 export default function QuizPage() {
   return (
-    <Suspense fallback={<div className="text-center p-8"><Card><CardHeader><CardTitle>Cargando Quiz...</CardTitle></CardHeader></Card></div>}>
-      <QuizComponent />
-    </Suspense>
+    <ProtectedRoute>
+        <Suspense fallback={<div className="text-center p-8"><Card><CardHeader><CardTitle>Cargando Quiz...</CardTitle></CardHeader></Card></div>}>
+            <QuizComponent />
+        </Suspense>
+    </ProtectedRoute>
   )
 }
