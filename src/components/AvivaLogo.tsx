@@ -15,16 +15,16 @@ export function AvivaLogo(props: SVGProps<SVGSVGElement>) {
       <rect
         width="200"
         height="200"
-        fill="#5FBD73"
+        fill="#63B346"
         rx="0"
       />
       
       {/* Texto "aviva" con tipografía corregida */}
       <text
         x="100"
-        y="125"
+        y="130"
         textAnchor="middle"
-        fontSize="36"
+        fontSize="52"
         fontWeight="500"
         fontFamily="Helvetica, Arial, sans-serif"
         fill="#1A3A1A"
