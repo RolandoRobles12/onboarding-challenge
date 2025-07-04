@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { quizzes } from '@/lib/questions';
 import type { Option } from '@/lib/types';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Check, CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from 'lucide-react';
@@ -239,6 +239,8 @@ function QuizComponent() {
           {currentQuestion.options.map((option, index) => {
             const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
             const isCorrect = option.isCorrect;
+            const optionId = `option-${questionKey}-${index}`;
+
             let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'outline';
             let buttonColor = 'border-accent/30 text-accent hover:bg-accent/10';
 
@@ -255,40 +257,53 @@ function QuizComponent() {
               }
             }
 
+            if (currentQuestion.multipleCorrect) {
+              return (
+                <label
+                  key={index}
+                  htmlFor={optionId}
+                  className={cn(
+                    buttonVariants({ variant, size: 'lg' }),
+                    "w-full justify-start text-left h-auto py-3 whitespace-normal rounded-lg flex items-center",
+                    buttonColor,
+                    gameState.isAnswered ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+                  )}
+                >
+                  <Checkbox
+                    id={optionId}
+                    checked={isSelected}
+                    onCheckedChange={() => handleOptionSelect(option)}
+                    disabled={gameState.isAnswered}
+                    className="mr-3 flex-shrink-0"
+                  />
+                  <span className="flex-grow">{option.text}</span>
+                  {gameState.isAnswered && (
+                    <div className="ml-2 flex-shrink-0">
+                      {isCorrect ? <CheckCircle /> : isSelected ? <XCircle /> : null}
+                    </div>
+                  )}
+                </label>
+              );
+            }
+            
             return (
               <Button
                 key={index}
                 onClick={() => handleOptionSelect(option)}
-                disabled={gameState.isAnswered && !currentQuestion.multipleCorrect}
+                disabled={gameState.isAnswered}
                 size="lg"
                 variant={variant}
                 className={cn("w-full justify-start text-left h-auto py-3 whitespace-normal rounded-lg", buttonColor)}
               >
-                {currentQuestion.multipleCorrect ? (
-                  <div className="flex items-center w-full">
-                    <Checkbox
-                      checked={isSelected}
-                      disabled={gameState.isAnswered}
-                      className="mr-3 flex-shrink-0"
-                    />
-                    <span className="flex-grow">{option.text}</span>
-                    {gameState.isAnswered && (
-                      <div className="ml-2 flex-shrink-0">
-                        {isCorrect ? <CheckCircle /> : isSelected ? <XCircle /> : null}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    {gameState.isAnswered && (
-                      isCorrect ? <CheckCircle className="mr-3" /> :
-                      isSelected ? <XCircle className="mr-3" /> :
-                      <span className="w-8 mr-3"></span>
-                    )}
-                    {!gameState.isAnswered && <span className="w-8 mr-3"></span>}
-                    {option.text}
-                  </>
-                )}
+                <>
+                  {gameState.isAnswered && (
+                    isCorrect ? <CheckCircle className="mr-3" /> :
+                    isSelected ? <XCircle className="mr-3" /> :
+                    <span className="w-8 mr-3"></span>
+                  )}
+                  {!gameState.isAnswered && <span className="w-8 mr-3"></span>}
+                  {option.text}
+                </>
               </Button>
             );
           })}
