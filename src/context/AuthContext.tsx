@@ -1,7 +1,7 @@
 
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import * as React from 'react';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,7 +12,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({
+const AuthContext = React.createContext<AuthContextType>({
   user: null,
   loading: true,
   logout: async () => {},
@@ -21,9 +21,9 @@ const AuthContext = createContext<AuthContextType>({
 const ALLOWED_DOMAIN = 'avivacredito.com';
 const ALLOWED_EMAILS = ['rolando.9834@gmail.com'];
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [user, setUser] = React.useState<User | null>(null);
+  const [loading, setLoading] = React.useState(true);
 
   const isFirebaseConfigured = !!auth;
 
@@ -33,7 +33,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
   
-  useEffect(() => {
+  React.useEffect(() => {
     if (!isFirebaseConfigured) {
       setLoading(false);
       return;
@@ -64,7 +64,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           <CardHeader>
             <CardTitle className="text-destructive">Error de Configuración de Firebase</CardTitle>
             <CardDescription>
-              La autenticación no se pudo inicializar. Para que la aplicación funcione, necesita las claves de la API de Firebase, que no están configuradas.
+              La autenticación no se pudo inicializar. Para que la aplicación funcione, necesita las claves de la API de Firebase.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -106,4 +106,4 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => React.useContext(AuthContext);
