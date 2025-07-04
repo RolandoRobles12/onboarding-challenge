@@ -15,12 +15,7 @@ export function AvivaLogo(props: SVGProps<SVGSVGElement>) {
           font-family: 'Inter', sans-serif;
           font-size: 32px;
           font-weight: 700;
-        }
-        .aviva-blue {
           fill: hsl(var(--primary));
-        }
-        .aviva-green {
-          fill: hsl(var(--accent));
         }
       `}</style>
       <text
@@ -30,7 +25,7 @@ export function AvivaLogo(props: SVGProps<SVGSVGElement>) {
         textAnchor="middle"
         className="aviva-text"
       >
-        <tspan className="aviva-blue">avi</tspan><tspan className="aviva-green">v</tspan><tspan className="aviva-blue">a</tspan>
+        aviva
       </text>
     </svg>
   );
