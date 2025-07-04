@@ -1,4 +1,4 @@
-import type { QuizData } from './types';
+import type { Question, QuizData } from './types';
 
 const promotores_ba_data = [
   { "question": "¿Qué significa AOS?", "options": ["Aviva On System", "Aviva Onboarding System"], "correct": "Aviva On System" },
@@ -102,7 +102,7 @@ const promotores_atn_data = [
 ];
 
 
-const transformQuestion = (q: { question: string; options: string[]; correct: string; }) => {
+const transformQuestion = (q: { question: string; options: string[]; correct: string; }): Question => {
   const correctAnswers = q.correct.split(',').map(s => s.trim());
   return {
     text: q.question,
@@ -110,6 +110,12 @@ const transformQuestion = (q: { question: string; options: string[]; correct: st
       text: o,
       isCorrect: correctAnswers.includes(o),
     })),
+    isTricky: [
+        '¿Qué categorías financiamos dentro de la tienda con el crédito Aviva?',
+        '¿En dónde se pueden hacer los pagos en efectivo?',
+        'Selecciona los negocios excluidos de Aviva Tu Negocio pero aceptados en Aviva Contigo',
+        'Selecciona los estados de cuenta que aceptamos actualmente'
+    ].includes(q.question),
   };
 };
 

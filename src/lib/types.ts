@@ -6,6 +6,7 @@ export interface Option {
 export interface Question {
   text: string;
   options: Option[];
+  isTricky?: boolean;
 }
 
 export interface Mission {
