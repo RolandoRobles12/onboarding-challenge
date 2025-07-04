@@ -68,23 +68,7 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="employeeId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-accent">Número de colaborador</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej. 48_02" {...field} className="bg-muted" />
-                  </FormControl>
-                  <FormDescription>
-                    Lo puedes encontrar en Worky → Mi perfil → No. de colaborador.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
+             <FormField
               control={form.control}
               name="assignedKiosk"
               render={({ field }) => (
@@ -119,6 +103,22 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
                   <FormControl>
                     <Input placeholder="Ej. Amran Frey" {...field} className="bg-muted" />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="employeeId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-accent">Número de colaborador</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ej. 48_02" {...field} className="bg-muted" />
+                  </FormControl>
+                  <FormDescription>
+                    Lo puedes encontrar en Worky → Mi perfil → No. de colaborador.
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
