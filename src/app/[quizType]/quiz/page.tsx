@@ -8,7 +8,7 @@ import type { Option } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -22,6 +22,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { getAvatarComponent } from '@/lib/avatars';
 import { cn } from '@/lib/utils';
+import { Checkbox } from '@/components/ui/checkbox';
+
 
 function QuizComponent() {
   const router = useRouter();
@@ -36,7 +38,7 @@ function QuizComponent() {
     currentMissionIndex: 0,
     currentQuestionIndex: 0,
     score: 0,
-    selectedOption: null as Option | null,
+    selectedOptions: [] as Option[],
     isAnswered: false,
     showMissionIntro: true,
     missionFailed: false,
@@ -48,6 +50,7 @@ function QuizComponent() {
     bonusLives: 0,
     lifeUsedMessage: null as string | null,
     mistakeMadeInMission: false,
+    lastAnswerWasCorrect: false,
   });
 
   const quiz = useMemo(() => quizzes[quizType], [quizType]);
@@ -79,8 +82,17 @@ function QuizComponent() {
     }));
   }, [quizType, fullName, router, searchParams]);
 
-  const processAnswer = (option: Option) => {
-      const isCorrect = option.isCorrect;
+  const processAnswer = (selected: Option[]) => {
+      let isCorrect;
+      if (currentQuestion?.isMultiSelect) {
+        const correctOptions = currentQuestion.options.filter(o => o.isCorrect);
+        const selectedTexts = new Set(selected.map(o => o.text));
+        const correctTexts = new Set(correctOptions.map(o => o.text));
+        isCorrect = selected.length === correctOptions.length && [...selectedTexts].every(text => correctTexts.has(text));
+      } else {
+        isCorrect = selected.length > 0 && selected[0].isCorrect;
+      }
+      
       let feedback = null;
       let bonusLivesChange = 0;
 
@@ -101,10 +113,8 @@ function QuizComponent() {
 
       if (!isCorrect) {
         if (gameState.mistakeMadeInMission) {
-          // This is the second mistake
           newMissionFailed = true;
         } else {
-          // This is the first mistake, use the "free" life for this mission
           newMistakeMadeInMission = true;
         }
       }
@@ -112,39 +122,54 @@ function QuizComponent() {
       setGameState(prev => ({
         ...prev,
         isAnswered: true,
-        selectedOption: option,
         score: isCorrect ? prev.score + 1 : prev.score,
         missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
         missionFailed: newMissionFailed,
         mistakeMadeInMission: newMistakeMadeInMission,
         specialFeedback: feedback,
         bonusLives: prev.bonusLives + bonusLivesChange,
+        lastAnswerWasCorrect: isCorrect,
       }));
   };
 
-  const handleOptionSelect = (option: Option) => {
+  const handleSingleOptionSelect = (option: Option) => {
     if (gameState.isAnswered || gameState.isConfirming) return;
+
+    setGameState(prev => ({ ...prev, selectedOptions: [option] }));
 
     if (currentQuestion?.isTricky && !gameState.initialSelection) {
         setGameState(prev => ({
             ...prev,
             isConfirming: true,
-            selectedOption: option,
             initialSelection: { option, isCorrect: option.isCorrect }
         }));
     } else {
-        processAnswer(option);
+        processAnswer([option]);
     }
+  };
+
+  const handleMultiOptionToggle = (option: Option) => {
+    if (gameState.isAnswered) return;
+    setGameState(prev => {
+        const newSelection = prev.selectedOptions.some(o => o.text === option.text)
+            ? prev.selectedOptions.filter(o => o.text !== option.text)
+            : [...prev.selectedOptions, option];
+        return { ...prev, selectedOptions: newSelection };
+    });
+  };
+
+  const handleVerifyMultiSelectAnswer = () => {
+    processAnswer(gameState.selectedOptions);
   };
 
   const handleConfirmAnswer = (isSure: boolean) => {
     setGameState(prev => ({ ...prev, isConfirming: false }));
-    if (isSure && gameState.selectedOption) {
-        processAnswer(gameState.selectedOption);
+    if (isSure && gameState.selectedOptions.length > 0) {
+        processAnswer(gameState.selectedOptions);
     } else {
         setGameState(prev => ({
           ...prev,
-          selectedOption: null, // Allow user to select another option
+          selectedOptions: [], 
           initialSelection: null,
         }));
     }
@@ -157,7 +182,7 @@ function QuizComponent() {
 
     if (missionFailed && bonusLivesLeft > 0) {
       bonusLivesLeft--;
-      missionFailed = false; // Override failure with a bonus life
+      missionFailed = false; 
       lifeUsed = true;
     }
 
@@ -167,7 +192,7 @@ function QuizComponent() {
     }
 
     const commonReset = {
-        selectedOption: null,
+        selectedOptions: [],
         isAnswered: false,
         initialSelection: null,
         specialFeedback: null,
@@ -190,7 +215,7 @@ function QuizComponent() {
           showMissionIntro: true,
           missionScore: 0,
           missionFailed: false,
-          mistakeMadeInMission: false, // Reset for new mission
+          mistakeMadeInMission: false,
           bonusLives: bonusLivesLeft,
           ...commonReset,
         }));
@@ -213,12 +238,12 @@ function QuizComponent() {
       ...prev,
       score: prev.score - prev.missionScore,
       currentQuestionIndex: 0,
-      selectedOption: null,
+      selectedOptions: [],
       isAnswered: false,
       showMissionIntro: true,
       showMissionFailedScreen: false,
       missionFailed: false,
-      mistakeMadeInMission: false, // Reset for mission restart
+      mistakeMadeInMission: false,
       missionScore: 0,
       initialSelection: null,
       specialFeedback: null,
@@ -240,7 +265,7 @@ function QuizComponent() {
 
   if (gameState.showMissionFailedScreen) {
     return (
-      <Card className="animate-fade-in text-center rounded-lg shadow-lg">
+      <Card className="animate-fade-in text-center rounded-lg shadow-lg border-destructive/20">
         <CardHeader>
           <ShieldAlert className="mx-auto h-16 w-16 text-destructive" />
           <CardTitle className="text-3xl font-headline text-destructive mt-4">
@@ -254,7 +279,7 @@ function QuizComponent() {
           <p>¡No te preocupes, hasta los mejores exploradores tropiezan! Concéntrate y vuelve a intentarlo.</p>
         </CardContent>
         <CardFooter>
-          <Button onClick={restartMission} size="lg" className="w-full rounded-lg text-primary-foreground">
+          <Button onClick={restartMission} size="lg" className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90">
             Intentar de Nuevo
           </Button>
         </CardFooter>
@@ -283,7 +308,7 @@ function QuizComponent() {
            )}
         </CardContent>
         <CardFooter>
-          <Button onClick={startMission} size="lg" className="w-full rounded-lg text-primary-foreground">
+          <Button onClick={startMission} size="lg" className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90">
             Comenzar Misión
           </Button>
         </CardFooter>
@@ -294,7 +319,60 @@ function QuizComponent() {
   if (!currentQuestion) return <p>Error: No se encontró la pregunta.</p>;
   
   const questionKey = `${gameState.currentMissionIndex}-${gameState.currentQuestionIndex}`;
-  const lastAnswerWasCorrect = gameState.selectedOption?.isCorrect;
+
+  const renderOptions = () => {
+    return currentQuestion.options.map((option, index) => {
+        const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
+        const isCorrect = option.isCorrect;
+        let optionStyle = "border-primary/30 text-primary bg-card hover:bg-primary/10";
+        let Icon = null;
+        let radioOrCheck = <div className="w-6 h-6 rounded-full border-2 border-primary/50 shrink-0"></div>;
+
+        if (currentQuestion.isMultiSelect) {
+            radioOrCheck = <Checkbox checked={isSelected} disabled={gameState.isAnswered} className="h-6 w-6 shrink-0" />;
+        } else if (isSelected) {
+            radioOrCheck = <div className="w-6 h-6 rounded-full border-2 border-primary bg-primary flex items-center justify-center shrink-0"><div className="w-3 h-3 bg-card rounded-full"></div></div>;
+        }
+
+        if (gameState.isAnswered) {
+          if (isCorrect) {
+            optionStyle = 'bg-accent/10 border-accent text-accent';
+            Icon = <CheckCircle className="text-accent shrink-0" />;
+          } else if (isSelected) {
+            optionStyle = 'bg-destructive/10 border-destructive text-destructive';
+            Icon = <XCircle className="text-destructive shrink-0" />;
+          } else {
+            optionStyle = 'border-muted-foreground/30 bg-muted text-muted-foreground';
+            Icon = <span className="w-6 h-6 shrink-0"></span>;
+          }
+        } else if (isSelected) {
+            optionStyle = 'border-primary bg-primary/10';
+        }
+
+        return (
+            <label
+              key={index}
+              className={cn(
+                "flex w-full cursor-pointer items-center gap-4 rounded-lg border p-4 text-left text-base transition-all",
+                optionStyle,
+                gameState.isAnswered ? 'cursor-not-allowed opacity-80' : 'hover:shadow-md'
+              )}
+              onClick={() => {
+                if (gameState.isAnswered) return;
+                if(currentQuestion.isMultiSelect) {
+                    handleMultiOptionToggle(option)
+                } else {
+                    handleSingleOptionSelect(option)
+                }
+              }}
+            >
+              {gameState.isAnswered ? Icon : radioOrCheck}
+              <span className="flex-grow">{option.text}</span>
+            </label>
+        );
+    })
+  }
+
 
   return (
     <div className="space-y-6">
@@ -308,7 +386,7 @@ function QuizComponent() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => handleConfirmAnswer(false)}>No, quiero cambiar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleConfirmAnswer(true)} className="text-primary-foreground">Sí, estoy seguro</AlertDialogAction>
+            <AlertDialogAction onClick={() => handleConfirmAnswer(true)} className="text-primary-foreground bg-primary hover:bg-primary/90">Sí, estoy seguro</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -318,7 +396,7 @@ function QuizComponent() {
           <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
           <Progress value={progressValue} className="transition-all duration-500 rounded-lg h-3" />
         </div>
-        <div className="relative flex items-center gap-2 bg-white p-2 rounded-full shadow-md">
+        <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
           <Avatar className="h-10 w-10 text-primary" />
           {gameState.bonusLives > 0 && (
             <div className="flex items-center gap-1 text-primary font-bold pr-2">
@@ -334,61 +412,35 @@ function QuizComponent() {
           <CardDescription>{currentMission.title}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {currentQuestion.options.map((option, index) => {
-            const isSelected = gameState.selectedOption?.text === option.text;
-            const isCorrect = option.isCorrect;
-
-            let buttonColor = 'border-primary/30 text-primary hover:bg-primary/10';
-
-            if (gameState.isAnswered) {
-              if (isCorrect) {
-                buttonColor = 'bg-accent text-accent-foreground border-accent';
-              } else if (isSelected) {
-                buttonColor = 'bg-destructive text-destructive-foreground border-destructive';
-              } else {
-                 buttonColor = 'border-gray-300 text-gray-500 bg-gray-50';
-              }
-            } else if (isSelected) {
-              buttonColor = 'bg-primary/20 border-primary';
-            }
-            
-            return (
-              <Button
-                key={index}
-                onClick={() => handleOptionSelect(option)}
-                disabled={gameState.isAnswered}
-                size="lg"
-                variant="outline"
-                className={cn("w-full justify-start text-left h-auto py-3 whitespace-normal rounded-lg transition-all", buttonColor)}
-              >
-                <>
-                  {gameState.isAnswered && (
-                    isCorrect ? <CheckCircle className="mr-3" /> :
-                    isSelected ? <XCircle className="mr-3" /> :
-                    <span className="w-8 mr-3"></span>
-                  )}
-                  {!gameState.isAnswered && <span className="w-8 mr-3"></span>}
-                  {option.text}
-                </>
-              </Button>
-            );
-          })}
+            {renderOptions()}
         </CardContent>
+
+        {currentQuestion.isMultiSelect && !gameState.isAnswered && (
+            <CardFooter>
+                <Button onClick={handleVerifyMultiSelectAnswer} disabled={gameState.selectedOptions.length === 0} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
+                    <Check className="mr-2"/>
+                    Verificar respuesta
+                </Button>
+            </CardFooter>
+        )}
 
         {gameState.isAnswered && (
           <CardFooter className="flex-col items-stretch space-y-4">
-            <Alert variant={lastAnswerWasCorrect ? 'default' : 'destructive'} className="bg-card rounded-lg border-2">
-              <AlertTitle>{lastAnswerWasCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
+            <Alert variant={gameState.lastAnswerWasCorrect ? 'default' : 'destructive'} className={cn(
+                "rounded-lg border-2",
+                gameState.lastAnswerWasCorrect ? "bg-accent/10 border-accent text-accent" : "bg-destructive/10 border-destructive text-destructive"
+            )}>
+              <AlertTitle className="font-bold">{gameState.lastAnswerWasCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
               <AlertDescription>
                 {gameState.specialFeedback ||
-                  (lastAnswerWasCorrect
+                  (gameState.lastAnswerWasCorrect
                     ? '¡Excelente! Sigamos adelante.'
                     : gameState.missionFailed
                     ? 'Este fue tu segundo error en la misión. Deberás reiniciar para continuar.'
                     : 'Cuidado, este es tu primer error. ¡Aún te queda una oportunidad en esta misión!')}
               </AlertDescription>
             </Alert>
-            <Button onClick={handleNext} className="w-full rounded-lg text-primary-foreground" size="lg">
+            <Button onClick={handleNext} className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
               Siguiente <ArrowRight className="ml-2" />
             </Button>
           </CardFooter>
@@ -400,7 +452,7 @@ function QuizComponent() {
 
 export default function QuizPage() {
   return (
-    <Suspense fallback={<div>Cargando...</div>}>
+    <Suspense fallback={<div className="text-center p-8"><Card><CardHeader><CardTitle>Cargando Quiz...</CardTitle></CardHeader></Card></div>}>
       <QuizComponent />
     </Suspense>
   )

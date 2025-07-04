@@ -110,6 +110,7 @@ const transformQuestion = (q: { question: string; options: string[]; correct: st
       text: o,
       isCorrect: correctAnswers.includes(o),
     })),
+    isMultiSelect: correctAnswers.length > 1,
     isTricky: [
         '¿Qué categorías financiamos dentro de la tienda con el crédito Aviva?',
         '¿Por qué se rechazan las solicitudes de crédito?',

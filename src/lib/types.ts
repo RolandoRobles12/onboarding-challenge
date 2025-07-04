@@ -7,6 +7,7 @@ export interface Question {
   text: string;
   options: Option[];
   isTricky?: boolean;
+  isMultiSelect?: boolean;
 }
 
 export interface Mission {
