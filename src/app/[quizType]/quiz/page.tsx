@@ -7,7 +7,7 @@ import type { Option } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAvatarComponent } from '@/lib/avatars';
 
@@ -27,6 +27,9 @@ function QuizComponent() {
     selectedOption: null as Option | null,
     isAnswered: false,
     showMissionIntro: true,
+    missionFailed: false,
+    missionScore: 0,
+    showMissionFailedScreen: false,
   });
 
   const quiz = useMemo(() => quizzes[quizType], [quizType]);
@@ -55,15 +58,24 @@ function QuizComponent() {
   const handleOptionSelect = (option: Option) => {
     if (gameState.isAnswered) return;
 
+    const isCorrect = option.isCorrect;
+
     setGameState(prev => ({
       ...prev,
       selectedOption: option,
       isAnswered: true,
-      score: option.isCorrect ? prev.score + 1 : prev.score,
+      score: isCorrect ? prev.score + 1 : prev.score,
+      missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
+      missionFailed: !isCorrect,
     }));
   };
 
   const handleNext = () => {
+    if (gameState.missionFailed) {
+      setGameState(prev => ({ ...prev, showMissionFailedScreen: true }));
+      return;
+    }
+
     if (gameState.currentQuestionIndex < (currentMission?.questions.length || 0) - 1) {
       // Next question in the same mission
       setGameState(prev => ({
@@ -83,6 +95,8 @@ function QuizComponent() {
           selectedOption: null,
           isAnswered: false,
           showMissionIntro: true,
+          missionScore: 0,
+          missionFailed: false,
         }));
       } else {
         // End of quiz
@@ -98,6 +112,20 @@ function QuizComponent() {
     setGameState(prev => ({ ...prev, showMissionIntro: false }));
   };
 
+  const restartMission = () => {
+    setGameState(prev => ({
+      ...prev,
+      score: prev.score - prev.missionScore,
+      currentQuestionIndex: 0,
+      selectedOption: null,
+      isAnswered: false,
+      showMissionIntro: true,
+      showMissionFailedScreen: false,
+      missionFailed: false,
+      missionScore: 0,
+    }));
+  };
+
   if (!quiz || !currentMission) {
     return (
       <Card>
@@ -107,6 +135,30 @@ function QuizComponent() {
         <CardContent>
           <p>Preparando tu misión. Por favor, espera.</p>
         </CardContent>
+      </Card>
+    );
+  }
+
+  if (gameState.showMissionFailedScreen) {
+    return (
+      <Card className="animate-fade-in text-center">
+        <CardHeader>
+          <ShieldAlert className="mx-auto h-16 w-16 text-destructive" />
+          <CardTitle className="text-3xl font-headline text-destructive mt-4">
+            ¡Misión Fallida!
+          </CardTitle>
+          <CardDescription>
+            Has cometido un error y debes reiniciar la misión para continuar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p>¡No te preocupes, hasta los mejores exploradores tropiezan! Concéntrate y vuelve a intentarlo.</p>
+        </CardContent>
+        <CardFooter>
+          <Button onClick={restartMission} size="lg" className="w-full">
+            Intentar de Nuevo
+          </Button>
+        </CardFooter>
       </Card>
     );
   }
@@ -189,7 +241,7 @@ function QuizComponent() {
             <Alert variant={gameState.selectedOption?.isCorrect ? 'default' : 'destructive'} className="bg-card">
               <AlertTitle>{gameState.selectedOption?.isCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
               <AlertDescription>
-                 {gameState.selectedOption?.isCorrect ? '¡Excelente! Sigamos adelante.' : 'No te preocupes, ¡lo importante es aprender!'}
+                 {gameState.selectedOption?.isCorrect ? '¡Excelente! Sigamos adelante.' : 'Has perdido tu única vida. Deberás reiniciar la misión para continuar.'}
               </AlertDescription>
             </Alert>
             <Button onClick={handleNext} className="w-full" size="lg">
