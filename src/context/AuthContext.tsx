@@ -64,12 +64,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           <CardHeader>
             <CardTitle className="text-destructive">Error: Configuración de Firebase Incompleta</CardTitle>
             <CardDescription>
-              La autenticación no se pudo inicializar. Para que la aplicación funcione, necesita las claves de la API de Firebase.
+             Para que la aplicación funcione, necesita las claves de la API de Firebase.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-sm">
-              Por favor, asegúrate de que tu archivo <strong>.env</strong> en la raíz del proyecto contiene las variables de entorno correctas de tu proyecto de Firebase.
+              Por favor, asegúrate de que tu archivo <strong>.env</strong> en la raíz del proyecto contiene las siguientes variables de tu proyecto de Firebase:
             </p>
             <div className="bg-muted p-3 rounded-md text-xs font-mono text-muted-foreground">
               <p>NEXT_PUBLIC_FIREBASE_API_KEY=...</p>

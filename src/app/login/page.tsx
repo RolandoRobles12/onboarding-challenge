@@ -10,7 +10,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { AvivaLogo } from '@/components/AvivaLogo';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect } from 'react';
-import { CardBody } from 'recharts/types/component/DefaultTooltipContent';
 
 const ALLOWED_DOMAIN = 'avivacredito.com';
 const ALLOWED_EMAILS = ['rolando.9834@gmail.com'];
