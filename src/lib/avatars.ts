@@ -1,16 +1,21 @@
-import { User, Shield, UserCog, UserRound } from 'lucide-react';
+import { Bot, Compass, GraduationCap, Rocket } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
 import type { ForwardRefExoticComponent, RefAttributes } from 'react';
 
-export const avatarComponents: { [key: string]: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>> } = {
-  'user-round': UserRound,
-  'shield': Shield,
-  'user-cog': UserCog,
-  'user': User,
+export type AvatarInfo = {
+  name: string;
+  Icon: ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>>;
 };
 
-export const defaultAvatar = 'user-round';
+export const avatarData: { [key: string]: AvatarInfo } = {
+  'bot': { name: 'Analista Robótico', Icon: Bot },
+  'rocket': { name: 'Pionero Espacial', Icon: Rocket },
+  'graduation-cap': { name: 'Mente Maestra', Icon: GraduationCap },
+  'compass': { name: 'Explorador Intrépido', Icon: Compass },
+};
 
-export const getAvatarComponent = (key: string | null | undefined) => {
-  return avatarComponents[key || defaultAvatar] || avatarComponents[defaultAvatar];
+export const defaultAvatar = 'bot';
+
+export const getAvatarComponent = (key: string | null | undefined): ForwardRefExoticComponent<Omit<LucideProps, "ref"> & RefAttributes<SVGSVGElement>> => {
+  return avatarData[key || defaultAvatar]?.Icon || avatarData[defaultAvatar].Icon;
 };

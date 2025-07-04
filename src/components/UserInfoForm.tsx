@@ -9,7 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Input } from '@/components/ui/input';
 import { Rocket } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { avatarComponents, defaultAvatar } from '@/lib/avatars';
+import { avatarData, defaultAvatar } from '@/lib/avatars';
 import { cn } from '@/lib/utils';
 
 const formSchema = z.object({
@@ -51,72 +51,74 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-        <FormField
-          control={form.control}
-          name="fullName"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Nombre completo</FormLabel>
-              <FormControl>
-                <Input placeholder="Ej. Ana García" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="employeeId"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Número de colaborador</FormLabel>
-              <FormControl>
-                <Input placeholder="Ej. 12345" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="assignedKiosk"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Kiosco asignado</FormLabel>
-              <FormControl>
-                <Input placeholder="Ej. Plaza Central" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="trainingKiosk"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Kiosco de capacitación (Opcional)</FormLabel>
-              <FormControl>
-                <Input placeholder="Ej. Oficina Principal" {...field} />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        <div className="grid md:grid-cols-2 gap-6">
+          <FormField
+            control={form.control}
+            name="fullName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Nombre completo</FormLabel>
+                <FormControl>
+                  <Input placeholder="Ej. Ana García" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="employeeId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Número de colaborador</FormLabel>
+                <FormControl>
+                  <Input placeholder="Ej. 12345" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="assignedKiosk"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Kiosco asignado</FormLabel>
+                <FormControl>
+                  <Input placeholder="Ej. Plaza Central" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="trainingKiosk"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Kiosco de capacitación (Opcional)</FormLabel>
+                <FormControl>
+                  <Input placeholder="Ej. Oficina Principal" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
         <FormField
           control={form.control}
           name="avatar"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Elige tu explorador</FormLabel>
+              <FormLabel className="text-lg font-semibold">Elige tu explorador</FormLabel>
               <FormControl>
                 <RadioGroup
                   onValueChange={field.onChange}
                   defaultValue={field.value}
-                  className="flex justify-around pt-4"
+                  className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4"
                 >
-                  {Object.entries(avatarComponents).map(([key, Icon]) => (
+                  {Object.entries(avatarData).map(([key, { name, Icon }]) => (
                     <FormItem key={key}>
                       <FormControl>
                         <RadioGroupItem value={key} id={key} className="sr-only" />
@@ -124,11 +126,18 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
                       <FormLabel
                         htmlFor={key}
                         className={cn(
-                          'cursor-pointer rounded-full p-3 border-2 transition-all hover:bg-accent/50',
-                          field.value === key ? 'border-primary bg-primary/10 scale-110' : 'border-transparent'
+                          'cursor-pointer rounded-xl p-3 border-2 transition-all w-full flex flex-col items-center justify-center gap-3 aspect-square',
+                          'hover:bg-card hover:border-primary/50',
+                          field.value === key ? 'border-primary bg-primary/10 ring-2 ring-primary ring-offset-background' : 'border-border bg-card'
                         )}
                       >
-                        <Icon className="h-12 w-12 text-muted-foreground group-hover:text-foreground" />
+                        <div className={cn(
+                            "rounded-full p-3 transition-colors",
+                            field.value === key ? 'bg-primary/20' : 'bg-muted'
+                        )}>
+                            <Icon className={cn("h-10 w-10 transition-colors", field.value === key ? 'text-primary' : 'text-muted-foreground')} />
+                        </div>
+                        <span className="font-semibold text-center text-sm">{name}</span>
                       </FormLabel>
                     </FormItem>
                   ))}
