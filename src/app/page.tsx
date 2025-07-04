@@ -7,17 +7,17 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 export default function Home() {
   return (
     <div className="flex flex-col min-h-screen bg-background">
-      <header className="bg-accent text-accent-foreground py-6 px-4 sm:px-8">
+      <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
         <div className="max-w-7xl mx-auto flex flex-col items-center text-center">
-            <AvivaLogo className="h-16 w-auto mb-4" />
-            <h1 className="text-4xl sm:text-5xl font-bold font-headline">Desafío Aviva</h1>
-            <p className="mt-2 text-lg text-accent-foreground/80">Tu aventura de conocimiento ha comenzado.</p>
+            <AvivaLogo className="h-12 sm:h-16 w-auto mb-3" />
+            <h1 className="text-3xl sm:text-5xl font-bold font-headline">Desafío Aviva</h1>
+            <p className="mt-2 text-base sm:text-lg text-accent-foreground/80">Tu aventura de conocimiento ha comenzado.</p>
         </div>
       </header>
 
-      <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-8">
-        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8">
-          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border-accent/20">
+      <main className="flex-grow flex flex-col items-center justify-center p-4 md:p-8">
+        <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
             <CardHeader>
               <CardTitle className="text-2xl font-headline text-accent">Promotores BA</CardTitle>
               <CardDescription>Para el producto Aviva Tu Compra.</CardDescription>
@@ -34,7 +34,7 @@ export default function Home() {
             </CardContent>
           </Card>
 
-          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border-accent/20">
+          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
             <CardHeader>
               <CardTitle className="text-2xl font-headline text-accent">Aviva Tu Negocio y Aviva Contigo</CardTitle>
               <CardDescription>Para Promotores y Gerentes.</CardDescription>
@@ -53,7 +53,7 @@ export default function Home() {
         </div>
       </main>
 
-      <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-12">
+      <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8 md:mt-12">
         <div className="max-w-7xl mx-auto text-center text-sm">
             <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
         </div>
