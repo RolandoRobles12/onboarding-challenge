@@ -98,7 +98,7 @@ const promotores_atn_data = [
   { "question": "¿Cuándo puedo iniciar mi proceso de renovación?", "options": ["Si el cliente es candidato, recibe oferta por WhatsApp", "Una vez que hayan pasado 3 meses del primer crédito"], "correct": "Si el cliente es candidato, recibe oferta por WhatsApp" },
   { "question": "¿Cuánto tiempo tarda en cerrarse un crédito después de liquidar?", "options": ["Menos de 12 horas", "De 24 a 72 horas", "Hasta 1 semana después"], "correct": "De 24 a 72 horas" },
   { "question": "¿El monto puede ser mayor que el crédito anterior?", "options": ["Sí, podría subir mínimo $1,000 o más", "No, siempre es el mismo monto"], "correct": "Sí, podría subir mínimo $1,000 o más" },
-  { "question": "¿Por qué un cliente es rechazado en la renovación?", "options": ["Por un mal comportamiento en pagos y/o mal score crediticio", "Por solicitar monto mayor al autorizado"], "correct": "Por un mal comportamiento en pagos y/o mal score crediticio" },
+  { "question": "¿Por qué un cliente es rechazado en la renovación?", "options": ["Por un mal comportamiento en pagos y/o mal score crediticio", "Por solicitar monto mayor al autorizado"], "correct": "Por un mal comportamiento en pagos y/o mal score crediticio" }
 ];
 
 
@@ -112,7 +112,7 @@ const transformQuestion = (q: { question: string; options: string[]; correct: st
     })),
     isTricky: [
         '¿Qué categorías financiamos dentro de la tienda con el crédito Aviva?',
-        '¿En dónde se pueden hacer los pagos en efectivo?',
+        '¿Por qué se rechazan las solicitudes de crédito?',
         'Selecciona los negocios excluidos de Aviva Tu Negocio pero aceptados en Aviva Contigo',
         'Selecciona los estados de cuenta que aceptamos actualmente'
     ].includes(q.question),
