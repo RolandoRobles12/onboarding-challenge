@@ -64,7 +64,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           <CardHeader>
             <CardTitle className="text-destructive">Error de Configuración de Firebase</CardTitle>
             <CardDescription>
-              La autenticación no se pudo inicializar. Esto suele deberse a que las claves de la API de Firebase no están configuradas.
+              La autenticación no se pudo inicializar. Para que la aplicación funcione, necesita las claves de la API de Firebase, que no están configuradas.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
