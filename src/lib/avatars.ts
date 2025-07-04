@@ -8,10 +8,10 @@ export type AvatarInfo = {
 };
 
 export const avatarData: { [key: string]: AvatarInfo } = {
-  'bot': { name: 'Capitán Proceso', Icon: Bot },
-  'rocket': { name: 'Comandante Avance', Icon: Rocket },
-  'graduation-cap': { name: 'Sabia Estratega', Icon: GraduationCap },
-  'compass': { name: 'Guía Pionero', Icon: Compass },
+  'bot': { name: 'Estratega de Compra', Icon: Bot },
+  'rocket': { name: 'Impulsor de Negocios', Icon: Rocket },
+  'graduation-cap': { name: 'Visionaria Contigo', Icon: GraduationCap },
+  'compass': { name: 'Explorador de Oportunidades', Icon: Compass },
 };
 
 export const defaultAvatar = 'bot';
