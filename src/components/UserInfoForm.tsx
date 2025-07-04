@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Rocket } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -16,7 +16,8 @@ const formSchema = z.object({
   fullName: z.string().min(3, { message: 'El nombre debe tener al menos 3 caracteres.' }),
   employeeId: z.string().min(1, { message: 'El número de colaborador es requerido.' }),
   assignedKiosk: z.string().min(2, { message: 'El kiosco asignado es requerido.' }),
-  trainingKiosk: z.string().optional(),
+  trainingKiosk: z.string().min(2, { message: 'El kiosco de capacitación es requerido.' }),
+  trainerName: z.string().min(3, { message: 'El nombre del capacitador es requerido.' }),
   avatar: z.string().default(defaultAvatar),
 });
 
@@ -31,6 +32,7 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
       employeeId: '',
       assignedKiosk: '',
       trainingKiosk: '',
+      trainerName: '',
       avatar: defaultAvatar,
     },
   });
@@ -41,11 +43,10 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
       fullName: values.fullName,
       employeeId: values.employeeId,
       assignedKiosk: values.assignedKiosk,
+      trainingKiosk: values.trainingKiosk,
+      trainerName: values.trainerName,
       avatar: values.avatar,
     });
-    if (values.trainingKiosk) {
-      params.set('trainingKiosk', values.trainingKiosk);
-    }
     router.push(`/${quizType}/quiz?${params.toString()}`);
   }
 
@@ -60,7 +61,7 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
               <FormItem>
                 <FormLabel>Nombre completo</FormLabel>
                 <FormControl>
-                  <Input placeholder="Ej. Ana García" {...field} />
+                  <Input placeholder="Ej. Fil Castro" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -73,8 +74,11 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
               <FormItem>
                 <FormLabel>Número de colaborador</FormLabel>
                 <FormControl>
-                  <Input placeholder="Ej. 12345" {...field} />
+                  <Input placeholder="Ej. 48_02" {...field} />
                 </FormControl>
+                <FormDescription>
+                  Lo puedes encontrar en Worky → Mi perfil → No. de colaborador.
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -86,7 +90,7 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
               <FormItem>
                 <FormLabel>Kiosco asignado</FormLabel>
                 <FormControl>
-                  <Input placeholder="Ej. Plaza Central" {...field} />
+                  <Input placeholder="Ej. Ixtapaluca" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -97,9 +101,22 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
             name="trainingKiosk"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Kiosco de capacitación (Opcional)</FormLabel>
+                <FormLabel>Kiosco de capacitación</FormLabel>
                 <FormControl>
-                  <Input placeholder="Ej. Oficina Principal" {...field} />
+                  <Input placeholder="Ej. Chalco" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="trainerName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Nombre del capacitador</FormLabel>
+                <FormControl>
+                  <Input placeholder="Ej. Amran Frey" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>
