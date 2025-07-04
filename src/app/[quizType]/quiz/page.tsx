@@ -4,13 +4,12 @@ import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { quizzes } from '@/lib/questions';
 import type { Option } from '@/lib/types';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { Check, CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAvatarComponent } from '@/lib/avatars';
-import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 
 function QuizComponent() {
@@ -60,44 +59,17 @@ function QuizComponent() {
   const handleOptionSelect = (option: Option) => {
     if (gameState.isAnswered) return;
 
-    if (currentQuestion?.multipleCorrect) {
-      setGameState(prev => {
-        const newSelected = prev.selectedOptions.some(o => o.text === option.text)
-          ? prev.selectedOptions.filter(o => o.text !== option.text)
-          : [...prev.selectedOptions, option];
-        return { ...prev, selectedOptions: newSelected };
-      });
-    } else {
-      const isCorrect = option.isCorrect;
-      setGameState(prev => ({
-        ...prev,
-        selectedOptions: [option],
-        isAnswered: true,
-        score: isCorrect ? prev.score + 1 : prev.score,
-        missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
-        missionFailed: !isCorrect,
-      }));
-    }
-  };
-  
-  const handleConfirmMultipleChoice = () => {
-    if (!currentQuestion || gameState.isAnswered) return;
-
-    const correctOptions = currentQuestion.options.filter(o => o.isCorrect);
-    const selectedCorrectOptions = gameState.selectedOptions.filter(o => o.isCorrect);
-    const selectedIncorrectOptions = gameState.selectedOptions.filter(o => !o.isCorrect);
-    
-    const isCorrect = selectedCorrectOptions.length === correctOptions.length && selectedIncorrectOptions.length === 0;
-
+    const isCorrect = option.isCorrect;
     setGameState(prev => ({
       ...prev,
+      selectedOptions: [option],
       isAnswered: true,
       score: isCorrect ? prev.score + 1 : prev.score,
       missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
       missionFailed: !isCorrect,
     }));
   };
-
+  
   const handleNext = () => {
     if (gameState.missionFailed) {
       setGameState(prev => ({ ...prev, showMissionFailedScreen: true }));
@@ -230,16 +202,12 @@ function QuizComponent() {
       <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-accent/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-accent">{currentQuestion.text}</CardTitle>
-          {currentQuestion.multipleCorrect && !gameState.isAnswered && (
-             <CardDescription>Selecciona todas las respuestas correctas.</CardDescription>
-          )}
           <CardDescription>{currentMission.title}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {currentQuestion.options.map((option, index) => {
             const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
             const isCorrect = option.isCorrect;
-            const optionId = `option-${questionKey}-${index}`;
 
             let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'outline';
             let buttonColor = 'border-accent/30 text-accent hover:bg-accent/10';
@@ -255,35 +223,6 @@ function QuizComponent() {
                  variant = 'outline';
                  buttonColor = 'border-gray-300 text-gray-500';
               }
-            }
-
-            if (currentQuestion.multipleCorrect) {
-              return (
-                <label
-                  key={index}
-                  htmlFor={optionId}
-                  className={cn(
-                    buttonVariants({ variant, size: 'lg' }),
-                    "w-full justify-start text-left h-auto py-3 whitespace-normal rounded-lg flex items-center",
-                    buttonColor,
-                    gameState.isAnswered ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
-                  )}
-                >
-                  <Checkbox
-                    id={optionId}
-                    checked={isSelected}
-                    onCheckedChange={() => handleOptionSelect(option)}
-                    disabled={gameState.isAnswered}
-                    className="mr-3 flex-shrink-0"
-                  />
-                  <span className="flex-grow">{option.text}</span>
-                  {gameState.isAnswered && (
-                    <div className="ml-2 flex-shrink-0">
-                      {isCorrect ? <CheckCircle /> : isSelected ? <XCircle /> : null}
-                    </div>
-                  )}
-                </label>
-              );
             }
             
             return (
@@ -309,7 +248,7 @@ function QuizComponent() {
           })}
         </CardContent>
 
-        {gameState.isAnswered ? (
+        {gameState.isAnswered && (
           <CardFooter className="flex-col items-stretch space-y-4">
             <Alert variant={!gameState.missionFailed ? 'default' : 'destructive'} className="bg-card rounded-lg">
               <AlertTitle>{!gameState.missionFailed ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
@@ -321,12 +260,6 @@ function QuizComponent() {
               Siguiente <ArrowRight className="ml-2" />
             </Button>
           </CardFooter>
-        ) : currentQuestion.multipleCorrect && (
-           <CardFooter>
-                <Button onClick={handleConfirmMultipleChoice} className="w-full rounded-lg" size="lg" disabled={gameState.selectedOptions.length === 0}>
-                    Verificar Respuesta <Check className="ml-2" />
-                </Button>
-            </CardFooter>
         )}
       </Card>
     </div>

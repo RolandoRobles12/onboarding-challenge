@@ -6,7 +6,6 @@ export interface Option {
 export interface Question {
   text: string;
   options: Option[];
-  multipleCorrect?: boolean;
 }
 
 export interface Mission {

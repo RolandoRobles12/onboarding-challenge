@@ -99,7 +99,8 @@ const promotores_atn_data = [
   { "question": "¿Cuánto tiempo tarda en cerrarse un crédito después de liquidar?", "options": ["Menos de 12 horas", "De 24 a 72 horas", "Hasta 1 semana después"], "correct": "De 24 a 72 horas" },
   { "question": "¿El monto puede ser mayor que el crédito anterior?", "options": ["Sí, podría subir mínimo $1,000 o más", "No, siempre es el mismo monto"], "correct": "Sí, podría subir mínimo $1,000 o más" },
   { "question": "¿Por qué un cliente es rechazado en la renovación?", "options": ["Por un mal comportamiento en pagos y/o mal score crediticio", "Por solicitar monto mayor al autorizado"], "correct": "Por un mal comportamiento en pagos y/o mal score crediticio" },
-]
+];
+
 
 const transformQuestion = (q: { question: string; options: string[]; correct: string; }) => {
   const correctAnswers = q.correct.split(',').map(s => s.trim());
@@ -109,7 +110,6 @@ const transformQuestion = (q: { question: string; options: string[]; correct: st
       text: o,
       isCorrect: correctAnswers.includes(o),
     })),
-    ...(correctAnswers.length > 1 && { multipleCorrect: true }),
   };
 };
 
