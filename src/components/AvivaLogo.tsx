@@ -11,37 +11,51 @@ export function AvivaLogo(props: SVGProps<SVGSVGElement>) {
     >
       <title>Aviva Logo</title>
       <path fill="#00C37E" d="M0,0h200v200h-200z" />
-      <g transform="translate(30 120) scale(1.2 1.2)">
-        <path
+      <g transform="translate(30, 120) scale(1.2, 1.2)">
+        {/* Letra a */}
+        <g>
+          <path
             fill="#1A3A34"
             d="M0,0c0,-10 8,-18 18,-18c6,0 12,3 15,9l0,30h-9v-5c-3,4 -7,6 -12,6c-7,0 -12,-5 -12,-12zM27,0c0,-6 -5,-9 -9,-9s-9,3 -9,9c0,6 5,9 9,9s9,-3 9,-9z"
-        />
-        <path
+          />
+        </g>
+        {/* Letra v */}
+        <g transform="translate(40, 0)">
+          <path
             fill="#1A3A34"
-            transform="translate(40)"
             d="M0,0l6,18l6,-18h9l-10,30h-10l-10,-30z"
-        />
-        <circle
+          />
+        </g>
+        {/* Punto de la i */}
+        <g transform="translate(75, -10)">
+          <circle
             fill="#1A3A34"
-            cx="75"
-            cy="-10"
+            cx="0"
+            cy="0"
             r="3"
-        />
-        <path
+          />
+        </g>
+        {/* Letra i */}
+        <g transform="translate(70, 0)">
+          <path
             fill="#1A3A34"
-            transform="translate(70)"
             d="M0,0h9v30h-9z"
-        />
-        <path
+          />
+        </g>
+        {/* Letra v */}
+        <g transform="translate(85, 0)">
+          <path
             fill="#1A3A34"
-            transform="translate(85)"
             d="M0,0l6,18l6,-18h9l-10,30h-10l-10,-30z"
-        />
-        <path
+          />
+        </g>
+        {/* Letra a */}
+        <g transform="translate(125, 0)">
+          <path
             fill="#1A3A34"
-            transform="translate(125)"
             d="M0,0c0,-10 8,-18 18,-18c6,0 12,3 15,9l0,30h-9v-5c-3,4 -7,6 -12,6c-7,0 -12,-5 -12,-12zM27,0c0,-6 -5,-9 -9,-9s-9,3 -9,9c0,6 5,9 9,9s9,-3 9,-9z"
-        />
+          />
+        </g>
       </g>
     </svg>
   );
