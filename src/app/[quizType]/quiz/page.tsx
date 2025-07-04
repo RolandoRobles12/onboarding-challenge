@@ -11,6 +11,7 @@ import { Check, CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from '
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAvatarComponent } from '@/lib/avatars';
 import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from '@/lib/utils';
 
 function QuizComponent() {
   const router = useRouter();
