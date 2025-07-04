@@ -1,58 +1,148 @@
 import type { QuizData } from './types';
 
+const promotores_ba_data = [
+  { "question": "¿Qué significa AOS?", "options": ["Aviva On System", "Aviva Onboarding System"], "correct": "Aviva On System" },
+  { "question": "¿Cuáles son las principales plataformas utilizadas en Aviva?", "options": ["Slack, Hubspot, Confluence y Worky", "Slack, Word, Canva y Hubspot", "Facebook, WhatsApp, Canva y Slack", "Word, Canva, Slack y Hubspot"], "correct": "Slack, Hubspot, Confluence y Worky" },
+  { "question": "Plataforma de comunicación oficial de Aviva", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Slack" },
+  { "question": "Sistema de Gestión y Administración de flujos de trabajo comercial; así como la revisión de métricas.", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Hubspot" },
+  { "question": "Software de Recursos Humanos y Nómina, así como para la solicitud de días aviva, reembolsos y vacaciones.", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Worky" },
+  { "question": "Espacio de trabajo para la administración y control de proyectos; así como para la visualización de contenido.", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Confluence" },
+  { "question": "¿Cuál es la contraseña para iniciar sesión en AOS? (usuario kiosco@avivacredito.com)", "options": ["Aviva", "Aviva2022", "Avivate"], "correct": "Aviva2022" },
+  { "question": "¿Qué requisitos se requiere para solicitar un crédito?", "options": ["INE original, WhatsApp y la App de Cashi", "INE y comprobante de domicilio", "Comprobante de domicilio y aval", "INE y aval"], "correct": "INE original, WhatsApp y la App de Cashi" },
+  { "question": "¿En qué momento se debe descargar la App de Cashi?", "options": ["Antes de realizar la solicitud", "Una vez que sea aprobado"], "correct": "Antes de realizar la solicitud" },
+  { "question": "¿La App de Cashi puede ser de otra persona?", "options": ["No, todos los datos deben ser del cliente", "Sí, puede ser de cualquier familiar cercano"], "correct": "No, todos los datos deben ser del cliente" },
+  { "question": "¿Dos o más personas pueden tener un crédito activo si tienen el mismo domicilio?", "options": ["Sí, sí es posible", "No, no es posible"], "correct": "Sí, sí es posible" },
+  { "question": "Además del INE ¿se puede utilizar alguna otra identificación oficial?", "options": ["Sí", "No"], "correct": "Sí" },
+  { "question": "¿Cuáles son los montos que se están otorgando como primeros créditos?", "options": ["De $1,000 a $10,000", "De $1,000 a $15,000", "De $10,000 a $50,000"], "correct": "De $1,000 a $10,000" },
+  { "question": "¿Todos los créditos manejan la misma tasa de interés?", "options": ["Sí, todas son iguales", "No, varía en función del riesgo del solicitante"], "correct": "No, varía en función del riesgo del solicitante" },
+  { "question": "¿Se puede realizar un ajuste sobre la oferta de crédito?", "options": ["Sí es posible, solo para un monto menor o ajuste en el plazo", "No, no es posible"], "correct": "Sí es posible, solo para un monto menor o ajuste en el plazo" },
+  { "question": "¿Qué categorías financiamos dentro de la tienda con el crédito Aviva?", "options": ["Línea Blanca, Electrónica, Electrodomésticos, Muebles y Motocicletas", "Electrónica, despensa y mueblería", "Todos los productos dentro de la tienda"], "correct": "Línea Blanca, Electrónica, Electrodomésticos, Muebles y Motocicletas" },
+  { "question": "Selecciona las categorías de productos que NO financiamos.", "options": ["Despensa", "Línea Blanca", "Pago de servicios", "Ropa", "Juguetería", "Medicamentos", "Productos de Belleza"], "correct": "Despensa, Pago de servicios, Ropa, Juguetería, Medicamentos, Productos de Belleza" },
+  { "question": "¿Qué documentos deben subir después del desembolso?", "options": ["Comprobante de domicilio, video del domicilio y ubicación por WhatsApp", "Video de su negocio, comprobante de domicilio y estado de cuenta"], "correct": "Comprobante de domicilio, video del domicilio y ubicación por WhatsApp" },
+  { "question": "¿Cómo se firma el contrato del crédito autorizado?", "options": ["Hay que imprimir, firmar a mano y enviar foto por WhatsApp", "Se firma de manera digital en la videollamada"], "correct": "Se firma de manera digital en la videollamada" },
+  { "question": "¿Cuántos días después de haber sido rechazado se puede volver a hacer la solicitud?", "options": ["30 días", "60 días", "90 días", "120 días"], "correct": "30 días" },
+  { "question": "¿Por qué se rechazan las solicitudes de crédito?", "options": ["Mal historial crediticio", "Muy joven", "Muchos préstamos recientes", "Poca información en su celular", "Todas las anteriores"], "correct": "Todas las anteriores" },
+  { "question": "¿Cuánto tiempo toma tener una respuesta de rechazo después de hacer la solicitud?", "options": ["1 día", "1 hora", "30 minutos", "De inmediato"], "correct": "30 minutos" },
+  { "question": "¿Cuántos días tiene el cliente para subir sus documentos después de la aprobación?", "options": ["Idealmente en las próximas 24 horas", "15 días", "Hasta 60 días"], "correct": "Idealmente en las próximas 24 horas" },
+  { "question": "Si el cliente fue autorizado y no fue desembolsado, ¿qué debe hacer?", "options": ["Si ya pasó más de un mes debe volver a solicitar", "Si ha pasado menos de un mes puede retomar la solicitud", "Las dos opciones anteriores"], "correct": "Las dos opciones anteriores" },
+  { "question": "¿Se puede cancelar el crédito una vez desembolsado?", "options": ["Sí", "No"], "correct": "Sí" },
+  { "question": "¿Cuál es el tiempo máximo para solicitar la cancelación del crédito?", "options": ["3 días naturales", "10 días naturales", "30 días naturales"], "correct": "3 días naturales" },
+  { "question": "¿El cliente debe pagar todo el monto desembolsado o solo el monto utilizado en su compra?", "options": ["Todo el monto desembolsado", "Solo el monto de su compra"], "correct": "Todo el monto desembolsado" },
+  { "question": "¿Cómo son los pagos?", "options": ["Diarios", "Semanales", "Quincenales", "Mensuales"], "correct": "Semanales" },
+  { "question": "¿Cuáles son los días elegibles para el pago al momento de hacer la solicitud?", "options": ["Lunes a Sábado", "Lunes a Domingo", "Lunes a Viernes"], "correct": "Lunes a Sábado" },
+  { "question": "¿Cómo se realizan los pagos?", "options": ["En efectivo", "Por transferencia bancaria", "En efectivo y por transferencia"], "correct": "En efectivo y por transferencia" },
+  { "question": "¿En dónde se pueden hacer los pagos en efectivo?", "options": ["En los Kioscos", "En Walmart, Bodega Aurrera, Farmacias del Ahorro, Sam’s, Waldos, Círculo K, Extra, El Asturiano, Farmacias Guadalajara, GestoPago, Atiendas, Multirecargas"], "correct": "En Walmart, Bodega Aurrera, Farmacias del Ahorro, Sam’s, Waldos, Círculo K, Extra, El Asturiano, Farmacias Guadalajara, GestoPago, Atiendas, Multirecargas" },
+  { "question": "¿Se paga algún cargo por atraso en el pago?", "options": ["No, sigue siendo el mismo pago semanal", "Desde el día 1 se cobran $30 más IVA", "Desde el día 1 se cobran $50 más IVA"], "correct": "Desde el día 1 se cobran $30 más IVA" },
+  { "question": "¿Cómo sabemos si un pago fue aplicado?", "options": ["El cliente recibe un mensaje de confirmación por WhatsApp / App", "No es posible saberlo"], "correct": "El cliente recibe un mensaje de confirmación por WhatsApp / App" },
+  { "question": "¿Se puede cambiar el día de pago del crédito?", "options": ["Sí, se debe presentar una razón válida", "No, se conserva el día elegido"], "correct": "Sí, se debe presentar una razón válida" },
+  { "question": "¿Se pueden juntar dos pagos o siempre debe ser 1 pago por semana?", "options": ["Sí, es posible adelantar pagos solicitando la ficha", "No, solo se puede un pago por semana"], "correct": "Sí, es posible adelantar pagos solicitando la ficha" },
+  { "question": "¿Qué pasa si un cliente pierde su teléfono y no recibe sus fichas de pago?", "options": ["Solicitar al número de Aviva Pagos y dar otro número", "Acudir al módulo cada semana", "Ambas opciones anteriores"], "correct": "Ambas opciones anteriores" },
+  { "question": "Si el cliente eligió transferencia como medio favorito de pago, ¿no podrá pagar en efectivo?", "options": ["Sí, solo puede pagar por un medio", "No, puede pagar en efectivo o transferencia solicitando su referencia"], "correct": "No, puede pagar en efectivo o transferencia solicitando su referencia" },
+  { "question": "¿Se puede liquidar anticipadamente?", "options": ["Sí, una vez cubierto al menos el 50% del crédito", "No, se deben cumplir las fechas establecidas"], "correct": "Sí, una vez cubierto al menos el 50% del crédito" },
+  { "question": "¿Hay algún descuento por pagar antes de la fecha indicada?", "options": ["No, no hay descuentos por pagos anticipados", "Sí, $50 para su próximo pago semanal"], "correct": "No, no hay descuentos por pagos anticipados" },
+  { "question": "¿Dónde puedo solicitar mi carta finiquito?", "options": ["Al Kiosco", "Al correo ayuda@avivacredito.com"], "correct": "Al Kiosco, Al correo ayuda@avivacredito.com" }
+];
+
+const promotores_atn_data = [
+  { "question": "¿Qué significa AOS?", "options": ["Aviva On System", "Aviva Onboarding System"], "correct": "Aviva On System" },
+  { "question": "¿Cuáles son las principales plataformas utilizadas en Aviva?", "options": ["Slack, Hubspot, Confluence y Worky", "Slack, Word, Canva y Hubspot", "Facebook, WhatsApp, Canva y Slack", "Word, Canva, Slack y Hubspot"], "correct": "Slack, Hubspot, Confluence y Worky" },
+  { "question": "Plataforma de comunicación oficial de Aviva", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Slack" },
+  { "question": "Sistema de Gestión y Administración de flujos de trabajo comercial; así como la revisión de métricas.", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Hubspot" },
+  { "question": "Software de Recursos Humanos y Nómina, así como para la solicitud de días aviva, reembolsos y vacaciones.", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Worky" },
+  { "question": "Espacio de trabajo para la administración y control de proyectos; así como para la visualización de contenido.", "options": ["Slack", "Hubspot", "Confluence", "Worky"], "correct": "Confluence" },
+  { "question": "¿Cuál es la clave de acceso a las pantallas en el Kiosco?", "options": ["1234", "009988", "0101"], "correct": "1234" },
+  { "question": "¿Cuál es la contraseña para iniciar sesión en AOS? (usuario kiosco@avivacredito.com)", "options": ["Aviva", "Aviva2022", "Avivate"], "correct": "Aviva2022" },
+  { "question": "¿Qué requisitos se requiere para solicitar un crédito (Aviva Contigo)?", "options": ["INE original y WhatsApp personal", "INE y comprobante de domicilio", "Comprobante de domicilio y aval", "INE y aval"], "correct": "INE original y WhatsApp personal" },
+  { "question": "¿Dos o más personas pueden tener un crédito activo si tienen el mismo domicilio?", "options": ["Sí, sí es posible", "No, no es posible"], "correct": "Sí, sí es posible" },
+  { "question": "Además del INE ¿se puede utilizar alguna otra identificación oficial?", "options": ["Sí", "No"], "correct": "Sí" },
+  { "question": "¿Cuáles son los montos que se están otorgando como primeros créditos (Aviva Contigo)?", "options": ["De $1,000 a $10,000", "De $1,000 a $15,000", "De $10,000 a $50,000"], "correct": "De $1,000 a $10,000" },
+  { "question": "¿Todos los créditos manejan la misma tasa de interés?", "options": ["Sí, todas son iguales", "No, varía en función del riesgo del solicitante"], "correct": "No, varía en función del riesgo del solicitante" },
+  { "question": "¿Se puede realizar un ajuste sobre la oferta de crédito?", "options": ["Sí es posible, solo para un monto menor o ajuste en el plazo", "No, no es posible"], "correct": "Sí es posible, solo para un monto menor o ajuste en el plazo" },
+  { "question": "¿Dónde deben subirse los documentos del cliente después de haber sido aprobado?", "options": ["Por la App de Aviva", "Al Gerente de Kiosco para que él los envíe al equipo"], "correct": "Por la App de Aviva" },
+  { "question": "En caso de no poder subirlos por la App, ¿a dónde se suben los documentos?", "options": ["Subirlos por WhatsApp al chat de Aviva Crédito Productivo", "Llevarlos al kiosco en físico", "Subirlos por Facebook al chat de Aviva Financiera"], "correct": "Subirlos por WhatsApp al chat de Aviva Crédito Productivo" },
+  { "question": "¿Cómo se firma el contrato del crédito autorizado?", "options": ["Hay que imprimir, firmar a mano y enviar foto por WhatsApp", "Se firma de manera digital a través de un enlace en el domicilio del cliente"], "correct": "Se firma de manera digital a través de un enlace en el domicilio del cliente" },
+  { "question": "¿Cuántos días después de haber sido rechazado se puede volver a hacer la solicitud?", "options": ["30 días", "60 días", "90 días", "120 días"], "correct": "30 días" },
+  { "question": "¿Por qué se rechazan las solicitudes de crédito?", "options": ["Mal historial crediticio", "Muy joven", "Muchos préstamos recientes", "Poca información en su celular", "Todas las anteriores"], "correct": "Todas las anteriores" },
+  { "question": "¿Cuánto tiempo toma tener una respuesta de rechazo después de hacer la solicitud?", "options": ["1 día", "1 hora", "30 minutos", "De inmediato"], "correct": "30 minutos" },
+  { "question": "¿Cuántos días tiene el cliente para subir sus documentos después de la aprobación?", "options": ["1 semana", "15 días", "30 días", "Hasta 60 días"], "correct": "1 semana" },
+  { "question": "¿Por qué se cancelan los préstamos?", "options": ["Domicilio no coincide", "Domicilio ya registrado", "Teléfono no propio", "Sin respuesta en 30 días", "Cliente decide no seguir", "Todas las anteriores"], "correct": "Todas las anteriores" },
+  { "question": "Si el cliente fue autorizado y no lo aceptó, ¿qué procede?", "options": ["Si ya pasó más de un mes debe volver a solicitar", "Si ha pasado menos de un mes puede retomar la solicitud", "Las dos opciones anteriores"], "correct": "Las dos opciones anteriores" },
+  { "question": "¿Cuáles son los montos que se están autorizando para Aviva Tu Negocio?", "options": ["De $15,000 a $20,000", "De $7,500 a $15,000", "De $1,000 a $10,000"], "correct": "De $15,000 a $20,000" },
+  { "question": "¿Es posible tener un crédito de Aviva Contigo y Tu Negocio al mismo tiempo?", "options": ["No es posible", "Sí es posible"], "correct": "No es posible" },
+  { "question": "Selecciona las 3 categorías generales aceptadas para Aviva Tu Negocio", "options": ["Comercios formales, talleres y servicios", "Escuelas, estéticas y tiendas de abarrotes", "Abarrotes, farmacias, papelerías y carnicerías"], "correct": "Comercios formales, talleres y servicios" },
+  { "question": "Selecciona los giros/negocios excluidos de TODOS los productos de Aviva", "options": ["Bares/Depósitos de cerveza", "Antros", "Estéticas", "Casinos"], "correct": "Bares/Depósitos de cerveza, Antros, Casinos" },
+  { "question": "Selecciona los negocios excluidos de Aviva Tu Negocio pero aceptados en Aviva Contigo", "options": ["Comercio sin local/venta por catálogo", "Pequeños agricultores y criadores", "Maquilas", "Taxis/mototaxis (Uber, Didi, etc)", "Reparación de electrodomésticos"], "correct": "Comercio sin local/venta por catálogo, Pequeños agricultores y criadores, Taxis/mototaxis (Uber, Didi, etc)" },
+  { "question": "¿Se aceptan estéticas y tortillerías como negocios válidos?", "options": ["Sí, si tienen local fijo y maquinaria", "No, no es posible"], "correct": "Sí, si tienen local fijo y maquinaria" },
+  { "question": "¿El comprobante para el seguimiento del crédito es del domicilio del cliente o del negocio?", "options": ["De su domicilio", "Del negocio"], "correct": "De su domicilio" },
+  { "question": "¿Los videos del negocio deben mostrar la fachada del negocio?", "options": ["Sí, se debe ver por fuera y por dentro", "No, debe ser estático y solo el cliente debe hablar"], "correct": "Sí, se debe ver por fuera y por dentro" },
+  { "question": "Documentos necesarios para el desembolso (Aviva Contigo)", "options": ["Comprobante de domicilio, estado de cuenta y video ingresando al domicilio", "Ubicación en Google Maps"], "correct": "Comprobante de domicilio, estado de cuenta y video ingresando al domicilio" },
+  { "question": "Documentos necesarios para el desembolso (Aviva Tu Negocio)", "options": ["Comprobante de domicilio, estado de cuenta y ubicación", "Solo un estado de cuenta", "Video del negocio"], "correct": "Comprobante de domicilio, estado de cuenta y ubicación" },
+  { "question": "¿Qué puede ser aceptado como un comprobante de domicilio?", "options": ["Recibo original de CFE/internet/teléfono (o PDF)", "Constancia domiciliaria o predial", "Ubicación en Google Maps"], "correct": "Recibo original de CFE/internet/teléfono (o PDF)" },
+  { "question": "¿El estado de cuenta debe ser propio o se puede utilizar el de un familiar?", "options": ["Sí, puede utilizar el de un familiar", "Tiene que ser una cuenta propia"], "correct": "Tiene que ser una cuenta propia" },
+  { "question": "Selecciona los estados de cuenta que aceptamos actualmente", "options": ["BBVA", "Bansefi", "Mercado Pago", "Santander", "Nu", "Oxxo", "BanCoppel", "Guardadito (Banco Azteca)"], "correct": "BBVA, Santander, Oxxo, BanCoppel, Guardadito (Banco Azteca)" },
+  { "question": "¿Qué pasa si el cliente no tiene una cuenta bancaria?", "options": ["Puede sacar una nueva y enviar foto del contrato", "No es posible realizar la solicitud"], "correct": "Puede sacar una nueva y enviar foto del contrato" },
+  { "question": "¿La dirección del estado de cuenta puede ser tomada como comprobante de domicilio?", "options": ["Sí", "No"], "correct": "No" },
+  { "question": "¿Cómo son los pagos?", "options": ["Diarios", "Semanales", "Quincenales", "Mensuales"], "correct": "Semanales" },
+  { "question": "¿Cuáles son los días elegibles para el pago al momento de hacer la solicitud?", "options": ["Lunes a Sábado", "Lunes a Domingo", "Lunes a Viernes"], "correct": "Lunes a Sábado" },
+  { "question": "¿Cómo se realizan los pagos?", "options": ["En efectivo", "Por transferencia bancaria", "En efectivo y por transferencia"], "correct": "En efectivo y por transferencia" },
+  { "question": "¿En dónde se pueden hacer los pagos en efectivo?", "options": ["En los Kioscos", "En Walmart, Bodega Aurrera, Farmacias del Ahorro, Sam’s, Waldos, Círculo K, Extra, El Asturiano, Farmacias Guadalajara, GestoPago, Atiendas, Multirecargas"], "correct": "En Walmart, Bodega Aurrera, Farmacias del Ahorro, Sam’s, Waldos, Círculo K, Extra, El Asturiano, Farmacias Guadalajara, GestoPago, Atiendas, Multirecargas" },
+  { "question": "¿Se paga algún cargo por atraso en el pago?", "options": ["No, sigue siendo el mismo pago semanal", "Desde el día 1 se cobran $30 más IVA", "Desde el día 1 se cobran $50 más IVA"], "correct": "Desde el día 1 se cobran $30 más IVA" },
+  { "question": "¿Cómo sabemos si un pago fue aplicado?", "options": ["El cliente recibe un mensaje de confirmación por WhatsApp / App", "No es posible saberlo"], "correct": "El cliente recibe un mensaje de confirmación por WhatsApp / App" },
+  { "question": "¿Se puede cambiar el día de pago del crédito?", "options": ["Sí, se debe presentar una razón válida", "No, se conserva el día elegido"], "correct": "Sí, se debe presentar una razón válida" },
+  { "question": "¿Se pueden juntar dos pagos o siempre debe ser 1 pago por semana?", "options": ["Sí, es posible adelantar pagos solicitando la ficha", "No, solo se puede un pago por semana"], "correct": "Sí, es posible adelantar pagos solicitando la ficha" },
+  { "question": "¿Qué pasa si un cliente pierde su teléfono y no recibe sus fichas de pago?", "options": ["Solicitar al número de Aviva Pagos y dar otro número", "Acudir al Kiosco cada semana", "Ambas opciones anteriores son válidas"], "correct": "Ambas opciones anteriores son válidas" },
+  { "question": "Si el cliente eligió transferencia como medio favorito de pago, ¿no podrá pagar en efectivo?", "options": ["Sí, solo puede pagar por un medio", "No, puede pagar en efectivo o transferencia solicitando su referencia"], "correct": "No, puede pagar en efectivo o transferencia solicitando su referencia" },
+  { "question": "¿Se puede liquidar anticipadamente?", "options": ["Sí, una vez cubierto al menos el 50% del crédito", "No, se tienen que cumplir las fechas establecidas"], "correct": "Sí, una vez cubierto al menos el 50% del crédito" },
+  { "question": "¿Hay algún descuento por pagar antes de la fecha indicada?", "options": ["No, no hay descuentos por pagos anticipados", "Sí, $50 para su próximo pago semanal"], "correct": "No, no hay descuentos por pagos anticipados" },
+  { "question": "¿Dónde puedo solicitar mi carta finiquito?", "options": ["Al Kiosco", "Al correo ayuda@avivacredito.com"], "correct": "Al Kiosco, Al correo ayuda@avivacredito.com" },
+  { "question": "¿Cuándo puedo iniciar mi proceso de renovación?", "options": ["Si el cliente es candidato, recibe oferta por WhatsApp", "Una vez que hayan pasado 3 meses del primer crédito"], "correct": "Si el cliente es candidato, recibe oferta por WhatsApp" },
+  { "question": "¿Cuánto tiempo tarda en cerrarse un crédito después de liquidar?", "options": ["Menos de 12 horas", "De 24 a 72 horas", "Hasta 1 semana después"], "correct": "De 24 a 72 horas" },
+  { "question": "¿El monto puede ser mayor que el crédito anterior?", "options": ["Sí, podría subir mínimo $1,000 o más", "No, siempre es el mismo monto"], "correct": "Sí, podría subir mínimo $1,000 o más" },
+  { "question": "¿Por qué un cliente es rechazado en la renovación?", "options": ["Por un mal comportamiento en pagos y/o mal score crediticio", "Por solicitar monto mayor al autorizado"], "correct": "Por un mal comportamiento en pagos y/o mal score crediticio" },
+]
+
+const transformQuestion = (q: { question: string; options: string[]; correct: string; }) => {
+  const correctAnswers = q.correct.split(',').map(s => s.trim());
+  return {
+    text: q.question,
+    options: q.options.map(o => ({
+      text: o,
+      isCorrect: correctAnswers.includes(o),
+    })),
+    ...(correctAnswers.length > 1 && { multipleCorrect: true }),
+  };
+};
+
+const baQuestions = promotores_ba_data.map(transformQuestion);
+const atnQuestions = promotores_atn_data.map(transformQuestion);
+
 export const quizzes: QuizData = {
   ba: {
     title: 'Promotores BA',
     missions: [
       {
         id: 'm1_ba',
-        title: 'Misión 1: El Origen de tu Compra',
-        narrative: 'Tu viaje comienza aquí. Antes de aventurarte en el campo, debes entender los fundamentos de "Aviva Tu Compra". Responde correctamente para forjar tu camino.',
-        questions: [
-          {
-            text: '¿Cuál es el propósito principal de "Aviva Tu Compra"?',
-            options: [
-              { text: 'Ofrecer préstamos para negocios', isCorrect: false },
-              { text: 'Financiar la compra de productos específicos en tiendas afiliadas', isCorrect: true },
-              { text: 'Dar tarjetas de crédito', isCorrect: false },
-              { text: 'Inversiones a largo plazo', isCorrect: false },
-            ],
-          },
-          {
-            text: '¿Qué herramienta es esencial para registrar una nueva solicitud?',
-            options: [
-              { text: 'Correo electrónico', isCorrect: false },
-              { text: 'Una libreta de notas', isCorrect: false },
-              { text: 'La plataforma AOS (Aviva Operating System)', isCorrect: true },
-              { text: 'WhatsApp', isCorrect: false },
-            ],
-          },
-        ],
+        title: 'Misión 1: Plataformas y Primeros Pasos',
+        narrative: 'Tu aventura comienza aquí. Domina las plataformas de Aviva y los requisitos esenciales para iniciar cualquier solicitud de crédito. ¡Este es el fundamento de tu éxito!',
+        questions: baQuestions.slice(0, 10),
       },
       {
         id: 'm2_ba',
-        title: 'Misión 2: El Arte del Seguimiento',
-        narrative: 'Un verdadero héroe de Aviva no abandona a sus clientes. Esta misión pondrá a prueba tu conocimiento sobre el proceso de seguimiento y desembolso. ¡Adelante!',
-        questions: [
-          {
-            text: '¿Cuál es el primer paso después de que una solicitud es aprobada?',
-            options: [
-              { text: 'Contactar al cliente para felicitarlo', isCorrect: false },
-              { text: 'Esperar a que el cliente llame', isCorrect: false },
-              { text: 'Notificar al cliente y coordinar la firma del contrato', isCorrect: true },
-              { text: 'Archivar el caso', isCorrect: false },
-            ],
-          },
-          {
-            text: '¿A través de qué canal principal se comunica el estatus de la solicitud al cliente?',
-            options: [
-              { text: 'Mensajes de humo', isCorrect: false },
-              { text: 'Slack', isCorrect: false },
-              { text: 'Llamada telefónica y/o SMS', isCorrect: true },
-              { text: 'Facebook', isCorrect: false },
-            ],
-          },
-        ],
+        title: 'Misión 2: Condiciones del Crédito y Oferta',
+        narrative: 'Un verdadero estratega conoce su producto a fondo. Profundiza en los detalles de los montos, tasas, y las categorías que financiamos para crear la oferta perfecta.',
+        questions: baQuestions.slice(10, 20),
+      },
+      {
+        id: 'm3_ba',
+        title: 'Misión 3: Manejo de Solicitudes y Estatus',
+        narrative: 'No todas las solicitudes son un camino recto. Aprende a navegar rechazos, cancelaciones y los detalles del desembolso para guiar a cada cliente a su destino.',
+        questions: baQuestions.slice(20, 30),
+      },
+       {
+        id: 'm4_ba',
+        title: 'Misión 4: Gestión de Pagos y Cierre',
+        narrative: 'La misión final: asegurar un ciclo de crédito exitoso. Conviértete en un experto en la gestión de pagos, liquidaciones y cierre de cuentas para completar la aventura.',
+        questions: baQuestions.slice(30, 40),
       },
     ],
   },
@@ -61,53 +151,33 @@ export const quizzes: QuizData = {
     missions: [
       {
         id: 'm1_atn',
-        title: 'Misión 1: El Motor del Negocio',
-        narrative: 'Como promotor o gerente, tu rol es clave para el crecimiento. Esta primera misión explora los fundamentos de "Aviva Tu Negocio". Demuestra tu valía.',
-        questions: [
-          {
-            text: '¿Quién es el cliente objetivo principal para "Aviva Tu Negocio"?',
-            options: [
-              { text: 'Estudiantes universitarios', isCorrect: false },
-              { text: 'Dueños de pequeños y medianos negocios', isCorrect: true },
-              { text: 'Empleados de grandes corporaciones', isCorrect: false },
-              { text: 'Jubilados', isCorrect: false },
-            ],
-          },
-          {
-            text: '¿Qué evalúa principalmente Aviva para aprobar un crédito de "Aviva Tu Negocio"?',
-            options: [
-              { text: 'El tipo de auto del solicitante', isCorrect: false },
-              { text: 'La capacidad de pago y la salud financiera del negocio', isCorrect: true },
-              { text: 'El número de seguidores en redes sociales', isCorrect: false },
-              { text: 'La edad del dueño del negocio', isCorrect: false },
-            ],
-          },
-        ],
+        title: 'Misión 1: Fundamentos y Herramientas',
+        narrative: 'Tu rol como líder de negocio empieza con el dominio de nuestras herramientas y los fundamentos de Aviva Contigo. ¡Demuestra que tienes las bases para el éxito!',
+        questions: atnQuestions.slice(0, 11),
       },
       {
         id: 'm2_atn',
-        title: 'Misión 2: Liderando la Renovación',
-        narrative: 'El éxito no es un destino, es un ciclo. La renovación de créditos es vital. ¿Sabes cómo guiar a tus clientes en este proceso? ¡Es hora de probarlo!',
-        questions: [
-          {
-            text: '¿Qué beneficio clave ofrece la renovación de un crédito a un cliente con buen historial?',
-            options: [
-              { text: 'Un trofeo conmemorativo', isCorrect: false },
-              { text: 'Posibilidad de acceder a un monto mayor y/o mejores condiciones', isCorrect: true },
-              { text: 'Un nuevo producto gratis', isCorrect: false },
-              { text: 'Un saludo del CEO', isCorrect: false },
-            ],
-          },
-          {
-            text: '¿Cuál es el requisito indispensable para que un cliente pueda renovar su crédito?',
-            options: [
-              { text: 'Haber pagado un mínimo de 10 cuotas', isCorrect: false },
-              { text: 'Tener un excelente historial de pagos y haber liquidado un porcentaje significativo del crédito actual', isCorrect: true },
-              { text: 'Ser amigo del gerente', isCorrect: false },
-              { text: 'Tener un negocio con más de 10 años', isCorrect: false },
-            ],
-          },
-        ],
+        title: 'Misión 2: El Crédito Aviva Contigo',
+        narrative: 'Ahora, profundiza en "Aviva Contigo". Aprende los detalles del proceso, desde la oferta inicial hasta el manejo de casos especiales, para ser un verdadero guía para tus clientes.',
+        questions: atnQuestions.slice(11, 22),
+      },
+       {
+        id: 'm3_atn',
+        title: 'Misión 3: Aviva Tu Negocio: Criterios y Exclusiones',
+        narrative: 'Es hora de impulsar negocios. Esta misión se centra en "Aviva Tu Negocio". Domina los criterios de elegibilidad, los giros aceptados y los documentos clave para el éxito.',
+        questions: atnQuestions.slice(22, 33),
+      },
+      {
+        id: 'm4_atn',
+        title: 'Misión 4: Documentación y Desembolso',
+        narrative: 'La burocracia no será un obstáculo para ti. Conviértete en un maestro de la documentación, desde estados de cuenta hasta comprobantes, y domina el proceso de pagos.',
+        questions: atnQuestions.slice(33, 45),
+      },
+      {
+        id: 'm5_atn',
+        title: 'Misión 5: Gestión Avanzada y Renovación',
+        narrative: 'El final del camino es solo un nuevo comienzo. Aprende a gestionar los pagos como un experto y domina el arte de la renovación para construir relaciones a largo plazo.',
+        questions: atnQuestions.slice(45, 56),
       },
     ],
   },

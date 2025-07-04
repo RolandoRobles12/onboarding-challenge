@@ -7,9 +7,10 @@ import type { Option } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from 'lucide-react';
+import { Check, CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { getAvatarComponent } from '@/lib/avatars';
+import { Checkbox } from '@/components/ui/checkbox';
 
 function QuizComponent() {
   const router = useRouter();
@@ -24,7 +25,7 @@ function QuizComponent() {
     currentMissionIndex: 0,
     currentQuestionIndex: 0,
     score: 0,
-    selectedOption: null as Option | null,
+    selectedOptions: [] as Option[],
     isAnswered: false,
     showMissionIntro: true,
     missionFailed: false,
@@ -58,11 +59,37 @@ function QuizComponent() {
   const handleOptionSelect = (option: Option) => {
     if (gameState.isAnswered) return;
 
-    const isCorrect = option.isCorrect;
+    if (currentQuestion?.multipleCorrect) {
+      setGameState(prev => {
+        const newSelected = prev.selectedOptions.some(o => o.text === option.text)
+          ? prev.selectedOptions.filter(o => o.text !== option.text)
+          : [...prev.selectedOptions, option];
+        return { ...prev, selectedOptions: newSelected };
+      });
+    } else {
+      const isCorrect = option.isCorrect;
+      setGameState(prev => ({
+        ...prev,
+        selectedOptions: [option],
+        isAnswered: true,
+        score: isCorrect ? prev.score + 1 : prev.score,
+        missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
+        missionFailed: !isCorrect,
+      }));
+    }
+  };
+  
+  const handleConfirmMultipleChoice = () => {
+    if (!currentQuestion || gameState.isAnswered) return;
+
+    const correctOptions = currentQuestion.options.filter(o => o.isCorrect);
+    const selectedCorrectOptions = gameState.selectedOptions.filter(o => o.isCorrect);
+    const selectedIncorrectOptions = gameState.selectedOptions.filter(o => !o.isCorrect);
+    
+    const isCorrect = selectedCorrectOptions.length === correctOptions.length && selectedIncorrectOptions.length === 0;
 
     setGameState(prev => ({
       ...prev,
-      selectedOption: option,
       isAnswered: true,
       score: isCorrect ? prev.score + 1 : prev.score,
       missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
@@ -76,30 +103,29 @@ function QuizComponent() {
       return;
     }
 
+    const commonReset = {
+        selectedOptions: [],
+        isAnswered: false,
+    };
+
     if (gameState.currentQuestionIndex < (currentMission?.questions.length || 0) - 1) {
-      // Next question in the same mission
       setGameState(prev => ({
         ...prev,
         currentQuestionIndex: prev.currentQuestionIndex + 1,
-        selectedOption: null,
-        isAnswered: false,
+        ...commonReset,
       }));
     } else {
-      // End of mission, check for next mission
       if (gameState.currentMissionIndex < (quiz?.missions.length || 0) - 1) {
-        // Next mission
         setGameState(prev => ({
           ...prev,
           currentMissionIndex: prev.currentMissionIndex + 1,
           currentQuestionIndex: 0,
-          selectedOption: null,
-          isAnswered: false,
           showMissionIntro: true,
           missionScore: 0,
           missionFailed: false,
+          ...commonReset,
         }));
       } else {
-        // End of quiz
         const params = new URLSearchParams(searchParams.toString());
         params.set('score', gameState.score.toString());
         params.set('totalQuestions', totalQuestions.toString());
@@ -117,7 +143,7 @@ function QuizComponent() {
       ...prev,
       score: prev.score - prev.missionScore,
       currentQuestionIndex: 0,
-      selectedOption: null,
+      selectedOptions: [],
       isAnswered: false,
       showMissionIntro: true,
       showMissionFailedScreen: false,
@@ -203,51 +229,80 @@ function QuizComponent() {
       <Card key={questionKey} className="animate-fade-in">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug">{currentQuestion.text}</CardTitle>
+          {currentQuestion.multipleCorrect && !gameState.isAnswered && (
+             <CardDescription>Selecciona todas las respuestas correctas.</CardDescription>
+          )}
           <CardDescription>{currentMission.title}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {currentQuestion.options.map((option, index) => {
-            const isSelected = gameState.selectedOption === option;
+            const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
             const isCorrect = option.isCorrect;
             let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'secondary';
+
             if (gameState.isAnswered) {
               if (isCorrect) variant = 'default';
-              if (isSelected && !isCorrect) variant = 'destructive';
-              if (!isSelected && !isCorrect) variant = 'outline';
+              else if (isSelected) variant = 'destructive';
+              else variant = 'outline';
             }
-            
+
             return (
               <Button
                 key={index}
                 onClick={() => handleOptionSelect(option)}
-                disabled={gameState.isAnswered}
+                disabled={gameState.isAnswered && !currentQuestion.multipleCorrect}
                 size="lg"
                 variant={variant}
                 className="w-full justify-start text-left h-auto py-3 whitespace-normal"
               >
-                {gameState.isAnswered && (
-                    isCorrect ? <CheckCircle className="mr-3 text-accent-foreground" /> :
-                    isSelected ? <XCircle className="mr-3" /> :
-                    <span className="w-8 mr-3"></span>
+                {currentQuestion.multipleCorrect ? (
+                  <div className="flex items-center w-full">
+                    <Checkbox
+                      checked={isSelected}
+                      disabled={gameState.isAnswered}
+                      className="mr-3 flex-shrink-0"
+                    />
+                    <span className="flex-grow">{option.text}</span>
+                    {gameState.isAnswered && (
+                      <div className="ml-2 flex-shrink-0">
+                        {isCorrect ? <CheckCircle className="text-accent-foreground" /> : isSelected ? <XCircle /> : null}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    {gameState.isAnswered && (
+                      isCorrect ? <CheckCircle className="mr-3 text-accent-foreground" /> :
+                      isSelected ? <XCircle className="mr-3" /> :
+                      <span className="w-8 mr-3"></span>
+                    )}
+                    {!gameState.isAnswered && <span className="w-8 mr-3"></span>}
+                    {option.text}
+                  </>
                 )}
-                {!gameState.isAnswered && <span className="w-8 mr-3"></span>}
-                {option.text}
               </Button>
             );
           })}
         </CardContent>
-        {gameState.isAnswered && (
+
+        {gameState.isAnswered ? (
           <CardFooter className="flex-col items-stretch space-y-4">
-            <Alert variant={gameState.selectedOption?.isCorrect ? 'default' : 'destructive'} className="bg-card">
-              <AlertTitle>{gameState.selectedOption?.isCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
+            <Alert variant={!gameState.missionFailed ? 'default' : 'destructive'} className="bg-card">
+              <AlertTitle>{!gameState.missionFailed ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
               <AlertDescription>
-                 {gameState.selectedOption?.isCorrect ? '¡Excelente! Sigamos adelante.' : 'Has perdido tu única vida. Deberás reiniciar la misión para continuar.'}
+                 {!gameState.missionFailed ? '¡Excelente! Sigamos adelante.' : 'Has perdido tu única vida. Deberás reiniciar la misión para continuar.'}
               </AlertDescription>
             </Alert>
             <Button onClick={handleNext} className="w-full" size="lg">
               Siguiente <ArrowRight className="ml-2" />
             </Button>
           </CardFooter>
+        ) : currentQuestion.multipleCorrect && (
+           <CardFooter>
+                <Button onClick={handleConfirmMultipleChoice} className="w-full" size="lg" disabled={gameState.selectedOptions.length === 0}>
+                    Verificar Respuesta <Check className="ml-2" />
+                </Button>
+            </CardFooter>
         )}
       </Card>
     </div>
