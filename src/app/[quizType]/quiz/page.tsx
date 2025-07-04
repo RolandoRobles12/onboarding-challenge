@@ -47,6 +47,7 @@ function QuizComponent() {
     specialFeedback: null as string | null,
     bonusLives: 0,
     lifeUsedMessage: null as string | null,
+    mistakeMadeInMission: false,
   });
 
   const quiz = useMemo(() => quizzes[quizType], [quizType]);
@@ -95,12 +96,27 @@ function QuizComponent() {
           }
       }
 
+      let newMissionFailed = false;
+      let newMistakeMadeInMission = gameState.mistakeMadeInMission;
+
+      if (!isCorrect) {
+        if (gameState.mistakeMadeInMission) {
+          // This is the second mistake
+          newMissionFailed = true;
+        } else {
+          // This is the first mistake, use the "free" life for this mission
+          newMistakeMadeInMission = true;
+        }
+      }
+
       setGameState(prev => ({
         ...prev,
         isAnswered: true,
+        selectedOption: option,
         score: isCorrect ? prev.score + 1 : prev.score,
         missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
-        missionFailed: !isCorrect,
+        missionFailed: newMissionFailed,
+        mistakeMadeInMission: newMistakeMadeInMission,
         specialFeedback: feedback,
         bonusLives: prev.bonusLives + bonusLivesChange,
       }));
@@ -109,12 +125,11 @@ function QuizComponent() {
   const handleOptionSelect = (option: Option) => {
     if (gameState.isAnswered || gameState.isConfirming) return;
 
-    setGameState(prev => ({ ...prev, selectedOption: option }));
-
     if (currentQuestion?.isTricky && !gameState.initialSelection) {
         setGameState(prev => ({
             ...prev,
             isConfirming: true,
+            selectedOption: option,
             initialSelection: { option, isCorrect: option.isCorrect }
         }));
     } else {
@@ -130,6 +145,7 @@ function QuizComponent() {
         setGameState(prev => ({
           ...prev,
           selectedOption: null, // Allow user to select another option
+          initialSelection: null,
         }));
     }
   };
@@ -141,7 +157,7 @@ function QuizComponent() {
 
     if (missionFailed && bonusLivesLeft > 0) {
       bonusLivesLeft--;
-      missionFailed = false; // Override failure
+      missionFailed = false; // Override failure with a bonus life
       lifeUsed = true;
     }
 
@@ -174,6 +190,7 @@ function QuizComponent() {
           showMissionIntro: true,
           missionScore: 0,
           missionFailed: false,
+          mistakeMadeInMission: false, // Reset for new mission
           bonusLives: bonusLivesLeft,
           ...commonReset,
         }));
@@ -201,6 +218,7 @@ function QuizComponent() {
       showMissionIntro: true,
       showMissionFailedScreen: false,
       missionFailed: false,
+      mistakeMadeInMission: false, // Reset for mission restart
       missionScore: 0,
       initialSelection: null,
       specialFeedback: null,
@@ -236,7 +254,7 @@ function QuizComponent() {
           <p>¡No te preocupes, hasta los mejores exploradores tropiezan! Concéntrate y vuelve a intentarlo.</p>
         </CardContent>
         <CardFooter>
-          <Button onClick={restartMission} size="lg" className="w-full rounded-lg text-background">
+          <Button onClick={restartMission} size="lg" className="w-full rounded-lg text-primary-foreground">
             Intentar de Nuevo
           </Button>
         </CardFooter>
@@ -265,7 +283,7 @@ function QuizComponent() {
            )}
         </CardContent>
         <CardFooter>
-          <Button onClick={startMission} size="lg" className="w-full rounded-lg text-background">
+          <Button onClick={startMission} size="lg" className="w-full rounded-lg text-primary-foreground">
             Comenzar Misión
           </Button>
         </CardFooter>
@@ -276,6 +294,7 @@ function QuizComponent() {
   if (!currentQuestion) return <p>Error: No se encontró la pregunta.</p>;
   
   const questionKey = `${gameState.currentMissionIndex}-${gameState.currentQuestionIndex}`;
+  const lastAnswerWasCorrect = gameState.selectedOption?.isCorrect;
 
   return (
     <div className="space-y-6">
@@ -289,7 +308,7 @@ function QuizComponent() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => handleConfirmAnswer(false)}>No, quiero cambiar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => handleConfirmAnswer(true)} className="text-background">Sí, estoy seguro</AlertDialogAction>
+            <AlertDialogAction onClick={() => handleConfirmAnswer(true)} className="text-primary-foreground">Sí, estoy seguro</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -358,13 +377,18 @@ function QuizComponent() {
 
         {gameState.isAnswered && (
           <CardFooter className="flex-col items-stretch space-y-4">
-            <Alert variant={!gameState.missionFailed ? 'default' : 'destructive'} className="bg-card rounded-lg border-2">
-              <AlertTitle>{!gameState.missionFailed ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
+            <Alert variant={lastAnswerWasCorrect ? 'default' : 'destructive'} className="bg-card rounded-lg border-2">
+              <AlertTitle>{lastAnswerWasCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
               <AlertDescription>
-                 {gameState.specialFeedback || (!gameState.missionFailed ? '¡Excelente! Sigamos adelante.' : 'Has perdido tu única vida. Deberás reiniciar la misión para continuar.')}
+                {gameState.specialFeedback ||
+                  (lastAnswerWasCorrect
+                    ? '¡Excelente! Sigamos adelante.'
+                    : gameState.missionFailed
+                    ? 'Este fue tu segundo error en la misión. Deberás reiniciar para continuar.'
+                    : 'Cuidado, este es tu primer error. ¡Aún te queda una oportunidad en esta misión!')}
               </AlertDescription>
             </Alert>
-            <Button onClick={handleNext} className="w-full rounded-lg text-background" size="lg">
+            <Button onClick={handleNext} className="w-full rounded-lg text-primary-foreground" size="lg">
               Siguiente <ArrowRight className="ml-2" />
             </Button>
           </CardFooter>
