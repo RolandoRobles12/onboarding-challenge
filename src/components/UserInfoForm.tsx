@@ -53,87 +53,89 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-        <div className="grid md:grid-cols-2 gap-6">
-          <FormField
-            control={form.control}
-            name="fullName"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Nombre completo</FormLabel>
-                <FormControl>
-                  <Input placeholder="Ej. Fil Castro" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="employeeId"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Número de colaborador</FormLabel>
-                <FormControl>
-                  <Input placeholder="Ej. 48_02" {...field} />
-                </FormControl>
-                <FormDescription>
-                  Lo puedes encontrar en Worky → Mi perfil → No. de colaborador.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="assignedKiosk"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Kiosco asignado</FormLabel>
-                <FormControl>
-                  <Input placeholder="Ej. Ixtapaluca" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="trainingKiosk"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Kiosco de capacitación</FormLabel>
-                <FormControl>
-                  <Input placeholder="Ej. Chalco" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="trainerName"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Nombre del capacitador</FormLabel>
-                <FormControl>
-                  <Input placeholder="Ej. Amran Frey" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+        <div className="space-y-4">
+          <div className="grid md:grid-cols-2 gap-x-6 gap-y-4">
+            <FormField
+              control={form.control}
+              name="fullName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-accent">Nombre completo</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ej. Fil Castro" {...field} className="bg-muted" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="employeeId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-accent">Número de colaborador</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ej. 48_02" {...field} className="bg-muted" />
+                  </FormControl>
+                  <FormDescription>
+                    Lo puedes encontrar en Worky → Mi perfil → No. de colaborador.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="assignedKiosk"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-accent">Kiosco asignado</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ej. Ixtapaluca" {...field} className="bg-muted" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="trainingKiosk"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-accent">Kiosco de capacitación</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ej. Chalco" {...field} className="bg-muted" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="trainerName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-accent">Nombre del capacitador</FormLabel>
+                  <FormControl>
+                    <Input placeholder="Ej. Amran Frey" {...field} className="bg-muted" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
         </div>
         <FormField
           control={form.control}
           name="avatar"
           render={({ field }) => (
             <FormItem>
-              <FormLabel className="text-lg font-semibold">Elige tu explorador</FormLabel>
+              <FormLabel className="text-accent font-medium">Elige tu explorador</FormLabel>
               <FormControl>
                 <RadioGroup
                   onValueChange={field.onChange}
                   defaultValue={field.value}
-                  className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4"
+                  className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2"
                 >
                   {Object.entries(avatarData).map(([key, { name, Icon }]) => (
                     <FormItem key={key}>
@@ -143,18 +145,18 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
                       <FormLabel
                         htmlFor={key}
                         className={cn(
-                          'cursor-pointer rounded-lg p-3 border-2 transition-all w-full flex flex-col items-center justify-center gap-3 aspect-square',
-                          'hover:bg-card hover:border-primary',
-                          field.value === key ? 'border-primary bg-primary/10 ring-2 ring-primary ring-offset-background' : 'border-border bg-card'
+                          'cursor-pointer rounded-lg p-4 border transition-colors w-full flex flex-col items-center justify-center gap-3 aspect-square h-full',
+                          'hover:border-primary',
+                          field.value === key ? 'border-primary bg-card border-2' : 'border-border bg-card'
                         )}
                       >
                         <div className={cn(
                             "rounded-full p-3 transition-colors",
-                            field.value === key ? 'bg-primary/20' : 'bg-muted'
+                            field.value === key ? 'bg-primary/10' : 'bg-muted'
                         )}>
-                            <Icon className={cn("h-10 w-10 transition-colors", field.value === key ? 'text-primary' : 'text-muted-foreground')} />
+                            <Icon className={cn("h-8 w-8 transition-colors", field.value === key ? 'text-primary' : 'text-muted-foreground')} />
                         </div>
-                        <span className="font-semibold text-center text-sm">{name}</span>
+                        <span className="font-semibold text-center text-sm text-accent">{name}</span>
                       </FormLabel>
                     </FormItem>
                   ))}
