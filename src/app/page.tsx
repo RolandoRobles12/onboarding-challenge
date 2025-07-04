@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ArrowRight } from 'lucide-react';
 import { AvivaLogo } from '@/components/AvivaLogo';
 
 export default function Home() {
@@ -28,7 +27,7 @@ export default function Home() {
               </p>
               <Button asChild size="lg" className="w-full rounded-lg">
                 <Link href="/ba">
-                  Iniciar Misión BA <ArrowRight className="ml-2" />
+                  Iniciar Misión BA <span role="img" aria-label="cohete" className="ml-2">🚀</span>
                 </Link>
               </Button>
             </CardContent>
@@ -45,7 +44,7 @@ export default function Home() {
               </p>
               <Button asChild size="lg" className="w-full rounded-lg">
                 <Link href="/atn">
-                  Iniciar Misión ATN <ArrowRight className="ml-2" />
+                  Iniciar Misión Aviva Contigo o Aviva Tu Negocio <span role="img" aria-label="cohete" className="ml-2">🚀</span>
                 </Link>
               </Button>
             </CardContent>
