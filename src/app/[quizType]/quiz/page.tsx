@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Progress } from '@/components/ui/progress';
 import { CheckCircle, XCircle, ArrowRight, BookOpen } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { getAvatarComponent } from '@/lib/avatars';
 
 function QuizComponent() {
   const router = useRouter();
@@ -16,6 +17,8 @@ function QuizComponent() {
 
   const quizType = searchParams.get('quizType') || '';
   const fullName = searchParams.get('fullName') || '';
+  const avatarKey = searchParams.get('avatar');
+  const Avatar = getAvatarComponent(avatarKey);
 
   const [gameState, setGameState] = useState({
     currentMissionIndex: 0,
@@ -131,14 +134,21 @@ function QuizComponent() {
   }
 
   if (!currentQuestion) return <p>Error: No se encontró la pregunta.</p>;
+  
+  const questionKey = `${gameState.currentMissionIndex}-${gameState.currentQuestionIndex}`;
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
-        <Progress value={progressValue} className="transition-all duration-500" />
+      <div className="flex justify-between items-center space-x-4">
+        <div className="space-y-2 flex-grow">
+          <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
+          <Progress value={progressValue} className="transition-all duration-500" />
+        </div>
+        <div className="flex-shrink-0">
+          <Avatar className="h-12 w-12 text-primary bg-muted rounded-full p-2" />
+        </div>
       </div>
-      <Card>
+      <Card key={questionKey} className="animate-fade-in">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug">{currentQuestion.text}</CardTitle>
           <CardDescription>{currentMission.title}</CardDescription>

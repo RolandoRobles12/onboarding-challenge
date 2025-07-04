@@ -2,9 +2,10 @@ import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Award, Star, MessageSquareQuote } from 'lucide-react';
+import { Star, MessageSquareQuote } from 'lucide-react';
 import Link from 'next/link';
 import { generateMotivationalFeedback } from '@/ai/flows/motivational-feedback';
+import { getAvatarComponent } from '@/lib/avatars';
 
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
@@ -23,6 +24,7 @@ async function ResultsContent({ searchParams }: Props) {
   const fullName = searchParams.fullName as string;
   const scoreStr = searchParams.score as string;
   const totalQuestionsStr = searchParams.totalQuestions as string;
+  const avatarKey = searchParams.avatar as string;
 
   if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
     return notFound();
@@ -31,6 +33,7 @@ async function ResultsContent({ searchParams }: Props) {
   const score = parseInt(scoreStr, 10);
   const totalQuestions = parseInt(totalQuestionsStr, 10);
   const level = getLevel(score, totalQuestions);
+  const Avatar = getAvatarComponent(avatarKey);
 
   const aiFeedback = await generateMotivationalFeedback({
     quizTopic: quizType === 'ba' ? 'Aviva Tu Compra' : 'Aviva Tu Negocio',
@@ -40,7 +43,9 @@ async function ResultsContent({ searchParams }: Props) {
   return (
     <Card className="text-center animate-fade-in">
       <CardHeader>
-        <Award className="mx-auto h-16 w-16 text-primary" />
+        <div className="mx-auto h-24 w-24 flex items-center justify-center bg-primary/10 rounded-full">
+            <Avatar className="h-20 w-20 text-primary" />
+        </div>
         <CardTitle className="text-3xl font-headline mt-4">¡Misión Cumplida, {fullName}!</CardTitle>
         <CardDescription>Has completado tu entrenamiento en AvivaQuest.</CardDescription>
       </CardHeader>

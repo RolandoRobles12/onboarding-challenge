@@ -8,12 +8,16 @@ import { Button } from '@/components/ui/button';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Rocket } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { avatarComponents, defaultAvatar } from '@/lib/avatars';
+import { cn } from '@/lib/utils';
 
 const formSchema = z.object({
   fullName: z.string().min(3, { message: 'El nombre debe tener al menos 3 caracteres.' }),
   employeeId: z.string().min(1, { message: 'El número de colaborador es requerido.' }),
   assignedKiosk: z.string().min(2, { message: 'El kiosco asignado es requerido.' }),
   trainingKiosk: z.string().optional(),
+  avatar: z.string().default(defaultAvatar),
 });
 
 type UserInfoFormValues = z.infer<typeof formSchema>;
@@ -27,6 +31,7 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
       employeeId: '',
       assignedKiosk: '',
       trainingKiosk: '',
+      avatar: defaultAvatar,
     },
   });
 
@@ -36,6 +41,7 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
       fullName: values.fullName,
       employeeId: values.employeeId,
       assignedKiosk: values.assignedKiosk,
+      avatar: values.avatar,
     });
     if (values.trainingKiosk) {
       params.set('trainingKiosk', values.trainingKiosk);
@@ -93,6 +99,40 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
               <FormLabel>Kiosco de capacitación (Opcional)</FormLabel>
               <FormControl>
                 <Input placeholder="Ej. Oficina Principal" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="avatar"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Elige tu explorador</FormLabel>
+              <FormControl>
+                <RadioGroup
+                  onValueChange={field.onChange}
+                  defaultValue={field.value}
+                  className="flex justify-around pt-4"
+                >
+                  {Object.entries(avatarComponents).map(([key, Icon]) => (
+                    <FormItem key={key}>
+                      <FormControl>
+                        <RadioGroupItem value={key} id={key} className="sr-only" />
+                      </FormControl>
+                      <FormLabel
+                        htmlFor={key}
+                        className={cn(
+                          'cursor-pointer rounded-full p-3 border-2 transition-all hover:bg-accent/50',
+                          field.value === key ? 'border-primary bg-primary/10 scale-110' : 'border-transparent'
+                        )}
+                      >
+                        <Icon className="h-12 w-12 text-muted-foreground group-hover:text-foreground" />
+                      </FormLabel>
+                    </FormItem>
+                  ))}
+                </RadioGroup>
               </FormControl>
               <FormMessage />
             </FormItem>
