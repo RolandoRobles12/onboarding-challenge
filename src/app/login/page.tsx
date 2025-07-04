@@ -51,7 +51,10 @@ export default function LoginPage() {
         description = 'Configuración incompleta. Asegúrate de haber habilitado el proveedor de "Google" en la sección de "Authentication" > "Sign-in method" de tu consola de Firebase.';
       } else if (error.code === 'auth/popup-closed-by-user') {
         description = 'El proceso de inicio de sesión fue cancelado.';
+      } else if (error.code === 'auth/unauthorized-domain') {
+        description = `El dominio desde el que intentas acceder no está autorizado en tu configuración de Firebase. Por favor, añade '${window.location.hostname}' a la lista de dominios autorizados en la sección Authentication > Settings de tu consola de Firebase.`;
       }
+
 
       toast({
         variant: 'destructive',
