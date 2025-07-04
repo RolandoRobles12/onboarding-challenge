@@ -20,6 +20,14 @@ export default function LoginPage() {
   const { toast } = useToast();
 
   const handleSignIn = async () => {
+    if (!auth) {
+      toast({
+        variant: 'destructive',
+        title: 'Error de Configuración',
+        description: 'La configuración de Firebase no está completa. Revisa las variables de entorno.',
+      });
+      return;
+    }
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
@@ -35,12 +43,20 @@ export default function LoginPage() {
           description: 'El acceso está restringido. Por favor, utiliza una cuenta autorizada.',
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error durante el inicio de sesión:', error);
+      
+      let description = 'Hubo un problema al iniciar sesión. Por favor, inténtalo de nuevo.';
+      if (error.code === 'auth/configuration-not-found') {
+        description = 'Configuración incompleta. Asegúrate de haber habilitado el proveedor de "Google" en la sección de "Authentication" > "Sign-in method" de tu consola de Firebase.';
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        description = 'El proceso de inicio de sesión fue cancelado.';
+      }
+
       toast({
         variant: 'destructive',
         title: 'Error de Autenticación',
-        description: 'Hubo un problema al iniciar sesión. Por favor, inténtalo de nuevo.',
+        description: description,
       });
     }
   };
