@@ -167,7 +167,7 @@ function QuizComponent() {
 
   if (gameState.showMissionFailedScreen) {
     return (
-      <Card className="animate-fade-in text-center">
+      <Card className="animate-fade-in text-center rounded-lg shadow-lg">
         <CardHeader>
           <ShieldAlert className="mx-auto h-16 w-16 text-destructive" />
           <CardTitle className="text-3xl font-headline text-destructive mt-4">
@@ -181,7 +181,7 @@ function QuizComponent() {
           <p>¡No te preocupes, hasta los mejores exploradores tropiezan! Concéntrate y vuelve a intentarlo.</p>
         </CardContent>
         <CardFooter>
-          <Button onClick={restartMission} size="lg" className="w-full">
+          <Button onClick={restartMission} size="lg" className="w-full rounded-lg">
             Intentar de Nuevo
           </Button>
         </CardFooter>
@@ -191,9 +191,9 @@ function QuizComponent() {
 
   if (gameState.showMissionIntro) {
     return (
-      <Card className="animate-fade-in">
+      <Card className="animate-fade-in rounded-lg shadow-lg">
         <CardHeader>
-          <CardTitle className="text-3xl font-headline flex items-center">
+          <CardTitle className="text-3xl font-headline flex items-center text-accent">
             <BookOpen className="mr-3 text-primary" />
             {currentMission.title}
           </CardTitle>
@@ -203,7 +203,7 @@ function QuizComponent() {
           <p className="text-lg leading-relaxed">{currentMission.narrative}</p>
         </CardContent>
         <CardFooter>
-          <Button onClick={startMission} size="lg" className="w-full">
+          <Button onClick={startMission} size="lg" className="w-full rounded-lg">
             Comenzar Misión
           </Button>
         </CardFooter>
@@ -220,15 +220,15 @@ function QuizComponent() {
       <div className="flex justify-between items-center space-x-4">
         <div className="space-y-2 flex-grow">
           <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
-          <Progress value={progressValue} className="transition-all duration-500" />
+          <Progress value={progressValue} className="transition-all duration-500 rounded-lg h-3" />
         </div>
-        <div className="flex-shrink-0">
-          <Avatar className="h-12 w-12 text-primary bg-muted rounded-full p-2" />
+        <div className="flex-shrink-0 bg-white p-1 rounded-full shadow-md">
+          <Avatar className="h-12 w-12 text-primary" />
         </div>
       </div>
-      <Card key={questionKey} className="animate-fade-in">
+      <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-accent/20">
         <CardHeader>
-          <CardTitle className="text-2xl leading-snug">{currentQuestion.text}</CardTitle>
+          <CardTitle className="text-2xl leading-snug text-accent">{currentQuestion.text}</CardTitle>
           {currentQuestion.multipleCorrect && !gameState.isAnswered && (
              <CardDescription>Selecciona todas las respuestas correctas.</CardDescription>
           )}
@@ -238,12 +238,20 @@ function QuizComponent() {
           {currentQuestion.options.map((option, index) => {
             const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
             const isCorrect = option.isCorrect;
-            let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'secondary';
+            let variant: 'default' | 'secondary' | 'destructive' | 'outline' = 'outline';
+            let buttonColor = 'border-accent/30 text-accent hover:bg-accent/10';
 
             if (gameState.isAnswered) {
-              if (isCorrect) variant = 'default';
-              else if (isSelected) variant = 'destructive';
-              else variant = 'outline';
+              if (isCorrect) {
+                variant = 'default';
+                buttonColor = 'bg-primary text-primary-foreground';
+              } else if (isSelected) {
+                variant = 'destructive';
+                buttonColor = 'bg-destructive text-destructive-foreground';
+              } else {
+                 variant = 'outline';
+                 buttonColor = 'border-gray-300 text-gray-500';
+              }
             }
 
             return (
@@ -253,7 +261,7 @@ function QuizComponent() {
                 disabled={gameState.isAnswered && !currentQuestion.multipleCorrect}
                 size="lg"
                 variant={variant}
-                className="w-full justify-start text-left h-auto py-3 whitespace-normal"
+                className={cn("w-full justify-start text-left h-auto py-3 whitespace-normal rounded-lg", buttonColor)}
               >
                 {currentQuestion.multipleCorrect ? (
                   <div className="flex items-center w-full">
@@ -265,14 +273,14 @@ function QuizComponent() {
                     <span className="flex-grow">{option.text}</span>
                     {gameState.isAnswered && (
                       <div className="ml-2 flex-shrink-0">
-                        {isCorrect ? <CheckCircle className="text-accent-foreground" /> : isSelected ? <XCircle /> : null}
+                        {isCorrect ? <CheckCircle /> : isSelected ? <XCircle /> : null}
                       </div>
                     )}
                   </div>
                 ) : (
                   <>
                     {gameState.isAnswered && (
-                      isCorrect ? <CheckCircle className="mr-3 text-accent-foreground" /> :
+                      isCorrect ? <CheckCircle className="mr-3" /> :
                       isSelected ? <XCircle className="mr-3" /> :
                       <span className="w-8 mr-3"></span>
                     )}
@@ -287,19 +295,19 @@ function QuizComponent() {
 
         {gameState.isAnswered ? (
           <CardFooter className="flex-col items-stretch space-y-4">
-            <Alert variant={!gameState.missionFailed ? 'default' : 'destructive'} className="bg-card">
+            <Alert variant={!gameState.missionFailed ? 'default' : 'destructive'} className="bg-card rounded-lg">
               <AlertTitle>{!gameState.missionFailed ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
               <AlertDescription>
                  {!gameState.missionFailed ? '¡Excelente! Sigamos adelante.' : 'Has perdido tu única vida. Deberás reiniciar la misión para continuar.'}
               </AlertDescription>
             </Alert>
-            <Button onClick={handleNext} className="w-full" size="lg">
+            <Button onClick={handleNext} className="w-full rounded-lg" size="lg">
               Siguiente <ArrowRight className="ml-2" />
             </Button>
           </CardFooter>
         ) : currentQuestion.multipleCorrect && (
            <CardFooter>
-                <Button onClick={handleConfirmMultipleChoice} className="w-full" size="lg" disabled={gameState.selectedOptions.length === 0}>
+                <Button onClick={handleConfirmMultipleChoice} className="w-full rounded-lg" size="lg" disabled={gameState.selectedOptions.length === 0}>
                     Verificar Respuesta <Check className="ml-2" />
                 </Button>
             </CardFooter>

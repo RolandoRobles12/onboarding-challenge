@@ -16,11 +16,11 @@ export default function UserInfoPage({ params }: Props) {
   }
 
   return (
-    <Card>
+    <Card className="bg-card shadow-lg rounded-lg border-accent/20">
       <CardHeader>
-        <CardTitle className="text-3xl font-headline">¡Casi listos para la aventura!</CardTitle>
+        <CardTitle className="text-3xl font-headline text-accent">¡Casi listos para la aventura!</CardTitle>
         <CardDescription>
-          Estás a punto de iniciar la evaluación de <span className="font-semibold text-primary">{quiz.title}</span>.
+          Estás a punto de iniciar el desafío de <span className="font-semibold text-primary">{quiz.title}</span>.
           <br />
           Primero, necesitamos algunos datos para registrar tu progreso.
         </CardDescription>

@@ -6,52 +6,58 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 
 export default function Home() {
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen p-4 sm:p-8">
-      <div className="text-center mb-8">
-        <AvivaLogo className="w-48 h-auto mx-auto mb-4" />
-        <h1 className="text-4xl sm:text-5xl font-bold font-headline text-primary">AvivaQuest</h1>
-        <p className="mt-2 text-lg text-muted-foreground">Tu aventura de conocimiento ha comenzado.</p>
-      </div>
+    <div className="flex flex-col min-h-screen bg-background">
+      <header className="bg-accent text-accent-foreground py-6 px-4 sm:px-8">
+        <div className="max-w-7xl mx-auto flex flex-col items-center text-center">
+            <AvivaLogo className="h-16 w-auto mb-4" />
+            <h1 className="text-4xl sm:text-5xl font-bold font-headline">Desafío Aviva</h1>
+            <p className="mt-2 text-lg text-accent-foreground/80">Tu aventura de conocimiento ha comenzado.</p>
+        </div>
+      </header>
 
-      <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8">
-        <Card className="hover:shadow-lg transition-shadow duration-300">
-          <CardHeader>
-            <CardTitle className="text-2xl font-headline">Promotores BA</CardTitle>
-            <CardDescription>Para el producto Aviva Tu Compra.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-6">
-              Comienza tu misión para dominar los secretos de Aviva Tu Compra y prepárate para el éxito.
-            </p>
-            <Button asChild size="lg" className="w-full">
-              <Link href="/ba">
-                Iniciar Misión BA <ArrowRight className="ml-2" />
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
+      <main className="flex-grow flex flex-col items-center justify-center p-4 sm:p-8">
+        <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-8">
+          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border-accent/20">
+            <CardHeader>
+              <CardTitle className="text-2xl font-headline text-accent">Promotores BA</CardTitle>
+              <CardDescription>Para el producto Aviva Tu Compra.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-6 text-card-foreground/80">
+                Comienza tu misión para dominar los secretos de Aviva Tu Compra y prepárate para el éxito.
+              </p>
+              <Button asChild size="lg" className="w-full rounded-lg">
+                <Link href="/ba">
+                  Iniciar Misión BA <ArrowRight className="ml-2" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
 
-        <Card className="hover:shadow-lg transition-shadow duration-300">
-          <CardHeader>
-            <CardTitle className="text-2xl font-headline">Aviva Tu Negocio y Aviva Contigo</CardTitle>
-            <CardDescription>Para Promotores y Gerentes.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="mb-6">
-              Embárcate en esta aventura para convertirte en un experto de Aviva Tu Negocio y Aviva Contigo.
-            </p>
-            <Button asChild size="lg" className="w-full">
-              <Link href="/atn">
-                Iniciar Misión ATN <ArrowRight className="ml-2" />
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+          <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border-accent/20">
+            <CardHeader>
+              <CardTitle className="text-2xl font-headline text-accent">Aviva Tu Negocio y Aviva Contigo</CardTitle>
+              <CardDescription>Para Promotores y Gerentes.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-6 text-card-foreground/80">
+                Embárcate en esta aventura para convertirte en un experto de Aviva Tu Negocio y Aviva Contigo.
+              </p>
+              <Button asChild size="lg" className="w-full rounded-lg">
+                <Link href="/atn">
+                  Iniciar Misión ATN <ArrowRight className="ml-2" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
 
-      <footer className="mt-12 text-center text-sm text-muted-foreground">
-        <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
+      <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-12">
+        <div className="max-w-7xl mx-auto text-center text-sm">
+            <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
+        </div>
       </footer>
-    </main>
+    </div>
   );
 }

@@ -41,13 +41,13 @@ async function ResultsContent({ searchParams }: Props) {
   });
 
   return (
-    <Card className="text-center animate-fade-in">
+    <Card className="text-center animate-fade-in bg-card shadow-lg rounded-lg border-accent/20">
       <CardHeader>
         <div className="mx-auto h-24 w-24 flex items-center justify-center bg-primary/10 rounded-full">
             <Avatar className="h-20 w-20 text-primary" />
         </div>
-        <CardTitle className="text-3xl font-headline mt-4">¡Misión Cumplida, {fullName}!</CardTitle>
-        <CardDescription>Has completado tu entrenamiento en AvivaQuest.</CardDescription>
+        <CardTitle className="text-3xl font-headline mt-4 text-accent">¡Misión Cumplida, {fullName}!</CardTitle>
+        <CardDescription>Has completado tu entrenamiento en Desafío Aviva.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="bg-muted p-6 rounded-lg">
@@ -70,7 +70,7 @@ async function ResultsContent({ searchParams }: Props) {
           </blockquote>
         </div>
 
-        <Button asChild size="lg" className="w-full">
+        <Button asChild size="lg" className="w-full rounded-lg">
           <Link href="/">Finalizar y volver al inicio</Link>
         </Button>
       </CardContent>
@@ -82,7 +82,7 @@ async function ResultsContent({ searchParams }: Props) {
 export default function ResultsPage({ searchParams }: Props) {
   return (
       <Suspense fallback={
-          <Card>
+          <Card className="rounded-lg">
               <CardHeader>
                   <CardTitle>Calculando resultados...</CardTitle>
               </CardHeader>

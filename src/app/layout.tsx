@@ -3,7 +3,7 @@ import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
 
 export const metadata: Metadata = {
-  title: 'AvivaQuest',
+  title: 'Desafío Aviva',
   description: 'Proceso de onboarding gamificado para nuevos ingresos en Aviva.',
 };
 

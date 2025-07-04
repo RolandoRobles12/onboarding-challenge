@@ -3,10 +3,10 @@ import Link from 'next/link';
 
 export default function QuizLayout({ children }: { children: React.ReactNode }) {
   return (
-    <>
-      <header className="py-4 px-8 border-b">
+    <div className="min-h-screen bg-background">
+      <header className="py-4 px-8 bg-accent text-accent-foreground">
         <Link href="/" aria-label="Volver al inicio">
-          <AvivaLogo className="w-32 h-auto" />
+          <AvivaLogo className="h-10 w-auto" />
         </Link>
       </header>
       <main className="flex flex-col items-center justify-start p-4 sm:p-8">
@@ -14,6 +14,6 @@ export default function QuizLayout({ children }: { children: React.ReactNode }) 
           {children}
         </div>
       </main>
-    </>
+    </div>
   );
 }

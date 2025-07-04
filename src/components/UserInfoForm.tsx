@@ -126,8 +126,8 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
                       <FormLabel
                         htmlFor={key}
                         className={cn(
-                          'cursor-pointer rounded-xl p-3 border-2 transition-all w-full flex flex-col items-center justify-center gap-3 aspect-square',
-                          'hover:bg-card hover:border-primary/50',
+                          'cursor-pointer rounded-lg p-3 border-2 transition-all w-full flex flex-col items-center justify-center gap-3 aspect-square',
+                          'hover:bg-card hover:border-primary',
                           field.value === key ? 'border-primary bg-primary/10 ring-2 ring-primary ring-offset-background' : 'border-border bg-card'
                         )}
                       >
@@ -147,9 +147,9 @@ export function UserInfoForm({ quizType }: { quizType: string }) {
             </FormItem>
           )}
         />
-        <Button type="submit" className="w-full" size="lg">
+        <Button type="submit" className="w-full rounded-lg" size="lg">
           <Rocket className="mr-2" />
-          Comenzar AvivaQuest
+          Comenzar Desafío
         </Button>
       </form>
     </Form>
