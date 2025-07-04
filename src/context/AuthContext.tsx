@@ -19,6 +19,7 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 const ALLOWED_DOMAIN = 'avivacredito.com';
+const ALLOWED_EMAILS = ['rolando.9834@gmail.com'];
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -39,12 +40,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser && currentUser.email?.endsWith(`@${ALLOWED_DOMAIN}`)) {
-        setUser(currentUser);
-      } else {
-        if (currentUser) {
-            signOut(auth);
+      if (currentUser && currentUser.email) {
+        const isAllowed = currentUser.email.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(currentUser.email);
+        if (isAllowed) {
+          setUser(currentUser);
+        } else {
+          signOut(auth);
+          setUser(null);
         }
+      } else {
         setUser(null);
       }
       setLoading(false);

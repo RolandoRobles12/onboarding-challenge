@@ -13,6 +13,7 @@ import { useEffect } from 'react';
 import { CardBody } from 'recharts/types/component/DefaultTooltipContent';
 
 const ALLOWED_DOMAIN = 'avivacredito.com';
+const ALLOWED_EMAILS = ['rolando.9834@gmail.com'];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,14 +26,14 @@ export default function LoginPage() {
       const result = await signInWithPopup(auth, provider);
       const userEmail = result.user.email;
 
-      if (userEmail && userEmail.endsWith(`@${ALLOWED_DOMAIN}`)) {
+      if (userEmail && (userEmail.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail))) {
         router.push('/');
       } else {
         await signOut(auth);
         toast({
           variant: 'destructive',
           title: 'Acceso Denegado',
-          description: `El acceso está restringido a correos @${ALLOWED_DOMAIN}.`,
+          description: 'El acceso está restringido. Por favor, utiliza una cuenta autorizada.',
         });
       }
     } catch (error) {
