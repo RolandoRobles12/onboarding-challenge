@@ -4,6 +4,8 @@ import * as React from 'react';
 import { onAuthStateChanged, User, signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { toast } from '@/hooks/use-toast';
+import { isUserAllowed } from '@/lib/auth-utils';
 
 interface AuthContextType {
   user: User | null;
@@ -16,9 +18,6 @@ const AuthContext = React.createContext<AuthContextType>({
   loading: true,
   logout: async () => {},
 });
-
-const ALLOWED_DOMAIN = 'avivacredito.com';
-const ALLOWED_EMAILS = ['rolando.9834@gmail.com'];
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = React.useState<User | null>(null);
@@ -39,16 +38,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser && currentUser.email) {
-        const userEmail = currentUser.email.toLowerCase().trim();
-        const isAllowed = userEmail.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail);
-        if (isAllowed) {
-          setUser(currentUser);
-        } else {
-          signOut(auth);
-          setUser(null);
-        }
+      if (isUserAllowed(currentUser?.email)) {
+        setUser(currentUser);
       } else {
+        // If there is a user, it means they were not allowed.
+        // Sign them out and show a message.
+        if (currentUser) {
+          toast({
+            variant: 'destructive',
+            title: 'Acceso Denegado',
+            description: 'El acceso está restringido. Por favor, utiliza una cuenta autorizada.',
+          });
+          signOut(auth);
+        }
         setUser(null);
       }
       setLoading(false);

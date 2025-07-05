@@ -9,9 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { AvivaLogo } from '@/components/AvivaLogo';
 import { useToast } from '@/hooks/use-toast';
 import { useEffect } from 'react';
-
-const ALLOWED_DOMAIN = 'avivacredito.com';
-const ALLOWED_EMAILS = ['rolando.9834@gmail.com'];
+import { isUserAllowed } from '@/lib/auth-utils';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -30,9 +28,8 @@ export default function LoginPage() {
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
-      const userEmail = result.user.email;
 
-      if (userEmail && (userEmail.toLowerCase().trim().endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail.toLowerCase().trim()))) {
+      if (isUserAllowed(result.user.email)) {
         router.push('/');
       } else {
         await signOut(auth);
