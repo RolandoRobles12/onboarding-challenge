@@ -8,7 +8,7 @@ import type { Option } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, MusicOff } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, VolumeX } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -410,7 +410,7 @@ function QuizComponent() {
         </div>
         <div className="flex items-center gap-2">
             <Button variant="outline" size="icon" onClick={toggleMusic} className="rounded-full shadow-md border" aria-label={isMusicPlaying ? "Pausar música" : "Reproducir música"}>
-                {isMusicPlaying ? <MusicOff className="h-5 w-5" /> : <Music className="h-5 w-5" />}
+                {isMusicPlaying ? <VolumeX className="h-5 w-5" /> : <Music className="h-5 w-5" />}
             </Button>
             <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
             <Avatar className="h-10 w-10 text-primary" />
@@ -423,7 +423,7 @@ function QuizComponent() {
             </div>
         </div>
       </div>
-      <audio ref={audioRef} src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3" loop />
+      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2022/08/17/audio_394a5f7823.mp3" loop />
       <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
