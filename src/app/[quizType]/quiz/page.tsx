@@ -31,11 +31,7 @@ function QuizComponent() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
-
-  const quizType = searchParams.get('quizType') || '';
-  const fullName = searchParams.get('fullName') || '';
-  const avatarKey = searchParams.get('avatar');
-  const Avatar = getAvatarComponent(avatarKey);
+  const [elapsedTime, setElapsedTime] = useState(0);
 
   const [gameState, setGameState] = useState({
     currentMissionIndex: 0,
@@ -56,7 +52,28 @@ function QuizComponent() {
     lastAnswerWasCorrect: false,
   });
 
+  const quizType = searchParams.get('quizType') || '';
+  const fullName = searchParams.get('fullName') || '';
+  const avatarKey = searchParams.get('avatar');
+  const Avatar = getAvatarComponent(avatarKey);
+
   const quiz = useMemo(() => quizzes[quizType], [quizType]);
+
+  useEffect(() => {
+    if (!startTime || gameState.showMissionFailedScreen || gameState.showMissionIntro) return;
+
+    const timer = setInterval(() => {
+      setElapsedTime(Math.round((Date.now() - startTime) / 1000));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro]);
+  
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const totalQuestions = useMemo(() => quiz?.missions.reduce((acc, mission) => acc + mission.questions.length, 0) || 0, [quiz]);
   
@@ -246,7 +263,7 @@ function QuizComponent() {
 
   const startMission = () => {
     // Only set startTime if it's the very first mission.
-    if (gameState.currentMissionIndex === 0) {
+    if (gameState.currentMissionIndex === 0 && !startTime) {
       setStartTime(Date.now());
     }
     setGameState(prev => ({ ...prev, showMissionIntro: false, lifeUsedMessage: null }));
@@ -419,6 +436,12 @@ function QuizComponent() {
             <Button variant="outline" size="icon" onClick={toggleMusic} className="rounded-full shadow-md border" aria-label={isMusicPlaying ? "Pausar música" : "Reproducir música"}>
                 {isMusicPlaying ? <VolumeX className="h-5 w-5" /> : <Music className="h-5 w-5" />}
             </Button>
+
+            <div className="flex items-center gap-2 bg-card p-2 px-3 rounded-full shadow-md border text-primary">
+                <Timer className="h-5 w-5" />
+                <span className="font-mono text-sm font-bold w-12 text-center">{formatTime(elapsedTime)}</span>
+            </div>
+
             <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
             <Avatar className="h-10 w-10 text-primary" />
             {gameState.bonusLives > 0 && (
@@ -430,7 +453,7 @@ function QuizComponent() {
             </div>
         </div>
       </div>
-      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2022/10/21/audio_a1bf1463a5.mp3" loop />
+      <audio ref={audioRef} src="https://storage.googleapis.com/proudcity/mebanenc/uploads/2021/03/placeholder-audio.mp3" loop />
       <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
