@@ -77,7 +77,7 @@ const promotores_atn_data = [
   { "question": "¿Los videos del negocio deben mostrar la fachada del negocio?", "options": ["Sí, se debe ver por fuera y por dentro", "No, debe ser estático y solo el cliente debe hablar"], "correct": "Sí, se debe ver por fuera y por dentro" },
   { "question": "Documentos necesarios para el desembolso (Aviva Contigo)", "options": ["Comprobante de domicilio, estado de cuenta y video ingresando al domicilio", "Ubicación en Google Maps"], "correct": "Comprobante de domicilio, estado de cuenta y video ingresando al domicilio" },
   { "question": "Documentos necesarios para el desembolso (Aviva Tu Negocio)", "options": ["Comprobante de domicilio, estado de cuenta y ubicación", "Solo un estado de cuenta", "Video del negocio"], "correct": "Comprobante de domicilio, estado de cuenta y ubicación" },
-  { "question": "¿Qué puede ser aceptado como un comprobante de domicilio?", "options": ["Recibo original de CFE/internet/teléfono (o PDF)", "Constancia domiciliaria o predial", "Ubicación en Google Maps"], "correct": "Recibo original de CFE/internet/teléfono (o PDF)" },
+  { "question": "¿Qué pode ser aceptado como un comprobante de domicilio?", "options": ["Recibo original de CFE/internet/teléfono (o PDF)", "Constancia domiciliaria o predial", "Ubicación en Google Maps"], "correct": "Recibo original de CFE/internet/teléfono (o PDF)" },
   { "question": "¿El estado de cuenta debe ser propio o se puede utilizar el de un familiar?", "options": ["Sí, puede utilizar el de un familiar", "Tiene que ser una cuenta propia"], "correct": "Tiene que ser una cuenta propia" },
   { "question": "Selecciona los estados de cuenta que aceptamos actualmente", "options": ["BBVA", "Bansefi", "Mercado Pago", "Santander", "Nu", "Oxxo", "BanCoppel", "Guardadito (Banco Azteca)"], "correct": "BBVA, Santander, Oxxo, BanCoppel, Guardadito (Banco Azteca)" },
   { "question": "¿Qué pasa si el cliente no tiene una cuenta bancaria?", "options": ["Puede sacar una nueva y enviar foto del contrato", "No es posible realizar la solicitud"], "correct": "Puede sacar una nueva y enviar foto del contrato" },
@@ -100,7 +100,6 @@ const promotores_atn_data = [
   { "question": "¿El monto puede ser mayor que el crédito anterior?", "options": ["Sí, podría subir mínimo $1,000 o más", "No, siempre es el mismo monto"], "correct": "Sí, podría subir mínimo $1,000 o más" },
   { "question": "¿Por qué un cliente es rechazado en la renovación?", "options": ["Por un mal comportamiento en pagos y/o mal score crediticio", "Por solicitar monto mayor al autorizado"], "correct": "Por un mal comportamiento en pagos y/o mal score crediticio" }
 ];
-
 
 const transformQuestion = (q: { question: string; options: string[]; correct: string; }): Question => {
   // Check if the correct answer string is one of the options verbatim.
