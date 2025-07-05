@@ -1,14 +1,14 @@
 
 'use client';
 
-import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useState, useEffect, useMemo, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { quizzes } from '@/lib/questions';
 import type { Option } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, MusicOff } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -29,6 +29,8 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 function QuizComponent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
 
   const quizType = searchParams.get('quizType') || '';
   const fullName = searchParams.get('fullName') || '';
@@ -82,6 +84,15 @@ function QuizComponent() {
       bonusLives: bonusLivesParam ? parseInt(bonusLivesParam, 10) : 0,
     }));
   }, [quizType, fullName, router, searchParams]);
+  
+  const toggleMusic = () => {
+    if (isMusicPlaying) {
+        audioRef.current?.pause();
+    } else {
+        audioRef.current?.play();
+    }
+    setIsMusicPlaying(!isMusicPlaying);
+  };
 
   const processAnswer = (selected: Option[]) => {
       let isCorrect;
@@ -397,16 +408,22 @@ function QuizComponent() {
           <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
           <Progress value={progressValue} className="transition-all duration-500 rounded-lg h-3" />
         </div>
-        <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
-          <Avatar className="h-10 w-10 text-primary" />
-          {gameState.bonusLives > 0 && (
-            <div className="flex items-center gap-1 text-primary font-bold pr-2">
-              <Heart className="h-5 w-5" />
-              <span>x{gameState.bonusLives}</span>
+        <div className="flex items-center gap-2">
+            <Button variant="outline" size="icon" onClick={toggleMusic} className="rounded-full shadow-md border" aria-label={isMusicPlaying ? "Pausar música" : "Reproducir música"}>
+                {isMusicPlaying ? <MusicOff className="h-5 w-5" /> : <Music className="h-5 w-5" />}
+            </Button>
+            <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
+            <Avatar className="h-10 w-10 text-primary" />
+            {gameState.bonusLives > 0 && (
+                <div className="flex items-center gap-1 text-primary font-bold pr-2">
+                <Heart className="h-5 w-5" />
+                <span>x{gameState.bonusLives}</span>
+                </div>
+            )}
             </div>
-          )}
         </div>
       </div>
+      <audio ref={audioRef} src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3" loop />
       <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
