@@ -103,14 +103,21 @@ const promotores_atn_data = [
 
 
 const transformQuestion = (q: { question: string; options: string[]; correct: string; }): Question => {
-  const correctAnswers = q.correct.split(',').map(s => s.trim());
+  // Check if the correct answer string is one of the options verbatim.
+  // This handles single-choice questions where the answer itself might contain commas.
+  const isSingleLongAnswer = q.options.includes(q.correct);
+
+  const correctAnswers = isSingleLongAnswer
+    ? [q.correct]
+    : q.correct.split(',').map(s => s.trim());
+
   return {
     text: q.question,
     options: q.options.map(o => ({
       text: o,
       isCorrect: correctAnswers.includes(o),
     })),
-    isMultiSelect: correctAnswers.length > 1,
+    isMultiSelect: !isSingleLongAnswer,
     isTricky: [
         '¿Qué categorías financiamos dentro de la tienda con el crédito Aviva?',
         '¿Por qué se rechazan las solicitudes de crédito?',
@@ -164,25 +171,25 @@ export const quizzes: QuizData = {
       },
       {
         id: 'm2_atn',
-        title: 'Misión 2: El Crédito Aviva Contigo',
+        title: 'El Crédito Aviva Contigo',
         narrative: 'Ahora, profundiza en "Aviva Contigo". Aprende los detalles del proceso, desde la oferta inicial hasta el manejo de casos especiales, para ser un verdadero guía para tus clientes.',
         questions: atnQuestions.slice(11, 22),
       },
        {
         id: 'm3_atn',
-        title: 'Misión 3: Aviva Tu Negocio: Criterios y Exclusiones',
+        title: 'Aviva Tu Negocio: Criterios y Exclusiones',
         narrative: 'Es hora de impulsar negocios. Esta misión se centra en "Aviva Tu Negocio". Domina los criterios de elegibilidad, los giros aceptados y los documentos clave para el éxito.',
         questions: atnQuestions.slice(22, 33),
       },
       {
         id: 'm4_atn',
-        title: 'Misión 4: Documentación y Desembolso',
+        title: 'Documentación y Desembolso',
         narrative: 'La burocracia no será un obstáculo para ti. Conviértete en un maestro de la documentación, desde estados de cuenta hasta comprobantes, y domina el proceso de pagos.',
         questions: atnQuestions.slice(33, 45),
       },
       {
         id: 'm5_atn',
-        title: 'Misión 5: Gestión Avanzada y Renovación',
+        title: 'Gestión Avanzada y Renovación',
         narrative: 'El final del camino es solo un nuevo comienzo. Aprende a gestionar los pagos como un experto y domina el arte de la renovación para construir relaciones a largo plazo.',
         questions: atnQuestions.slice(45, 56),
       },
