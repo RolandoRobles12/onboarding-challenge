@@ -424,7 +424,7 @@ function QuizComponent() {
             </div>
         </div>
       </div>
-      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2023/07/19/audio_d14e0f4d33.mp3" loop />
+      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2022/10/21/audio_a1bf1463a5.mp3" loop />
       <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
