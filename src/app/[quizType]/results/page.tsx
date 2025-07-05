@@ -4,11 +4,12 @@ import { Suspense, useEffect, useState } from 'react';
 import { notFound, useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Star, MessageSquareQuote } from 'lucide-react';
+import { Star, MessageSquareQuote, Download } from 'lucide-react';
 import Link from 'next/link';
 import { generateMotivationalFeedback, MotivationalFeedbackOutput } from '@/ai/flows/motivational-feedback';
 import { getAvatarComponent } from '@/lib/avatars';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { quizzes } from '@/lib/questions';
 
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
@@ -31,12 +32,14 @@ function ResultsContent() {
     const scoreStr = searchParams.get('score');
     const totalQuestionsStr = searchParams.get('totalQuestions');
     const avatarKey = searchParams.get('avatar');
+    
+    const quiz = quizzes[quizType || ''];
 
     const [feedback, setFeedback] = useState<MotivationalFeedbackOutput | null>(null);
     const [loadingFeedback, setLoadingFeedback] = useState(true);
 
     useEffect(() => {
-        if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
+        if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
             router.push('/');
             return;
         }
@@ -45,7 +48,7 @@ function ResultsContent() {
             try {
                 const score = parseInt(scoreStr!, 10);
                 const aiFeedback = await generateMotivationalFeedback({
-                    quizTopic: quizType === 'ba' ? 'Aviva Tu Compra' : 'Aviva Tu Negocio',
+                    quizTopic: quiz.title,
                     score: score,
                 });
                 setFeedback(aiFeedback);
@@ -57,9 +60,9 @@ function ResultsContent() {
             }
         }
         getFeedback();
-    }, [quizType, fullName, scoreStr, totalQuestionsStr, router]);
+    }, [quizType, fullName, scoreStr, totalQuestionsStr, router, quiz]);
 
-    if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
+    if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
         return null;
     }
 
@@ -102,9 +105,17 @@ function ResultsContent() {
           )}
         </div>
 
-        <Button asChild size="lg" className="w-full rounded-lg">
-          <Link href="/">Finalizar y volver al inicio</Link>
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-4">
+            <Button asChild size="lg" className="w-full rounded-lg">
+            <Link href="/">Finalizar y volver al inicio</Link>
+            </Button>
+            <Button asChild size="lg" variant="outline" className="w-full rounded-lg">
+                <Link href={`/${quizType}/certificate?${searchParams.toString()}`}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Ver Certificado
+                </Link>
+            </Button>
+        </div>
       </CardContent>
     </Card>
   );
