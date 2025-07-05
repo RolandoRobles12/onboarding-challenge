@@ -121,8 +121,9 @@ const transformQuestion = (q: { question: string; options: string[]; correct: st
     isTricky: [
         '¿Qué categorías financiamos dentro de la tienda con el crédito Aviva?',
         '¿Por qué se rechazan las solicitudes de crédito?',
-        'Selecciona los negocios excluidos de Aviva Tu Negocio pero aceptados en Aviva Contigo',
-        'Selecciona los estados de cuenta que aceptamos actualmente'
+        '¿Se puede liquidar anticipadamente?',
+        '¿El estado de cuenta debe ser propio o se puede utilizar el de un familiar?',
+        '¿El comprobante para el seguimiento del crédito es del domicilio del cliente o del negocio?',
     ].includes(q.question),
   };
 };
