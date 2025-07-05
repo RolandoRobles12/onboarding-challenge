@@ -34,6 +34,7 @@ function ResultsContent() {
     const totalQuestionsStr = searchParams.get('totalQuestions');
     const avatarKey = searchParams.get('avatar');
     const startTimeStr = searchParams.get('startTime');
+    const assignedKiosk = searchParams.get('assignedKiosk');
     
     const quiz = quizzes[quizType || ''];
 
@@ -57,6 +58,7 @@ function ResultsContent() {
 
             addLeaderboardEntry({
                 fullName,
+                assignedKiosk: assignedKiosk || 'N/A',
                 score,
                 totalQuestions,
                 time: durationInSeconds,
@@ -83,7 +85,7 @@ function ResultsContent() {
             }
         }
         getFeedback();
-    }, [quizType, fullName, scoreStr, totalQuestionsStr, router, quiz, avatarKey, startTimeStr]);
+    }, [quizType, fullName, scoreStr, totalQuestionsStr, router, quiz, avatarKey, startTimeStr, assignedKiosk]);
 
     if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
         return null;

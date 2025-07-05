@@ -43,7 +43,10 @@ function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
                             <TableCell>
                                 <div className="flex items-center gap-3">
                                     <Avatar className="h-8 w-8 text-muted-foreground" />
-                                    <span className="font-medium">{entry.fullName}</span>
+                                    <div>
+                                        <div className="font-medium">{entry.fullName}</div>
+                                        <div className="text-xs text-muted-foreground">{entry.assignedKiosk}</div>
+                                    </div>
                                 </div>
                             </TableCell>
                             <TableCell className="text-right">{entry.score}/{entry.totalQuestions}</TableCell>

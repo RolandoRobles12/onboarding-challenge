@@ -3,6 +3,7 @@
 export interface LeaderboardEntry {
   id: string;
   fullName: string;
+  assignedKiosk: string;
   score: number;
   totalQuestions: number;
   time: number; // in seconds
@@ -14,17 +15,17 @@ export interface LeaderboardEntry {
 // Mock data - in a real app, this would come from a database like Firestore.
 // This data will reset on every server restart.
 const leaderboardData: LeaderboardEntry[] = [
-    { id: '1', fullName: 'Amran Frey', score: 38, totalQuestions: 40, time: 185, quizType: 'ba', avatar: 'rocket', date: new Date().toISOString() },
-    { id: '2', fullName: 'Fil Castro', score: 40, totalQuestions: 40, time: 210, quizType: 'ba', avatar: 'bot', date: new Date().toISOString() },
-    { id: '3', fullName: 'Alan Brito', score: 35, totalQuestions: 40, time: 250, quizType: 'ba', avatar: 'compass', date: new Date().toISOString() },
-    { id: '4', fullName: 'Elena Nito', score: 40, totalQuestions: 40, time: 205, quizType: 'ba', avatar: 'graduation-cap', date: new Date().toISOString() },
-    { id: '5', fullName: 'Zacarias Flores', score: 39, totalQuestions: 40, time: 190, quizType: 'ba', avatar: 'rocket', date: new Date().toISOString() },
+    { id: '1', fullName: 'Amran Frey', assignedKiosk: 'Ixtapaluca', score: 38, totalQuestions: 40, time: 185, quizType: 'ba', avatar: 'rocket', date: new Date().toISOString() },
+    { id: '2', fullName: 'Fil Castro', assignedKiosk: 'Chalco', score: 40, totalQuestions: 40, time: 210, quizType: 'ba', avatar: 'bot', date: new Date().toISOString() },
+    { id: '3', fullName: 'Alan Brito', assignedKiosk: 'Valle de Chalco', score: 35, totalQuestions: 40, time: 250, quizType: 'ba', avatar: 'compass', date: new Date().toISOString() },
+    { id: '4', fullName: 'Elena Nito', assignedKiosk: 'Ixtapaluca', score: 40, totalQuestions: 40, time: 205, quizType: 'ba', avatar: 'graduation-cap', date: new Date().toISOString() },
+    { id: '5', fullName: 'Zacarias Flores', assignedKiosk: 'Chalco', score: 39, totalQuestions: 40, time: 190, quizType: 'ba', avatar: 'rocket', date: new Date().toISOString() },
 
-    { id: '6', fullName: 'Rosa Melcacho', score: 56, totalQuestions: 56, time: 320, quizType: 'atn', avatar: 'graduation-cap', date: new Date().toISOString() },
-    { id: '7', fullName: 'Armando Casas', score: 52, totalQuestions: 56, time: 350, quizType: 'atn', avatar: 'bot', date: new Date().toISOString() },
-    { id: '8', fullName: 'Aquiles Bailo', score: 54, totalQuestions: 56, time: 330, quizType: 'atn', avatar: 'compass', date: new Date().toISOString() },
-    { id: '9', fullName: 'Esteban Dido', score: 55, totalQuestions: 56, time: 310, quizType: 'atn', avatar: 'rocket', date: new Date().toISOString() },
-    { id: '10', fullName: 'Elsa Pato', score: 56, totalQuestions: 56, time: 295, quizType: 'atn', avatar: 'bot', date: new Date().toISOString() },
+    { id: '6', fullName: 'Rosa Melcacho', assignedKiosk: 'Neza', score: 56, totalQuestions: 56, time: 320, quizType: 'atn', avatar: 'graduation-cap', date: new Date().toISOString() },
+    { id: '7', fullName: 'Armando Casas', assignedKiosk: 'Chimalhuacán', score: 52, totalQuestions: 56, time: 350, quizType: 'atn', avatar: 'bot', date: new Date().toISOString() },
+    { id: '8', fullName: 'Aquiles Bailo', assignedKiosk: 'Neza', score: 54, totalQuestions: 56, time: 330, quizType: 'atn', avatar: 'compass', date: new Date().toISOString() },
+    { id: '9', fullName: 'Esteban Dido', assignedKiosk: 'Los Reyes', score: 55, totalQuestions: 56, time: 310, quizType: 'atn', avatar: 'rocket', date: new Date().toISOString() },
+    { id: '10', fullName: 'Elsa Pato', assignedKiosk: 'Chimalhuacán', score: 56, totalQuestions: 56, time: 295, quizType: 'atn', avatar: 'bot', date: new Date().toISOString() },
 ];
 
 /**
