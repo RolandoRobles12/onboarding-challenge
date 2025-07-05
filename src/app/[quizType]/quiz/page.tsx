@@ -1,4 +1,5 @@
 
+
 'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef } from 'react';
@@ -423,7 +424,7 @@ function QuizComponent() {
             </div>
         </div>
       </div>
-      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2022/08/17/audio_394a5f7823.mp3" loop />
+      <audio ref={audioRef} src="https://cdn.pixabay.com/download/audio/2022/12/22/audio_fb81878a57.mp3" loop />
       <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
