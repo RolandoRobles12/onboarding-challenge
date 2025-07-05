@@ -40,7 +40,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser && currentUser.email) {
-        const userEmail = currentUser.email.toLowerCase();
+        const userEmail = currentUser.email.toLowerCase().trim();
         const isAllowed = userEmail.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail);
         if (isAllowed) {
           setUser(currentUser);

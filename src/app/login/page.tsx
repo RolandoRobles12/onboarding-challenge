@@ -32,7 +32,7 @@ export default function LoginPage() {
       const result = await signInWithPopup(auth, provider);
       const userEmail = result.user.email;
 
-      if (userEmail && (userEmail.toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail.toLowerCase()))) {
+      if (userEmail && (userEmail.toLowerCase().trim().endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail.toLowerCase().trim()))) {
         router.push('/');
       } else {
         await signOut(auth);
