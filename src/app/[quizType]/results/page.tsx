@@ -4,12 +4,13 @@ import { Suspense, useEffect, useState } from 'react';
 import { notFound, useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Star, MessageSquareQuote, Download } from 'lucide-react';
+import { Star, MessageSquareQuote, Download, Timer } from 'lucide-react';
 import Link from 'next/link';
 import { generateMotivationalFeedback, MotivationalFeedbackOutput } from '@/ai/flows/motivational-feedback';
-import { getAvatarComponent } from '@/lib/avatars';
+import { getAvatarComponent, defaultAvatar } from '@/lib/avatars';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { quizzes } from '@/lib/questions';
+import { addLeaderboardEntry } from '@/lib/leaderboard';
 
 type Props = {
   searchParams: { [key: string]: string | string[] | undefined };
@@ -32,11 +33,13 @@ function ResultsContent() {
     const scoreStr = searchParams.get('score');
     const totalQuestionsStr = searchParams.get('totalQuestions');
     const avatarKey = searchParams.get('avatar');
+    const startTimeStr = searchParams.get('startTime');
     
     const quiz = quizzes[quizType || ''];
 
     const [feedback, setFeedback] = useState<MotivationalFeedbackOutput | null>(null);
     const [loadingFeedback, setLoadingFeedback] = useState(true);
+    const [timeTaken, setTimeTaken] = useState<number | null>(null);
 
     useEffect(() => {
         if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
@@ -44,9 +47,29 @@ function ResultsContent() {
             return;
         }
 
+        const score = parseInt(scoreStr, 10);
+        const totalQuestions = parseInt(totalQuestionsStr, 10);
+        
+        if (startTimeStr) {
+            const startTime = parseInt(startTimeStr, 10);
+            const durationInSeconds = Math.round((Date.now() - startTime) / 1000);
+            setTimeTaken(durationInSeconds);
+
+            addLeaderboardEntry({
+                fullName,
+                score,
+                totalQuestions,
+                time: durationInSeconds,
+                quizType: quizType as 'ba' | 'atn',
+                avatar: avatarKey || defaultAvatar,
+            }).catch(error => {
+                console.error("Failed to save to leaderboard", error);
+            });
+        }
+
+
         async function getFeedback() {
             try {
-                const score = parseInt(scoreStr!, 10);
                 const aiFeedback = await generateMotivationalFeedback({
                     quizTopic: quiz.title,
                     score: score,
@@ -60,7 +83,7 @@ function ResultsContent() {
             }
         }
         getFeedback();
-    }, [quizType, fullName, scoreStr, totalQuestionsStr, router, quiz]);
+    }, [quizType, fullName, scoreStr, totalQuestionsStr, router, quiz, avatarKey, startTimeStr]);
 
     if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
         return null;
@@ -70,6 +93,10 @@ function ResultsContent() {
     const totalQuestions = parseInt(totalQuestionsStr, 10);
     const level = getLevel(score, totalQuestions);
     const Avatar = getAvatarComponent(avatarKey);
+
+    const timeFormatted = timeTaken !== null 
+        ? `${Math.floor(timeTaken / 60)}m ${ (timeTaken % 60).toString().padStart(2, '0')}s` 
+        : '...';
 
   return (
     <Card className="text-center animate-fade-in bg-card shadow-lg rounded-lg border-accent/20">
@@ -81,11 +108,20 @@ function ResultsContent() {
         <CardDescription>Has completado tu entrenamiento en Desafío Aviva.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="bg-muted p-6 rounded-lg">
-          <p className="text-lg font-semibold">Tu puntaje final es:</p>
-          <p className="text-6xl font-bold text-primary">
-            {score}<span className="text-3xl text-muted-foreground">/{totalQuestions}</span>
-          </p>
+        <div className="bg-muted p-4 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
+            <div className="p-2">
+                <p className="text-sm font-semibold text-muted-foreground">Puntaje Final</p>
+                <p className="text-5xl font-bold text-primary">
+                    {score}<span className="text-3xl text-muted-foreground">/{totalQuestions}</span>
+                </p>
+            </div>
+            <div className="p-2">
+                <p className="text-sm font-semibold text-muted-foreground">Tiempo Total</p>
+                <p className="text-5xl font-bold text-primary flex items-center justify-center gap-2">
+                    <Timer className="h-8 w-8" />
+                    {timeFormatted}
+                </p>
+            </div>
         </div>
 
         <div className="text-center">

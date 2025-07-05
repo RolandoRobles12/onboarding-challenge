@@ -1,5 +1,3 @@
-
-
 'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef } from 'react';
@@ -9,7 +7,7 @@ import type { Option } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, VolumeX } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, VolumeX, Timer } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -32,6 +30,7 @@ function QuizComponent() {
   const searchParams = useSearchParams();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [startTime, setStartTime] = useState<number | null>(null);
 
   const quizType = searchParams.get('quizType') || '';
   const fullName = searchParams.get('fullName') || '';
@@ -237,12 +236,19 @@ function QuizComponent() {
         params.set('score', gameState.score.toString());
         params.set('totalQuestions', totalQuestions.toString());
         params.set('bonusLives', bonusLivesLeft.toString());
+        if (startTime) {
+          params.set('startTime', startTime.toString());
+        }
         router.push(`/${quizType}/results?${params.toString()}`);
       }
     }
   };
 
   const startMission = () => {
+    // Only set startTime if it's the very first mission.
+    if (gameState.currentMissionIndex === 0) {
+      setStartTime(Date.now());
+    }
     setGameState(prev => ({ ...prev, showMissionIntro: false, lifeUsedMessage: null }));
   };
 
