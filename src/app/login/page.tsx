@@ -44,9 +44,9 @@ export default function LoginPage() {
         });
       }
     } catch (error: any) {
-      // Ignore the error if the user intentionally closed the sign-in popup.
-      // This is a normal user action, not an application error.
-      if (error.code === 'auth/popup-closed-by-user') {
+      // Ignore errors caused by the user closing the popup or rapid clicks,
+      // as these are normal user actions, not application errors.
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
         return;
       }
 
