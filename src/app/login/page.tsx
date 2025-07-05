@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useRouter } from 'next/navigation';
@@ -33,7 +32,7 @@ export default function LoginPage() {
       const result = await signInWithPopup(auth, provider);
       const userEmail = result.user.email;
 
-      if (userEmail && (userEmail.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail))) {
+      if (userEmail && (userEmail.toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail.toLowerCase()))) {
         router.push('/');
       } else {
         await signOut(auth);

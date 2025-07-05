@@ -1,4 +1,3 @@
-
 'use client';
 
 import * as React from 'react';
@@ -41,7 +40,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser && currentUser.email) {
-        const isAllowed = currentUser.email.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(currentUser.email);
+        const userEmail = currentUser.email.toLowerCase();
+        const isAllowed = userEmail.endsWith(`@${ALLOWED_DOMAIN}`) || ALLOWED_EMAILS.includes(userEmail);
         if (isAllowed) {
           setUser(currentUser);
         } else {
