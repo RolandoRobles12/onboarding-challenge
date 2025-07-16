@@ -10,7 +10,7 @@ export type AvatarInfo = {
 export const avatarData: { [key: string]: AvatarInfo } = {
   'bot': { name: 'Estratega de Compra', Icon: Bot },
   'rocket': { name: 'Impulsor de Negocios', Icon: Rocket },
-  'graduation-cap': { name: 'Visionaria Contigo', Icon: GraduationCap },
+  'graduation-cap': { name: 'Visionario Contigo', Icon: GraduationCap },
   'compass': { name: 'Explorador de Oportunidades', Icon: Compass },
 };
 
