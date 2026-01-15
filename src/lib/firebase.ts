@@ -1,6 +1,7 @@
 
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,6 +14,7 @@ const firebaseConfig = {
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
+let db: Firestore | null = null;
 
 // Check if all required environment variables are present.
 // An empty string is not a valid value for most of these.
@@ -25,10 +27,12 @@ if (firebaseConfigIsValid) {
   try {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
+    db = getFirestore(app);
   } catch (error) {
     console.error("Firebase initialization failed:", error);
     // If initialization fails, ensure auth remains null.
     auth = null;
+    db = null;
   }
 } else {
     // Only log warning in development to avoid spamming production logs
@@ -37,4 +41,4 @@ if (firebaseConfigIsValid) {
     }
 }
 
-export { auth };
+export { auth, db };
