@@ -6,21 +6,39 @@ import { auth } from '@/lib/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { isUserAllowed } from '@/lib/auth-utils';
+import { getUserProfile, createUserProfile, checkWhitelist, markWhitelistAsUsed } from '@/lib/firestore-service';
+import type { UserProfile, UserRole } from '@/lib/types-scalable';
+import { Timestamp } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
+  profile: UserProfile | null;
   loading: boolean;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
+  hasRole: (roles: UserRole | UserRole[]) => boolean;
+  isAdmin: boolean;
+  isTrainer: boolean;
+  isSeller: boolean;
 }
 
 const AuthContext = React.createContext<AuthContextType>({
   user: null,
+  profile: null,
   loading: true,
   logout: async () => {},
+  refreshProfile: async () => {},
+  hasRole: () => false,
+  isAdmin: false,
+  isTrainer: false,
+  isSeller: false,
 });
+
+const DEFAULT_ORG_ID = 'aviva-credito';
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = React.useState<User | null>(null);
+  const [profile, setProfile] = React.useState<UserProfile | null>(null);
   const [loading, setLoading] = React.useState(true);
 
   const isFirebaseConfigured = !!auth;
@@ -28,18 +46,91 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const logout = async () => {
     if (auth) {
       await signOut(auth);
+      setProfile(null);
     }
   };
-  
+
+  const refreshProfile = React.useCallback(async () => {
+    if (!user) {
+      setProfile(null);
+      return;
+    }
+
+    try {
+      const userProfile = await getUserProfile(user.uid);
+      setProfile(userProfile);
+    } catch (error) {
+      console.error('Error refreshing profile:', error);
+    }
+  }, [user]);
+
+  const loadOrCreateUserProfile = React.useCallback(async (currentUser: User) => {
+    try {
+      // Intentar cargar el perfil existente
+      let userProfile = await getUserProfile(currentUser.uid);
+
+      // Si no existe, crear uno nuevo
+      if (!userProfile) {
+        console.log('Creating new user profile for:', currentUser.email);
+
+        // Verificar whitelist para determinar el rol
+        let role: UserRole = 'seller'; // Rol por defecto
+        let whitelistEntry = null;
+
+        if (currentUser.email) {
+          whitelistEntry = await checkWhitelist(currentUser.email, DEFAULT_ORG_ID);
+          if (whitelistEntry) {
+            role = whitelistEntry.role;
+          }
+        }
+
+        // Crear el perfil
+        await createUserProfile(currentUser.uid, {
+          organizationId: DEFAULT_ORG_ID,
+          email: currentUser.email || '',
+          displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
+          photoURL: currentUser.photoURL || undefined,
+          role: role,
+          selectedAvatar: 'bot',
+          level: 1,
+          totalXP: 0,
+          badges: [],
+          active: true,
+        });
+
+        // Marcar whitelist como usada si corresponde
+        if (whitelistEntry) {
+          await markWhitelistAsUsed(whitelistEntry.id);
+        }
+
+        // Cargar el perfil recién creado
+        userProfile = await getUserProfile(currentUser.uid);
+      }
+
+      setProfile(userProfile);
+    } catch (error) {
+      console.error('Error loading/creating user profile:', error);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: 'No se pudo cargar tu perfil de usuario. Intenta de nuevo más tarde.',
+      });
+    }
+  }, []);
+
   React.useEffect(() => {
     if (!isFirebaseConfigured) {
       setLoading(false);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (isUserAllowed(currentUser?.email)) {
         setUser(currentUser);
+
+        if (currentUser) {
+          await loadOrCreateUserProfile(currentUser);
+        }
       } else {
         // If there is a user, it means they were not allowed.
         // Sign them out and show a message.
@@ -52,12 +143,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           signOut(auth);
         }
         setUser(null);
+        setProfile(null);
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [isFirebaseConfigured]);
+  }, [isFirebaseConfigured, loadOrCreateUserProfile]);
 
   if (!isFirebaseConfigured) {
     return (
@@ -90,7 +182,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     );
   }
 
-  const value = { user, loading, logout };
+  // Helper functions for role checking
+  const hasRole = React.useCallback((roles: UserRole | UserRole[]): boolean => {
+    if (!profile) return false;
+    const roleArray = Array.isArray(roles) ? roles : [roles];
+    return roleArray.includes(profile.role);
+  }, [profile]);
+
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
+  const isTrainer = profile?.role === 'trainer' || isAdmin;
+  const isSeller = profile?.role === 'seller';
+
+  const value = {
+    user,
+    profile,
+    loading,
+    logout,
+    refreshProfile,
+    hasRole,
+    isAdmin,
+    isTrainer,
+    isSeller,
+  };
 
   return (
     <AuthContext.Provider value={value}>
