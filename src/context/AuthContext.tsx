@@ -84,18 +84,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }
         }
 
-        // Crear el perfil
+        // Crear el perfil con estructura simplificada
         await createUserProfile(currentUser.uid, {
-          organizationId: DEFAULT_ORG_ID,
           email: currentUser.email || '',
-          displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
-          photoURL: currentUser.photoURL || undefined,
-          role: role,
-          selectedAvatar: 'bot',
-          level: 1,
-          totalXP: 0,
-          badges: [],
-          active: true,
+          nombre: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
+          rol: role,
+          producto: whitelistEntry?.assignedKiosko, // Usar como producto por ahora
         });
 
         // Marcar whitelist como usada si corresponde
@@ -186,12 +180,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const hasRole = React.useCallback((roles: UserRole | UserRole[]): boolean => {
     if (!profile) return false;
     const roleArray = Array.isArray(roles) ? roles : [roles];
-    return roleArray.includes(profile.role);
+    return roleArray.includes(profile.rol);
   }, [profile]);
 
-  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin';
-  const isTrainer = profile?.role === 'trainer' || isAdmin;
-  const isSeller = profile?.role === 'seller';
+  const isAdmin = profile?.rol === 'admin' || profile?.rol === 'super_admin';
+  const isTrainer = profile?.rol === 'trainer' || isAdmin;
+  const isSeller = profile?.rol === 'seller';
 
   const value = {
     user,

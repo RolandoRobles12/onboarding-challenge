@@ -180,32 +180,34 @@ export interface QuestionOption {
 // ============================================================================
 
 export interface UserProfile {
-  id: string; // mismo que Firebase Auth UID
-  organizationId: string;
+  uid: string; // ID único de Firebase Auth
   email: string;
-  displayName: string;
-  photoURL?: string;
-
-  // Información laboral
-  employeeId?: string;
-  role: UserRole;
-  assignedKiosko?: string;
-  trainerId?: string; // ID del capacitador asignado
-
-  // Perfil de gamificación
-  selectedAvatar: string;
-  level: number;
-  totalXP: number;
-  badges: string[]; // IDs de badges obtenidos
-
-  // Estadísticas
-  stats: UserStats;
+  nombre: string;
+  rol: UserRole;
+  producto?: string; // ID del producto asignado (opcional para admins)
 
   // Metadata
-  active: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
+}
+
+// Interfaz extendida para compatibilidad con código legacy
+export interface UserProfileExtended extends UserProfile {
+  id: string; // alias de uid para compatibilidad
+  organizationId?: string;
+  displayName: string; // alias de nombre
+  photoURL?: string;
+  employeeId?: string;
+  assignedKiosko?: string;
+  trainerId?: string;
+  selectedAvatar?: string;
+  level?: number;
+  totalXP?: number;
+  badges?: string[];
+  stats?: UserStats;
+  active?: boolean;
   lastLoginAt?: Timestamp;
+  role: UserRole; // alias de rol
 }
 
 export interface UserStats {
