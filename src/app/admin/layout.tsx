@@ -20,7 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useState } from 'react';
-import AvivaLogo from '@/components/AvivaLogo';
+import { AvivaLogo } from '@/components/AvivaLogo';
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
