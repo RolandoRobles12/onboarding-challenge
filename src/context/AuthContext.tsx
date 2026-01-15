@@ -78,23 +78,60 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         let whitelistEntry = null;
 
         if (currentUser.email) {
-          whitelistEntry = await checkWhitelist(currentUser.email, DEFAULT_ORG_ID);
-          if (whitelistEntry) {
-            role = whitelistEntry.role;
+          try {
+            whitelistEntry = await checkWhitelist(currentUser.email, DEFAULT_ORG_ID);
+            if (whitelistEntry) {
+              role = whitelistEntry.role;
+              console.log('Found whitelist entry, role:', role);
+            } else {
+              // Si no está en whitelist pero es email autorizado, dar super_admin
+              const allowedEmails = ['rolando.9834@gmail.com', 'admin@avivacredito.com'];
+              if (allowedEmails.includes(currentUser.email.toLowerCase())) {
+                role = 'super_admin';
+                console.log('Email autorizado sin whitelist, asignando super_admin');
+              }
+            }
+          } catch (error) {
+            console.error('Error checking whitelist:', error);
+            // Si hay error (ej: colección no existe), usar emails autorizados
+            const allowedEmails = ['rolando.9834@gmail.com', 'admin@avivacredito.com'];
+            if (currentUser.email && allowedEmails.includes(currentUser.email.toLowerCase())) {
+              role = 'super_admin';
+              console.log('Whitelist no disponible, usando email autorizado para super_admin');
+            }
           }
         }
 
         // Crear el perfil con estructura simplificada
-        await createUserProfile(currentUser.uid, {
+        const profileData: {
+          email: string;
+          nombre: string;
+          rol: UserRole;
+          producto?: string;
+        } = {
           email: currentUser.email || '',
           nombre: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
           rol: role,
-          producto: whitelistEntry?.assignedKiosko, // Usar como producto por ahora
-        });
+        };
+
+        // Solo agregar producto si existe
+        if (whitelistEntry?.assignedKiosko) {
+          profileData.producto = whitelistEntry.assignedKiosko;
+        }
+
+        console.log('Creating user profile with data:', profileData);
+        await createUserProfile(currentUser.uid, profileData);
+        console.log('User profile created successfully');
 
         // Marcar whitelist como usada si corresponde
         if (whitelistEntry) {
-          await markWhitelistAsUsed(whitelistEntry.id);
+          try {
+            await markWhitelistAsUsed(whitelistEntry.id);
+            console.log('Whitelist marked as used');
+          } catch (error) {
+            console.error('Error marking whitelist as used:', error);
+            // No es crítico, continuar
+          }
         }
 
         // Cargar el perfil recién creado
