@@ -82,14 +82,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div className="p-4 border-b border-white/10">
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10">
-                  <AvatarImage src={profile?.photoURL} />
                   <AvatarFallback className="bg-primary text-primary-foreground">
-                    {profile?.displayName?.charAt(0) || 'A'}
+                    {profile?.nombre?.charAt(0) || 'A'}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{profile?.displayName}</p>
-                  <p className="text-xs text-white/70 capitalize">{profile?.role.replace('_', ' ')}</p>
+                  <p className="text-sm font-medium truncate">{profile?.nombre}</p>
+                  <p className="text-xs text-white/70 capitalize">{profile?.rol.replace('_', ' ')}</p>
                 </div>
               </div>
             </div>

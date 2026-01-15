@@ -32,7 +32,7 @@ export function AdminRoute({ children, requiredRoles = ['super_admin', 'admin'] 
       }
 
       // Verificar si el usuario tiene el rol requerido
-      const hasRequiredRole = requiredRoles.includes(profile.role as any);
+      const hasRequiredRole = requiredRoles.includes(profile.rol as any);
 
       if (!hasRequiredRole) {
         // Redirigir a la página principal si no tiene permisos
@@ -74,7 +74,7 @@ export function AdminRoute({ children, requiredRoles = ['super_admin', 'admin'] 
   }
 
   // Verificar permisos antes de mostrar contenido
-  const hasRequiredRole = requiredRoles.includes(profile.role as any);
+  const hasRequiredRole = requiredRoles.includes(profile.rol as any);
 
   if (!hasRequiredRole) {
     return (
@@ -85,7 +85,7 @@ export function AdminRoute({ children, requiredRoles = ['super_admin', 'admin'] 
           </CardHeader>
           <CardContent>
             <p>No tienes permisos para acceder a esta sección.</p>
-            <p className="text-sm text-muted-foreground mt-2">Tu rol: {profile.role}</p>
+            <p className="text-sm text-muted-foreground mt-2">Tu rol: {profile.rol}</p>
           </CardContent>
         </Card>
       </div>

@@ -397,7 +397,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
     const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as UserProfile : null;
+    return docSnap.exists() ? { uid: docSnap.id, ...docSnap.data() } as UserProfile : null;
   } catch (error) {
     console.error('Error getting user profile:', error);
     throw error;
@@ -406,22 +406,13 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 
 export async function createUserProfile(
   userId: string,
-  profile: Omit<UserProfile, 'id' | 'createdAt' | 'updatedAt' | 'stats'>
+  profile: Omit<UserProfile, 'uid' | 'createdAt' | 'updatedAt'>
 ): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
     await setDoc(docRef, {
+      uid: userId,
       ...profile,
-      stats: {
-        quizzesCompleted: 0,
-        quizzesAttempted: 0,
-        totalScore: 0,
-        averageScore: 0,
-        totalTimeSpent: 0,
-        perfectScores: 0,
-        currentStreak: 0,
-        longestStreak: 0,
-      },
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
     });
@@ -437,7 +428,6 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
     await updateDoc(docRef, {
       ...updates,
       updatedAt: Timestamp.now(),
-      lastLoginAt: Timestamp.now(),
     } as DocumentData);
   } catch (error) {
     console.error('Error updating user profile:', error);
