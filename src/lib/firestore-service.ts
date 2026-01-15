@@ -410,12 +410,23 @@ export async function createUserProfile(
 ): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
-    await setDoc(docRef, {
+
+    // Filtrar campos undefined
+    const data: any = {
       uid: userId,
-      ...profile,
+      email: profile.email,
+      nombre: profile.nombre,
+      rol: profile.rol,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
-    });
+    };
+
+    // Solo agregar producto si tiene valor
+    if (profile.producto) {
+      data.producto = profile.producto;
+    }
+
+    await setDoc(docRef, data);
   } catch (error) {
     console.error('Error creating user profile:', error);
     throw error;
@@ -638,13 +649,17 @@ export async function checkWhitelist(email: string, orgId: string = DEFAULT_ORG_
     const snapshot = await getDocs(q);
 
     if (snapshot.empty) {
+      console.log('No whitelist entry found for:', email);
       return null;
     }
 
-    return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as WhitelistEntry;
-  } catch (error) {
-    console.error('Error checking whitelist:', error);
-    throw error;
+    const entry = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as WhitelistEntry;
+    console.log('Whitelist entry found:', entry);
+    return entry;
+  } catch (error: any) {
+    // Si la colección no existe o hay error de permisos, no es crítico
+    console.warn('Could not check whitelist (collection may not exist):', error?.message);
+    return null; // Retornar null en lugar de lanzar error
   }
 }
 
