@@ -126,7 +126,7 @@ async function migrateProducts() {
       organizationId: ORG_ID,
       createdBy: USER_ID,
       createdAt: serverTimestamp(),
-      updatedAt: Timestamp.now(),
+      updatedAt: serverTimestamp(),
     });
     console.log(`✅ Producto creado: ${product.name} (${product.id})`);
   }
