@@ -10,7 +10,7 @@
  */
 
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, Timestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 // Configuración de Firebase (usar las mismas variables de entorno)
 const firebaseConfig = {
@@ -102,8 +102,8 @@ function convertQuestion(q: any, productId: string, category: string): any {
     timesUsed: 0,
     averageCorrectRate: 0,
     createdBy: USER_ID,
-    createdAt: Timestamp.now(),
-    updatedAt: Timestamp.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   };
 }
 
@@ -125,7 +125,7 @@ async function migrateProducts() {
       ...product,
       organizationId: ORG_ID,
       createdBy: USER_ID,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
       updatedAt: Timestamp.now(),
     });
     console.log(`✅ Producto creado: ${product.name} (${product.id})`);
@@ -218,9 +218,9 @@ async function migrateQuizzes(questionIds: { [category: string]: string[] }) {
     tags: ['certificación', 'ba', 'promotores'],
     order: 0,
     createdBy: USER_ID,
-    createdAt: Timestamp.now(),
-    updatedAt: Timestamp.now(),
-    publishedAt: Timestamp.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    publishedAt: serverTimestamp(),
   };
 
   // Calcular total de preguntas
@@ -253,7 +253,7 @@ async function migrateAchievements() {
       xpReward: 50,
       order: 0,
       active: true,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
     },
     {
       id: 'perfectionist',
@@ -270,7 +270,7 @@ async function migrateAchievements() {
       xpReward: 100,
       order: 1,
       active: true,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
     },
     {
       id: 'speedster',
@@ -287,7 +287,7 @@ async function migrateAchievements() {
       xpReward: 75,
       order: 2,
       active: true,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
     },
     {
       id: 'no-errors',
@@ -303,7 +303,7 @@ async function migrateAchievements() {
       xpReward: 80,
       order: 3,
       active: true,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
     },
   ];
 
@@ -334,8 +334,8 @@ async function createOrganization() {
       maxAttemptsPerQuiz: -1, // Ilimitado
       leaderboardVisibility: 'public' as const,
     },
-    createdAt: Timestamp.now(),
-    updatedAt: Timestamp.now(),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   };
 
   const docRef = doc(db, 'organizations', ORG_ID);

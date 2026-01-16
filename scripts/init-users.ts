@@ -11,7 +11,7 @@
  */
 
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, collection, doc, setDoc, Timestamp } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 // Configuración de Firebase
 const firebaseConfig = {
@@ -88,7 +88,7 @@ async function addToWhitelist(entry: WhitelistData, addedBy: string = 'init-scri
       email: entry.email,
       role: entry.role,
       addedBy: addedBy,
-      addedAt: Timestamp.now(),
+      addedAt: serverTimestamp(),
       used: false,
     };
 

@@ -16,6 +16,7 @@ import {
   orderBy,
   limit,
   Timestamp,
+  serverTimestamp,
   writeBatch,
   increment,
   onSnapshot,
@@ -98,8 +99,8 @@ export async function createOrganization(org: Omit<Organization, 'id'>): Promise
     const docRef = doc(getCollectionRef(COLLECTIONS.ORGANIZATIONS));
     await setDoc(docRef, {
       ...org,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     return docRef.id;
   } catch (error) {
@@ -148,8 +149,8 @@ export async function createProduct(
     await setDoc(docRef, {
       ...product,
       createdBy: userId,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     return docRef.id;
   } catch (error) {
@@ -163,7 +164,7 @@ export async function updateProduct(productId: string, updates: Partial<Product>
     const docRef = getDocRef(COLLECTIONS.PRODUCTS, productId);
     await updateDoc(docRef, {
       ...updates,
-      updatedAt: Timestamp.now(),
+      updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
     console.error('Error updating product:', error);
@@ -235,8 +236,8 @@ export async function createQuiz(
       ...quiz,
       version: 1,
       createdBy: userId,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     return docRef.id;
   } catch (error) {
@@ -251,7 +252,7 @@ export async function updateQuiz(quizId: string, updates: Partial<Quiz>): Promis
     await updateDoc(docRef, {
       ...updates,
       version: increment(1),
-      updatedAt: Timestamp.now(),
+      updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
     console.error('Error updating quiz:', error);
@@ -264,8 +265,8 @@ export async function publishQuiz(quizId: string): Promise<void> {
     const docRef = getDocRef(COLLECTIONS.QUIZZES, quizId);
     await updateDoc(docRef, {
       published: true,
-      publishedAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      publishedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   } catch (error) {
     console.error('Error publishing quiz:', error);
@@ -357,8 +358,8 @@ export async function createQuestion(
       timesUsed: 0,
       averageCorrectRate: 0,
       createdBy: userId,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
     return docRef.id;
   } catch (error) {
@@ -372,7 +373,7 @@ export async function updateQuestion(questionId: string, updates: Partial<Questi
     const docRef = getDocRef(COLLECTIONS.QUESTIONS, questionId);
     await updateDoc(docRef, {
       ...updates,
-      updatedAt: Timestamp.now(),
+      updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
     console.error('Error updating question:', error);
@@ -417,8 +418,8 @@ export async function createUserProfile(
       email: profile.email,
       nombre: profile.nombre,
       rol: profile.rol,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
     // Solo agregar producto si tiene valor
@@ -438,7 +439,7 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
     await updateDoc(docRef, {
       ...updates,
-      updatedAt: Timestamp.now(),
+      updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
     console.error('Error updating user profile:', error);
@@ -608,7 +609,7 @@ export async function createAchievement(
     const docRef = doc(getCollectionRef(COLLECTIONS.ACHIEVEMENTS));
     await setDoc(docRef, {
       ...achievement,
-      createdAt: Timestamp.now(),
+      createdAt: serverTimestamp(),
     });
     return docRef.id;
   } catch (error) {
@@ -629,7 +630,7 @@ export async function addToWhitelist(
     await setDoc(docRef, {
       ...entry,
       used: false,
-      addedAt: Timestamp.now(),
+      addedAt: serverTimestamp(),
     });
     return docRef.id;
   } catch (error) {
@@ -728,8 +729,8 @@ export async function batchCreateQuestions(
         timesUsed: 0,
         averageCorrectRate: 0,
         createdBy: userId,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
       ids.push(docRef.id);
     }
