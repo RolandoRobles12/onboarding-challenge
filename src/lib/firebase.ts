@@ -1,7 +1,7 @@
 
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
-import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getAuth, connectAuthEmulator, type Auth } from 'firebase/auth';
+import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -28,6 +28,19 @@ if (firebaseConfigIsValid) {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     db = getFirestore(app);
+
+    // Conectar a los emuladores cuando el projectId es "demo-*" (desarrollo local)
+    // Firebase convention: demo-* projects automatically use emulators
+    const isDemo = firebaseConfig.projectId?.startsWith('demo-');
+    if (isDemo && typeof window !== 'undefined') {
+      // Evitar reconectar si ya se hizo
+      const w = window as Window & { __fbEmulatorsConnected?: boolean };
+      if (!w.__fbEmulatorsConnected) {
+        w.__fbEmulatorsConnected = true;
+        connectFirestoreEmulator(db, 'localhost', 8080);
+        connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+      }
+    }
   } catch (error) {
     console.error("Firebase initialization failed:", error);
     // If initialization fails, ensure auth remains null.
