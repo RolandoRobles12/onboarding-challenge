@@ -144,11 +144,11 @@ export default function QuestionsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!profile?.id || !selectedProductId) {
+    if (!selectedProductId) {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Falta información requerida.',
+        description: 'Selecciona un producto primero.',
       });
       return;
     }
@@ -205,7 +205,7 @@ export default function QuestionsPage() {
           description: 'La pregunta se actualizó correctamente.',
         });
       } else {
-        await createQuestion(questionData, profile.id);
+        await createQuestion(questionData, profile?.uid || 'admin');
         toast({
           title: 'Pregunta creada',
           description: 'La pregunta se creó correctamente.',
@@ -266,9 +266,9 @@ export default function QuestionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Banco de Preguntas</h1>
+          <h1 className="text-2xl font-bold">Preguntas</h1>
           <p className="text-muted-foreground">
-            Gestiona el repositorio de preguntas para tus quizzes
+            Crea y organiza preguntas individuales. Luego úsalas en tus Evaluaciones.
           </p>
         </div>
 

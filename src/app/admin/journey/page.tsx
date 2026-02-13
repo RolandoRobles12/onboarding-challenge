@@ -219,7 +219,8 @@ export default function JourneyPage() {
   };
 
   const handleSave = async () => {
-    if (!selectedProductId || !profile?.uid) return;
+    if (!selectedProductId) return;
+    const userId = profile?.uid || 'admin';
     if (!journeyName.trim()) {
       toast({ variant: 'destructive', title: 'Error', description: 'Ingresa un nombre para la ruta.' });
       return;
@@ -236,7 +237,7 @@ export default function JourneyPage() {
           steps: stepsWithOrder,
           active: true,
         },
-        profile.uid,
+        userId,
         journey?.id
       );
       toast({ title: 'Ruta guardada', description: 'La ruta del vendedor se guardó correctamente.' });

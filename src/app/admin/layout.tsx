@@ -29,9 +29,9 @@ const navigation = [
   { name: 'Productos', href: '/admin/products', icon: Package },
   { name: 'Rutas del Vendedor', href: '/admin/journey', icon: Route },
   { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
-  { name: 'Banco de Preguntas', href: '/admin/questions', icon: HelpCircle },
+  { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
   { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
-  { name: 'Quizzes', href: '/admin/quizzes', icon: FileQuestion },
+  { name: 'Evaluaciones', href: '/admin/quizzes', icon: FileQuestion },
   { name: 'Usuarios', href: '/admin/users', icon: Users },
   { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
 ];

@@ -142,7 +142,7 @@ export default function OnboardingFieldsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.uid) return;
+    const userId = profile?.uid || 'admin';
     if (!form.label.trim() || !form.fieldKey.trim()) {
       toast({ variant: 'destructive', title: 'Error', description: 'El nombre y la clave son obligatorios.' });
       return;
@@ -170,7 +170,7 @@ export default function OnboardingFieldsPage() {
         await updateOnboardingField(editingField.id, data);
         toast({ title: 'Campo actualizado' });
       } else {
-        await createOnboardingField(data, profile.uid);
+        await createOnboardingField(data, userId);
         toast({ title: 'Campo creado' });
       }
 
@@ -272,7 +272,6 @@ export default function OnboardingFieldsPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 mt-0.5">
-                    <span className="text-xs text-muted-foreground font-mono">key: {field.fieldKey}</span>
                     {field.fieldType === 'select' && field.options && (
                       <span className="text-xs text-muted-foreground">{field.options.length} opciones</span>
                     )}
@@ -359,21 +358,6 @@ export default function OnboardingFieldsPage() {
                   onChange={(e) => handleLabelChange(e.target.value)}
                   placeholder="Ej: Fecha de ingreso, Capacitador, Sucursal..."
                   required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="fieldKey">
-                  Clave del campo *
-                  <span className="ml-2 text-xs text-muted-foreground font-normal">(identificador único, solo letras y guiones bajos)</span>
-                </Label>
-                <Input
-                  id="fieldKey"
-                  value={form.fieldKey}
-                  onChange={(e) => setForm({ ...form, fieldKey: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') })}
-                  placeholder="fecha_ingreso"
-                  required
-                  className="font-mono text-sm"
                 />
               </div>
 

@@ -21,9 +21,9 @@ export default function AdminDashboard() {
       href: '/admin/products',
     },
     {
-      title: 'Quizzes',
+      title: 'Evaluaciones',
       value: loadingQuizzes ? '...' : quizzes.length,
-      description: 'Quizzes publicados',
+      description: 'Evaluaciones publicadas',
       icon: FileQuestion,
       color: 'text-green-500',
       href: '/admin/quizzes',
@@ -39,7 +39,7 @@ export default function AdminDashboard() {
     {
       title: 'Tasa de Completado',
       value: '0%',
-      description: 'Porcentaje de quizzes completados',
+      description: 'Porcentaje de evaluaciones completadas',
       icon: TrendingUp,
       color: 'text-orange-500',
       href: '/admin/analytics',
@@ -54,8 +54,8 @@ export default function AdminDashboard() {
       icon: Package,
     },
     {
-      title: 'Crear Quiz',
-      description: 'Diseña un nuevo quiz con el constructor visual',
+      title: 'Crear Evaluación',
+      description: 'Diseña una nueva evaluación con el constructor visual',
       href: '/admin/quizzes/new',
       icon: FileQuestion,
     },
@@ -79,7 +79,7 @@ export default function AdminDashboard() {
       <div>
         <h1 className="text-3xl font-bold text-foreground">Panel de Administración</h1>
         <p className="text-muted-foreground mt-2">
-          Bienvenido al panel de control de Desafío Aviva. Gestiona productos, quizzes y usuarios desde aquí.
+          Bienvenido al panel de control de Desafío Aviva. Gestiona productos, evaluaciones y usuarios desde aquí.
         </p>
       </div>
 
@@ -180,7 +180,7 @@ export default function AdminDashboard() {
       {/* Recent Quizzes */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold">Quizzes Recientes</h2>
+          <h2 className="text-xl font-bold">Evaluaciones Recientes</h2>
           <Link href="/admin/quizzes">
             <Button variant="outline" size="sm">Ver todos</Button>
           </Link>
@@ -196,9 +196,9 @@ export default function AdminDashboard() {
           <Card>
             <CardContent className="py-8 text-center">
               <FileQuestion className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">No hay quizzes aún.</p>
+              <p className="text-muted-foreground">No hay evaluaciones aún.</p>
               <Link href="/admin/quizzes/new">
-                <Button className="mt-4" variant="outline">Crear Primer Quiz</Button>
+                <Button className="mt-4" variant="outline">Crear Primera Evaluación</Button>
               </Link>
             </CardContent>
           </Card>
