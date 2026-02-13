@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { quizzes } from '@/lib/questions';
 import type { Option } from '@/lib/types';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FloatingParticles, StreakCounter, MissionCompleteBanner } from '@/components/GamificationEffects';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -50,7 +52,11 @@ function QuizComponent() {
     lifeUsedMessage: null as string | null,
     mistakeMadeInMission: false,
     lastAnswerWasCorrect: false,
+    streak: 0,
+    showMissionComplete: false,
   });
+  const [showParticles, setShowParticles] = useState(false);
+  const [particleType, setParticleType] = useState<'correct' | 'wrong'>('correct');
 
   const quizType = searchParams.get('quizType') || '';
   const fullName = searchParams.get('fullName') || '';
@@ -148,6 +154,11 @@ function QuizComponent() {
         }
       }
 
+      // Trigger particle effect
+      setParticleType(isCorrect ? 'correct' : 'wrong');
+      setShowParticles(true);
+      setTimeout(() => setShowParticles(false), 1500);
+
       setGameState(prev => ({
         ...prev,
         isAnswered: true,
@@ -158,6 +169,7 @@ function QuizComponent() {
         specialFeedback: feedback,
         bonusLives: prev.bonusLives + bonusLivesChange,
         lastAnswerWasCorrect: isCorrect,
+        streak: isCorrect ? prev.streak + 1 : 0,
       }));
   };
 
@@ -412,6 +424,9 @@ function QuizComponent() {
 
   return (
     <div className="space-y-6">
+      {/* Floating particles on answer */}
+      <FloatingParticles trigger={showParticles} type={particleType} />
+
       <AlertDialog open={gameState.isConfirming} onOpenChange={(open) => !open && handleConfirmAnswer(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -429,7 +444,16 @@ function QuizComponent() {
 
       <div className="flex justify-between items-center space-x-4">
         <div className="space-y-2 flex-grow">
-          <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-muted-foreground">Pregunta {questionsAnswered + 1} de {totalQuestions}</p>
+            <StreakCounter streak={gameState.streak} />
+          </div>
+          <motion.div
+            initial={false}
+            animate={{ scaleX: progressValue / 100 }}
+            style={{ transformOrigin: 'left' }}
+          >
+          </motion.div>
           <Progress value={progressValue} className="transition-all duration-500 rounded-lg h-3" />
         </div>
         <div className="flex items-center gap-2">
@@ -454,7 +478,15 @@ function QuizComponent() {
         </div>
       </div>
       <audio ref={audioRef} src="https://storage.googleapis.com/proudcity/mebanenc/uploads/2021/03/placeholder-audio.mp3" loop />
-      <Card key={questionKey} className="animate-fade-in bg-card shadow-lg rounded-lg border-primary/20">
+      <AnimatePresence mode="wait">
+      <motion.div
+        key={questionKey}
+        initial={{ opacity: 0, x: 40 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -40 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+      >
+      <Card className="bg-card shadow-lg rounded-lg border-primary/20">
         <CardHeader>
           <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
           <CardDescription>{currentMission.title}</CardDescription>
@@ -494,6 +526,8 @@ function QuizComponent() {
           </CardFooter>
         )}
       </Card>
+      </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

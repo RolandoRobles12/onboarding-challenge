@@ -5,19 +5,20 @@ import { Button } from '@/components/ui/button';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/AuthContext';
-import { Award, LogOut, Trophy } from 'lucide-react';
+import { Award, LogOut, Trophy, Rocket, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getAvatarComponent } from '@/lib/avatars';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useProducts } from '@/hooks/use-firestore';
+import { cn } from '@/lib/utils';
 
 function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
     if (data.length === 0) {
         return <p className="p-4 text-center text-muted-foreground">Aún no hay participantes. ¡Sé el primero!</p>;
     }
-
     return (
         <Table>
             <TableHeader>
@@ -34,7 +35,7 @@ function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
                     const minutes = Math.floor(entry.time / 60);
                     const seconds = entry.time % 60;
                     return (
-                        <TableRow key={entry.id}>
+                        <TableRow key={entry.id} className={cn(index === 0 && 'bg-yellow-50')}>
                             <TableCell className="font-medium">
                                 <div className="flex justify-center items-center">
                                     {index === 0 ? <Award className="h-5 w-5 text-yellow-500" /> : index + 1}
@@ -49,14 +50,17 @@ function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
                                     </div>
                                 </div>
                             </TableCell>
-                            <TableCell className="text-right">{entry.score}/{entry.totalQuestions}</TableCell>
-                            <TableCell className="text-right">{`${minutes}m ${seconds.toString().padStart(2, '0')}s`}</TableCell>
+                            <TableCell className="text-right font-mono">
+                                <span className="font-semibold">{entry.score}</span>
+                                <span className="text-muted-foreground">/{entry.totalQuestions}</span>
+                            </TableCell>
+                            <TableCell className="text-right font-mono text-sm">{`${minutes}m ${seconds.toString().padStart(2, '0')}s`}</TableCell>
                         </TableRow>
                     );
                 })}
             </TableBody>
         </Table>
-    )
+    );
 }
 
 function LeaderboardSkeleton() {
@@ -65,18 +69,49 @@ function LeaderboardSkeleton() {
             {[...Array(5)].map((_, i) => (
                 <div key={i} className="flex items-center space-x-4 p-2">
                     <Skeleton className="h-8 w-8 rounded-full" />
-                    <div className="space-y-2 flex-grow">
-                        <Skeleton className="h-4 w-3/4" />
-                    </div>
+                    <div className="space-y-2 flex-grow"><Skeleton className="h-4 w-3/4" /></div>
                     <Skeleton className="h-4 w-1/4" />
                 </div>
             ))}
         </div>
-    )
+    );
+}
+
+const FALLBACK_PRODUCTS = [
+    { id: 'ba', name: 'Promotores BA', shortName: 'BA', description: 'Domina los secretos de Aviva Tu Compra y prepárate para el éxito.', color: '#E85D26', targetAudience: 'Para el producto Aviva Tu Compra' },
+    { id: 'atn', name: 'Aviva Tu Negocio / Contigo', shortName: 'ATN', description: 'Conviértete en experto de Aviva Tu Negocio y Aviva Contigo.', color: '#1A56DB', targetAudience: 'Para Promotores y Gerentes' },
+];
+
+function ProductCard({ product }: { product: typeof FALLBACK_PRODUCTS[0] }) {
+    return (
+        <Card className="bg-card hover:shadow-xl transition-all duration-300 rounded-xl border-2 border-transparent hover:border-primary/30 group overflow-hidden">
+            <div className="h-2 w-full" style={{ backgroundColor: product.color }} />
+            <CardHeader>
+                <div className="flex items-center gap-3 mb-1">
+                    <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md" style={{ backgroundColor: product.color }}>
+                        {product.shortName}
+                    </div>
+                    <CardTitle className="text-xl font-headline text-accent leading-tight">{product.name}</CardTitle>
+                </div>
+                {product.targetAudience && (
+                    <CardDescription className="text-xs">{product.targetAudience}</CardDescription>
+                )}
+            </CardHeader>
+            <CardContent>
+                <p className="mb-6 text-card-foreground/80 text-sm leading-relaxed">{product.description}</p>
+                <Button asChild size="lg" className="w-full rounded-lg text-white font-semibold shadow-md transition-transform group-hover:scale-[1.02]" style={{ backgroundColor: product.color }}>
+                    <Link href={`/${product.id}`}>
+                        Iniciar Misión <Rocket className="ml-2 h-4 w-4" />
+                    </Link>
+                </Button>
+            </CardContent>
+        </Card>
+    );
 }
 
 export default function Home() {
-  const { user, logout } = useAuth();
+  const { user, profile, logout } = useAuth();
+  const { products, loading: loadingProducts } = useProducts();
   const [leaderboardBA, setLeaderboardBA] = useState<LeaderboardEntry[]>([]);
   const [leaderboardATN, setLeaderboardATN] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,10 +119,7 @@ export default function Home() {
   useEffect(() => {
     async function fetchLeaderboards() {
         try {
-            const [baData, atnData] = await Promise.all([
-                getLeaderboard('ba'),
-                getLeaderboard('atn')
-            ]);
+            const [baData, atnData] = await Promise.all([getLeaderboard('ba'), getLeaderboard('atn')]);
             setLeaderboardBA(baData);
             setLeaderboardATN(atnData);
         } catch (error) {
@@ -98,7 +130,13 @@ export default function Home() {
     }
     fetchLeaderboards();
   }, []);
-  
+
+  const displayProducts = (!loadingProducts && products.length > 0)
+    ? products.map(p => ({ id: p.id, name: p.name, shortName: p.shortName, description: p.description, color: p.color, targetAudience: p.targetAudience }))
+    : FALLBACK_PRODUCTS;
+
+  const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
+
   return (
     <ProtectedRoute>
       <div className="flex flex-col min-h-screen bg-background">
@@ -108,29 +146,56 @@ export default function Home() {
               <Link href="/" className="flex-grow flex justify-center">
                 <AvivaLogo className="h-12 sm:h-16 w-auto" />
               </Link>
-              <div className="absolute right-0">
-                  {user && (
-                      <Button variant="ghost" onClick={logout} className="text-accent-foreground hover:bg-accent/20">
-                          <LogOut className="mr-2 h-4 w-4" />
-                          Salir
-                      </Button>
-                  )}
+              <div className="absolute right-0 flex items-center gap-2">
+                {isAdmin && (
+                  <Link href="/admin">
+                    <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 hidden sm:flex gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5" /> Admin
+                    </Button>
+                  </Link>
+                )}
+                {user && (
+                  <Button variant="ghost" onClick={logout} className="text-accent-foreground hover:bg-accent/20">
+                    <LogOut className="mr-2 h-4 w-4" />
+                    <span className="hidden sm:inline">Salir</span>
+                  </Button>
+                )}
               </div>
             </div>
             <h1 className="text-3xl sm:text-5xl font-bold font-headline">Desafío Aviva</h1>
             <p className="mt-2 text-base sm:text-lg text-accent-foreground/80">
-              { user ? `Bienvenido de nuevo, ${user.displayName?.split(' ')[0]}` : 'Tu aventura de conocimiento ha comenzado.'}
+              {user ? `Bienvenido de nuevo, ${user.displayName?.split(' ')[0] || 'Explorador'}` : 'Tu aventura de conocimiento ha comenzado.'}
             </p>
           </div>
         </header>
 
         <main className="flex-grow flex flex-col items-center p-4 md:p-8 space-y-8 md:space-y-12">
+            {/* Products */}
             <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
-                <Card className="bg-card shadow-lg rounded-lg border-primary/20">
+                <h2 className="text-xl font-bold mb-4 text-center text-foreground/80">Elige tu misión</h2>
+                {loadingProducts ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <Skeleton className="h-48" />
+                        <Skeleton className="h-48" />
+                    </div>
+                ) : (
+                    <div className={cn(
+                        'grid gap-6',
+                        displayProducts.length === 1 ? 'grid-cols-1 max-w-sm mx-auto' :
+                        displayProducts.length <= 2 ? 'grid-cols-1 md:grid-cols-2' :
+                        'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+                    )}>
+                        {displayProducts.map((product) => <ProductCard key={product.id} product={product} />)}
+                    </div>
+                )}
+            </div>
+
+            {/* Leaderboard */}
+            <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
+                <Card className="bg-card shadow-lg rounded-xl border-primary/20">
                     <CardHeader>
                         <CardTitle className="text-2xl font-headline text-accent flex items-center gap-2">
-                            <Trophy className="text-yellow-500" />
-                            Salón de la Fama
+                            <Trophy className="text-yellow-500" /> Salón de la Fama
                         </CardTitle>
                         <CardDescription>Los 5 mejores exploradores por puntaje y tiempo. ¡Supera sus récords!</CardDescription>
                     </CardHeader>
@@ -140,49 +205,9 @@ export default function Home() {
                                 <TabsTrigger value="ba">Promotores BA</TabsTrigger>
                                 <TabsTrigger value="atn">Aviva Tu Negocio y Contigo</TabsTrigger>
                             </TabsList>
-                            <TabsContent value="ba">
-                                {loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboardBA} />}
-                            </TabsContent>
-                            <TabsContent value="atn">
-                                {loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboardATN} />}
-                            </TabsContent>
+                            <TabsContent value="ba">{loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboardBA} />}</TabsContent>
+                            <TabsContent value="atn">{loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboardATN} />}</TabsContent>
                         </Tabs>
-                    </CardContent>
-                </Card>
-            </div>
-
-            <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-                <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
-                    <CardHeader>
-                        <CardTitle className="text-2xl font-headline text-accent">Promotores BA</CardTitle>
-                        <CardDescription>Para el producto Aviva Tu Compra.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="mb-6 text-card-foreground/80">
-                        Comienza tu misión para dominar los secretos de Aviva Tu Compra y prepárate para el éxito.
-                        </p>
-                        <Button asChild size="lg" className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90">
-                        <Link href="/ba">
-                            Iniciar Misión BA <span role="img" aria-label="cohete" className="ml-2">🚀</span>
-                        </Link>
-                        </Button>
-                    </CardContent>
-                </Card>
-
-                <Card className="bg-card hover:shadow-xl transition-shadow duration-300 rounded-lg border border-primary/20">
-                    <CardHeader>
-                        <CardTitle className="text-2xl font-headline text-accent">Aviva Tu Negocio y Aviva Contigo</CardTitle>
-                        <CardDescription>Para Promotores y Gerentes.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <p className="mb-6 text-card-foreground/80">
-                        Embárcate en esta aventura para convertirte en un experto de Aviva Tu Negocio y Aviva Contigo.
-                        </p>
-                        <Button asChild size="lg" className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90">
-                        <Link href="/atn">
-                            Iniciar Misión Aviva Contigo o Aviva Tu Negocio <span role="img" aria-label="cohete" className="ml-2">🚀</span>
-                        </Link>
-                        </Button>
                     </CardContent>
                 </Card>
             </div>
@@ -195,5 +220,5 @@ export default function Home() {
         </footer>
       </div>
     </ProtectedRoute>
-  )
+  );
 }
