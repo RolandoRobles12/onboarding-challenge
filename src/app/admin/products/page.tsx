@@ -30,7 +30,6 @@ export default function ProductsPage() {
     description: '',
     icon: 'package',
     color: '#23cd7d',
-    targetAudience: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -47,7 +46,6 @@ export default function ProductsPage() {
         description: product.description,
         icon: product.icon || 'package',
         color: product.color,
-        targetAudience: product.targetAudience,
       });
     } else {
       setEditingProduct(null);
@@ -56,7 +54,6 @@ export default function ProductsPage() {
         description: '',
         icon: 'package',
         color: '#23cd7d',
-        targetAudience: '',
       });
     }
     setDialogOpen(true);
@@ -65,16 +62,9 @@ export default function ProductsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!profile?.uid) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'No se pudo identificar tu usuario.',
-      });
-      return;
-    }
-
     setSaving(true);
+
+    const userId = profile?.uid || 'admin';
 
     try {
       if (editingProduct) {
@@ -87,9 +77,9 @@ export default function ProductsPage() {
             ...formData,
             active: true,
             order: products.length,
-            createdBy: profile.uid,
+            createdBy: userId,
           },
-          profile.uid
+          userId
         );
         toast({ title: 'Producto creado', description: `${formData.name} se creó correctamente.` });
       }
@@ -163,17 +153,6 @@ export default function ProductsPage() {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     placeholder="Describe el producto y su propósito"
                     rows={3}
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="targetAudience">Audiencia Objetivo *</Label>
-                  <Input
-                    id="targetAudience"
-                    value={formData.targetAudience}
-                    onChange={(e) => setFormData({ ...formData, targetAudience: e.target.value })}
-                    placeholder="Promotores BA, Vendedores de Kiosco, etc."
                     required
                   />
                 </div>
@@ -276,11 +255,7 @@ export default function ProductsPage() {
                 <CardTitle className="mt-3">{product.name}</CardTitle>
                 <CardDescription>{product.description}</CardDescription>
               </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  <span className="font-medium">Audiencia:</span> {product.targetAudience}
-                </p>
-              </CardContent>
+              <CardContent />
             </Card>
           ))}
         </div>

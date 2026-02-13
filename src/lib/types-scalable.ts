@@ -71,7 +71,6 @@ export interface Product {
   description: string;
   icon: string; // nombre del icono de lucide-react
   color: string; // color hex para UI
-  targetAudience: string; // ej: "Promotores BA"
   active: boolean;
   order: number; // para ordenar en UI
   imageUrl?: string;
@@ -458,7 +457,6 @@ export interface ProductFormData {
   description: string;
   icon: string;
   color: string;
-  targetAudience: string;
   imageUrl?: string;
 }
 

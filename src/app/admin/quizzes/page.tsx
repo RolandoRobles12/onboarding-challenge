@@ -40,7 +40,7 @@ export default function QuizzesPage() {
     try {
       await publishQuiz(quiz.id);
       await refresh();
-      toast({ title: quiz.published ? 'Quiz despublicado' : '🚀 Quiz publicado exitosamente' });
+      toast({ title: quiz.published ? 'Evaluación despublicada' : '🚀 Evaluación publicada exitosamente' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -53,7 +53,7 @@ export default function QuizzesPage() {
     try {
       await deleteQuiz(quiz.id);
       await refresh();
-      toast({ title: 'Quiz eliminado' });
+      toast({ title: 'Evaluación eliminada' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
@@ -66,12 +66,12 @@ export default function QuizzesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Quizzes</h1>
-          <p className="text-muted-foreground mt-1">Gestiona los quizzes y sus misiones</p>
+          <h1 className="text-3xl font-bold">Evaluaciones</h1>
+          <p className="text-muted-foreground mt-1">Crea evaluaciones completas con misiones usando preguntas del banco</p>
         </div>
         <Link href="/admin/quizzes/new">
           <Button className="gap-2">
-            <Plus className="h-4 w-4" /> Nuevo Quiz
+            <Plus className="h-4 w-4" /> Nueva Evaluación
           </Button>
         </Link>
       </div>
@@ -96,13 +96,13 @@ export default function QuizzesPage() {
         <Card>
           <CardContent className="py-16 text-center">
             <FileQuestion className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-            <h2 className="text-xl font-semibold mb-2">No hay quizzes</h2>
+            <h2 className="text-xl font-semibold mb-2">No hay evaluaciones</h2>
             <p className="text-muted-foreground mb-6">
-              {search ? 'Sin resultados para tu búsqueda' : 'Crea tu primer quiz para comenzar'}
+              {search ? 'Sin resultados para tu búsqueda' : 'Crea tu primera evaluación para comenzar'}
             </p>
             <Link href="/admin/quizzes/new">
               <Button>
-                <Plus className="h-4 w-4 mr-2" /> Crear Quiz
+                <Plus className="h-4 w-4 mr-2" /> Crear Evaluación
               </Button>
             </Link>
           </CardContent>
@@ -195,7 +195,7 @@ export default function QuizzesPage() {
       <AlertDialog open={!!confirmDelete} onOpenChange={() => setConfirmDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar este quiz?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar esta evaluación?</AlertDialogTitle>
             <AlertDialogDescription>
               Se eliminará <strong>{confirmDelete?.title}</strong>. Esta acción no se puede deshacer.
             </AlertDialogDescription>

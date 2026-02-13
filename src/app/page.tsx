@@ -78,7 +78,7 @@ function LeaderboardSkeleton() {
     );
 }
 
-type ProductDisplay = { id: string; name: string; description: string; color: string; targetAudience: string };
+type ProductDisplay = { id: string; name: string; description: string; color: string };
 
 function ProductCard({ product }: { product: ProductDisplay }) {
     return (
@@ -91,9 +91,6 @@ function ProductCard({ product }: { product: ProductDisplay }) {
                     </div>
                     <CardTitle className="text-xl font-headline text-accent leading-tight">{product.name}</CardTitle>
                 </div>
-                {product.targetAudience && (
-                    <CardDescription className="text-xs">{product.targetAudience}</CardDescription>
-                )}
             </CardHeader>
             <CardContent>
                 <p className="mb-6 text-card-foreground/80 text-sm leading-relaxed">{product.description}</p>
@@ -135,7 +132,6 @@ export default function Home() {
     name: p.name,
     description: p.description,
     color: p.color,
-    targetAudience: p.targetAudience,
   }));
 
   const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
