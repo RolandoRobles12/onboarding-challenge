@@ -14,7 +14,7 @@ import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-
 import { toast } from '@/hooks/use-toast';
 import { HelpCircle, Plus, Pencil, Trash2, Search, Filter, Check, X } from 'lucide-react';
 import type { QuestionFormData, QuizDifficulty, QuestionType } from '@/lib/types-scalable';
-import { Badge } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 
 export default function QuestionsPage() {

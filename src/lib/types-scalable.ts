@@ -413,6 +413,7 @@ export interface WhitelistEntry {
   email: string;
   role: UserRole;
   assignedKiosko?: string;
+  assignedProductId?: string;
   addedBy: string;
   addedAt: Timestamp;
   used: boolean; // si ya se registró el usuario

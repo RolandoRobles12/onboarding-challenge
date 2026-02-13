@@ -675,6 +675,50 @@ export async function markWhitelistAsUsed(entryId: string): Promise<void> {
 }
 
 // ============================================================================
+// USERS - ADMIN QUERIES
+// ============================================================================
+
+export async function getAllUsers(orgId: string = DEFAULT_ORG_ID): Promise<UserProfile[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.USERS),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
+  } catch (error) {
+    console.error('Error getting all users:', error);
+    throw error;
+  }
+}
+
+export async function getWhitelistEntries(orgId: string = DEFAULT_ORG_ID): Promise<WhitelistEntry[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.WHITELIST),
+      where('organizationId', '==', orgId),
+      orderBy('addedAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as WhitelistEntry));
+  } catch (error) {
+    console.error('Error getting whitelist entries:', error);
+    // Return empty array if index doesn't exist yet
+    return [];
+  }
+}
+
+export async function deleteWhitelistEntry(entryId: string): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.WHITELIST, entryId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error deleting whitelist entry:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
 // REAL-TIME LISTENERS
 // ============================================================================
 
