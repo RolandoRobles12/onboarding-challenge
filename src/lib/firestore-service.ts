@@ -36,6 +36,8 @@ import type {
   WhitelistEntry,
   QuizAnalytics,
   Organization,
+  Journey,
+  OnboardingField,
 } from './types-scalable';
 
 // ============================================================================
@@ -53,6 +55,8 @@ const COLLECTIONS = {
   ACHIEVEMENTS: 'achievements',
   WHITELIST: 'whitelist',
   ANALYTICS: 'analytics',
+  JOURNEYS: 'journeys',
+  ONBOARDING_FIELDS: 'onboarding_fields',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -418,6 +422,7 @@ export async function createUserProfile(
       email: profile.email,
       nombre: profile.nombre,
       rol: profile.rol,
+      onboardingCompleted: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -783,6 +788,168 @@ export async function batchCreateQuestions(
     return ids;
   } catch (error) {
     console.error('Error batch creating questions:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// JOURNEYS (RUTA DEL VENDEDOR POR PRODUCTO)
+// ============================================================================
+
+export async function getJourneyByProduct(productId: string, orgId: string = DEFAULT_ORG_ID): Promise<Journey | null> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.JOURNEYS),
+      where('organizationId', '==', orgId),
+      where('productId', '==', productId),
+      where('active', '==', true),
+      limit(1)
+    );
+    const snapshot = await getDocs(q);
+    if (snapshot.empty) return null;
+    return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Journey;
+  } catch (error) {
+    console.error('Error getting journey:', error);
+    return null;
+  }
+}
+
+export async function getAllJourneys(orgId: string = DEFAULT_ORG_ID): Promise<Journey[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.JOURNEYS),
+      where('organizationId', '==', orgId)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Journey));
+  } catch (error) {
+    console.error('Error getting journeys:', error);
+    return [];
+  }
+}
+
+export async function saveJourney(
+  journey: Omit<Journey, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>,
+  userId: string,
+  existingId?: string
+): Promise<string> {
+  try {
+    if (existingId) {
+      const docRef = getDocRef(COLLECTIONS.JOURNEYS, existingId);
+      await updateDoc(docRef, { ...journey, updatedAt: serverTimestamp() } as DocumentData);
+      return existingId;
+    }
+    const docRef = doc(getCollectionRef(COLLECTIONS.JOURNEYS));
+    await setDoc(docRef, {
+      ...journey,
+      createdBy: userId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error saving journey:', error);
+    throw error;
+  }
+}
+
+export async function deleteJourney(journeyId: string): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.JOURNEYS, journeyId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error deleting journey:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// CAMPOS DE INGRESO DINÁMICOS (ONBOARDING POST-LOGIN)
+// ============================================================================
+
+export async function getOnboardingFields(orgId: string = DEFAULT_ORG_ID): Promise<OnboardingField[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.ONBOARDING_FIELDS),
+      where('organizationId', '==', orgId),
+      where('active', '==', true),
+      orderBy('order', 'asc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as OnboardingField));
+  } catch (error) {
+    console.error('Error getting onboarding fields:', error);
+    return [];
+  }
+}
+
+export async function getAllOnboardingFields(orgId: string = DEFAULT_ORG_ID): Promise<OnboardingField[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.ONBOARDING_FIELDS),
+      where('organizationId', '==', orgId),
+      orderBy('order', 'asc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as OnboardingField));
+  } catch (error) {
+    console.error('Error getting all onboarding fields:', error);
+    return [];
+  }
+}
+
+export async function createOnboardingField(
+  field: Omit<OnboardingField, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>,
+  userId: string
+): Promise<string> {
+  try {
+    const docRef = doc(getCollectionRef(COLLECTIONS.ONBOARDING_FIELDS));
+    await setDoc(docRef, {
+      ...field,
+      createdBy: userId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating onboarding field:', error);
+    throw error;
+  }
+}
+
+export async function updateOnboardingField(fieldId: string, updates: Partial<OnboardingField>): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.ONBOARDING_FIELDS, fieldId);
+    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() } as DocumentData);
+  } catch (error) {
+    console.error('Error updating onboarding field:', error);
+    throw error;
+  }
+}
+
+export async function deleteOnboardingField(fieldId: string): Promise<void> {
+  try {
+    // Soft delete
+    await updateOnboardingField(fieldId, { active: false });
+  } catch (error) {
+    console.error('Error deleting onboarding field:', error);
+    throw error;
+  }
+}
+
+export async function saveSellerOnboardingData(
+  userId: string,
+  data: Record<string, string>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.USERS, userId);
+    await updateDoc(docRef, {
+      onboardingData: data,
+      onboardingCompleted: true,
+      updatedAt: serverTimestamp(),
+    } as DocumentData);
+  } catch (error) {
+    console.error('Error saving seller onboarding data:', error);
     throw error;
   }
 }

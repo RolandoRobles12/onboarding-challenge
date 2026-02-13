@@ -68,7 +68,6 @@ export interface Product {
   id: string;
   organizationId: string;
   name: string; // ej: "Aviva Tu Compra", "Aviva Tu Negocio"
-  shortName: string; // ej: "BA", "ATN"
   description: string;
   icon: string; // nombre del icono de lucide-react
   color: string; // color hex para UI
@@ -76,7 +75,6 @@ export interface Product {
   active: boolean;
   order: number; // para ordenar en UI
   imageUrl?: string;
-  tags: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdBy: string; // userId
@@ -185,6 +183,8 @@ export interface UserProfile {
   nombre: string;
   rol: UserRole;
   producto?: string; // ID del producto asignado (opcional para admins)
+  onboardingCompleted: boolean; // si ya completó el formulario de ingreso
+  onboardingData?: Record<string, string>; // datos del formulario de ingreso (fieldKey → valor)
 
   // Metadata
   createdAt: Timestamp;
@@ -455,13 +455,70 @@ export interface QuizBuilderState {
 
 export interface ProductFormData {
   name: string;
-  shortName: string;
   description: string;
   icon: string;
   color: string;
   targetAudience: string;
-  tags: string[];
   imageUrl?: string;
+}
+
+// ============================================================================
+// JOURNEY (RUTA DEL VENDEDOR POR PRODUCTO)
+// ============================================================================
+
+export type JourneyStepType = 'info_form' | 'quiz' | 'results' | 'certificate';
+
+export interface JourneyStep {
+  id: string;
+  type: JourneyStepType;
+  order: number;
+  title: string;
+  required: boolean;
+  config: {
+    quizId?: string; // para pasos de tipo 'quiz'
+    description?: string;
+  };
+}
+
+export interface Journey {
+  id: string;
+  organizationId: string;
+  productId: string;
+  name: string;
+  description?: string;
+  steps: JourneyStep[];
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
+}
+
+// ============================================================================
+// CAMPOS DE INGRESO DINÁMICOS (ONBOARDING POST-LOGIN)
+// ============================================================================
+
+export type OnboardingFieldType = 'text' | 'select' | 'date' | 'number' | 'textarea';
+
+export interface FieldOption {
+  id: string;
+  value: string;
+  label: string;
+}
+
+export interface OnboardingField {
+  id: string;
+  organizationId: string;
+  label: string;
+  fieldKey: string; // clave única para almacenamiento, ej: 'fecha_ingreso'
+  fieldType: OnboardingFieldType;
+  placeholder?: string;
+  required: boolean;
+  options?: FieldOption[]; // solo para tipo 'select'
+  order: number;
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
 }
 
 export interface QuestionFormData {
