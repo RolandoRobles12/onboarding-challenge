@@ -1,176 +1,172 @@
 'use client';
 
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
-import { z } from 'zod';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Rocket } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Rocket } from 'lucide-react';
 import { avatarData, defaultAvatar } from '@/lib/avatars';
 import { cn } from '@/lib/utils';
-
-const formSchema = z.object({
-  fullName: z.string().min(3, { message: 'El nombre debe tener al menos 3 caracteres.' }),
-  employeeId: z.string().min(1, { message: 'El número de colaborador es requerido.' }),
-  assignedKiosk: z.string().min(2, { message: 'El kiosco asignado es requerido.' }),
-  trainingKiosk: z.string().min(2, { message: 'El kiosco de capacitación es requerido.' }),
-  trainerName: z.string().min(3, { message: 'El nombre del capacitador es requerido.' }),
-  avatar: z.string().default(defaultAvatar),
-});
-
-type UserInfoFormValues = z.infer<typeof formSchema>;
+import { getOnboardingFields } from '@/lib/firestore-service';
+import type { OnboardingField } from '@/lib/types-scalable';
 
 export function UserInfoForm({ quizType }: { quizType: string }) {
   const router = useRouter();
-  const form = useForm<UserInfoFormValues>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      fullName: '',
-      employeeId: '',
-      assignedKiosk: '',
-      trainingKiosk: '',
-      trainerName: '',
-      avatar: defaultAvatar,
-    },
-  });
+  const [fields, setFields] = useState<OnboardingField[]>([]);
+  const [loadingFields, setLoadingFields] = useState(true);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [avatar, setAvatar] = useState(defaultAvatar);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  function onSubmit(values: UserInfoFormValues) {
-    const params = new URLSearchParams({
-      quizType,
-      fullName: values.fullName,
-      employeeId: values.employeeId,
-      assignedKiosk: values.assignedKiosk,
-      trainingKiosk: values.trainingKiosk,
-      trainerName: values.trainerName,
-      avatar: values.avatar,
+  useEffect(() => {
+    getOnboardingFields()
+      .then((loaded) => {
+        setFields(loaded);
+        const initial: Record<string, string> = {};
+        loaded.forEach((f) => { initial[f.fieldKey] = ''; });
+        setValues(initial);
+      })
+      .catch(console.error)
+      .finally(() => setLoadingFields(false));
+  }, []);
+
+  const validate = () => {
+    const newErrors: Record<string, string> = {};
+    fields.forEach((field) => {
+      if (field.required && !values[field.fieldKey]?.trim()) {
+        newErrors[field.fieldKey] = `${field.label} es requerido.`;
+      }
+    });
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+    const params = new URLSearchParams({ quizType, avatar });
+    fields.forEach((field) => {
+      if (values[field.fieldKey]) {
+        params.set(field.fieldKey, values[field.fieldKey]);
+      }
     });
     router.push(`/${quizType}/quiz?${params.toString()}`);
+  };
+
+  const setValue = (key: string, val: string) =>
+    setValues((prev) => ({ ...prev, [key]: val }));
+
+  if (loadingFields) {
+    return (
+      <div className="space-y-4">
+        {[1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}
+      </div>
+    );
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-        <div className="space-y-4">
-          <div className="grid md:grid-cols-2 gap-x-6 gap-y-4">
-            <FormField
-              control={form.control}
-              name="fullName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-accent">Nombre completo</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej. Fil Castro" {...field} className="bg-muted" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {fields.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-x-6 gap-y-4">
+          {fields.map((field) => (
+            <div
+              key={field.id}
+              className={field.fieldType === 'textarea' ? 'md:col-span-2' : ''}
+            >
+              <Label className="text-accent mb-1.5 block">
+                {field.label}
+                {field.required && <span className="text-destructive ml-1">*</span>}
+              </Label>
+
+              {(field.fieldType === 'text' || field.fieldType === 'number' || field.fieldType === 'date') && (
+                <Input
+                  type={field.fieldType}
+                  placeholder={field.placeholder}
+                  value={values[field.fieldKey] || ''}
+                  onChange={(e) => setValue(field.fieldKey, e.target.value)}
+                  className="bg-muted"
+                />
               )}
-            />
-             <FormField
-              control={form.control}
-              name="assignedKiosk"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-accent">Kiosco asignado</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej. Ixtapaluca" {...field} className="bg-muted" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
+
+              {field.fieldType === 'textarea' && (
+                <Textarea
+                  placeholder={field.placeholder}
+                  value={values[field.fieldKey] || ''}
+                  onChange={(e) => setValue(field.fieldKey, e.target.value)}
+                  className="bg-muted"
+                />
               )}
-            />
-            <FormField
-              control={form.control}
-              name="trainingKiosk"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-accent">Kiosco de capacitación</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej. Chalco" {...field} className="bg-muted" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="trainerName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-accent">Nombre del capacitador</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej. Amran Frey" {...field} className="bg-muted" />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="employeeId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel className="text-accent">Número de colaborador</FormLabel>
-                  <FormControl>
-                    <Input placeholder="Ej. 48_02" {...field} className="bg-muted" />
-                  </FormControl>
-                  <FormDescription>
-                    Lo puedes encontrar en Worky → Mi perfil → No. de colaborador.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </div>
-        </div>
-        <FormField
-          control={form.control}
-          name="avatar"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-accent font-medium">Elige tu explorador</FormLabel>
-              <FormControl>
-                <RadioGroup
-                  onValueChange={field.onChange}
-                  defaultValue={field.value}
-                  className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2"
+
+              {field.fieldType === 'select' && (
+                <Select
+                  value={values[field.fieldKey] || ''}
+                  onValueChange={(val) => setValue(field.fieldKey, val)}
                 >
-                  {Object.entries(avatarData).map(([key, { name, Icon }]) => (
-                    <FormItem key={key}>
-                      <FormControl>
-                        <RadioGroupItem value={key} id={key} className="sr-only" />
-                      </FormControl>
-                      <FormLabel
-                        htmlFor={key}
-                        className={cn(
-                          'cursor-pointer rounded-lg p-4 border transition-colors w-full flex flex-col items-center justify-center gap-3 aspect-square h-full',
-                          'hover:border-primary',
-                          field.value === key ? 'border-primary bg-card border-2' : 'border-border bg-card'
-                        )}
-                      >
-                        <div className={cn(
-                            "rounded-full p-3 transition-colors",
-                            field.value === key ? 'bg-primary/10' : 'bg-muted'
-                        )}>
-                            <Icon className={cn("h-8 w-8 transition-colors", field.value === key ? 'text-primary' : 'text-muted-foreground')} />
-                        </div>
-                        <span className="font-semibold text-center text-sm text-accent">{name}</span>
-                      </FormLabel>
-                    </FormItem>
-                  ))}
-                </RadioGroup>
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-        <Button type="submit" className="w-full rounded-lg" size="lg">
-          <Rocket className="mr-2" />
-          Comenzar Desafío
-        </Button>
-      </form>
-    </Form>
+                  <SelectTrigger className="bg-muted">
+                    <SelectValue placeholder={field.placeholder || `Selecciona ${field.label}`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(field.options || []).map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              {errors[field.fieldKey] && (
+                <p className="text-sm text-destructive mt-1">{errors[field.fieldKey]}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Avatar selector */}
+      <div>
+        <Label className="text-accent font-medium block mb-2">Elige tu explorador</Label>
+        <RadioGroup
+          value={avatar}
+          onValueChange={setAvatar}
+          className="grid grid-cols-2 sm:grid-cols-4 gap-4"
+        >
+          {Object.entries(avatarData).map(([key, { name, Icon }]) => (
+            <div key={key}>
+              <RadioGroupItem value={key} id={`avatar-${key}`} className="sr-only" />
+              <Label
+                htmlFor={`avatar-${key}`}
+                className={cn(
+                  'cursor-pointer rounded-lg p-4 border transition-colors w-full flex flex-col items-center justify-center gap-3 aspect-square h-full',
+                  'hover:border-primary',
+                  avatar === key ? 'border-primary bg-card border-2' : 'border-border bg-card'
+                )}
+              >
+                <div className={cn(
+                  'rounded-full p-3 transition-colors',
+                  avatar === key ? 'bg-primary/10' : 'bg-muted'
+                )}>
+                  <Icon className={cn(
+                    'h-8 w-8 transition-colors',
+                    avatar === key ? 'text-primary' : 'text-muted-foreground'
+                  )} />
+                </div>
+                <span className="font-semibold text-center text-sm text-accent">{name}</span>
+              </Label>
+            </div>
+          ))}
+        </RadioGroup>
+      </div>
+
+      <Button type="submit" className="w-full rounded-lg" size="lg">
+        <Rocket className="mr-2" />
+        Comenzar Desafío
+      </Button>
+    </form>
   );
 }
