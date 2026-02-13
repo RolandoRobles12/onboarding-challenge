@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // DESARROLLO: permite todo. Para producción, usar reglas del FIREBASE_SETUP.md
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}
