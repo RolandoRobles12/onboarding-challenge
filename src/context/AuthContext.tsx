@@ -107,11 +107,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           email: string;
           nombre: string;
           rol: UserRole;
+          onboardingCompleted: boolean;
           producto?: string;
         } = {
           email: currentUser.email || '',
           nombre: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
           rol: role,
+          onboardingCompleted: false,
         };
 
         // Solo agregar producto si existe

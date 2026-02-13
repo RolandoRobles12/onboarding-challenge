@@ -1,56 +1,41 @@
 'use client';
 
+import React from 'react';
 import { UserInfoForm } from '@/components/UserInfoForm';
-import { quizzes } from '@/lib/questions';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useEffect, useState } from 'react';
-import { getProduct, getQuizzes } from '@/lib/firestore-service';
+import { getProduct } from '@/lib/firestore-service';
 import { Skeleton } from '@/components/ui/skeleton';
 
 type Props = {
-  params: { quizType: string };
+  params: Promise<{ quizType: string }>;
 };
 
 export default function UserInfoPage({ params }: Props) {
-  const { quizType } = params;
-  const hardcodedQuiz = quizzes[quizType];
-
-  const [productName, setProductName] = useState<string | null>(hardcodedQuiz?.title || null);
-  const [loading, setLoading] = useState(!hardcodedQuiz);
+  const resolvedParams = React.use(params);
+  const { quizType } = resolvedParams;
+  const [productName, setProductName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
-    if (hardcodedQuiz) return;
-
-    async function loadFromFirestore() {
+    async function loadProduct() {
       try {
-        // Try loading as product ID from Firestore
         const product = await getProduct(quizType);
         if (product) {
           setProductName(product.name);
-          setLoading(false);
-          return;
+        } else {
+          setNotFound(true);
         }
-
-        // Try loading as quiz ID
-        const quizzesForType = await getQuizzes(quizType, false);
-        if (quizzesForType.length > 0) {
-          setProductName(quizzesForType[0].title);
-          setLoading(false);
-          return;
-        }
-
-        setNotFound(true);
       } catch {
         setNotFound(true);
       } finally {
         setLoading(false);
       }
     }
-
-    loadFromFirestore();
-  }, [quizType, hardcodedQuiz]);
+    loadProduct();
+  }, [quizType]);
 
   if (loading) {
     return (
@@ -68,14 +53,14 @@ export default function UserInfoPage({ params }: Props) {
     );
   }
 
-  if (notFound || (!hardcodedQuiz && !productName)) {
+  if (notFound || !productName) {
     return (
       <ProtectedRoute>
         <Card className="bg-card shadow-lg rounded-lg border-destructive/20">
           <CardHeader>
-            <CardTitle className="text-destructive">Quiz no encontrado</CardTitle>
+            <CardTitle className="text-destructive">Producto no encontrado</CardTitle>
             <CardDescription>
-              El quiz o producto "{quizType}" no existe en la plataforma.
+              El producto "{quizType}" no existe en la plataforma.
             </CardDescription>
           </CardHeader>
         </Card>

@@ -36,6 +36,7 @@ export function useProducts(orgId?: string) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -64,9 +65,11 @@ export function useProducts(orgId?: string) {
     return () => {
       mounted = false;
     };
-  }, [orgId]);
+  }, [orgId, refreshCounter]);
 
-  return { products, loading, error };
+  const refresh = () => setRefreshCounter(c => c + 1);
+
+  return { products, loading, error, refresh };
 }
 
 export function useProduct(productId: string | null) {

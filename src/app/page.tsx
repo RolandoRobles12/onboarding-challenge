@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
 import { Award, LogOut, Trophy, Rocket, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -77,19 +78,16 @@ function LeaderboardSkeleton() {
     );
 }
 
-const FALLBACK_PRODUCTS = [
-    { id: 'ba', name: 'Promotores BA', shortName: 'BA', description: 'Domina los secretos de Aviva Tu Compra y prepárate para el éxito.', color: '#E85D26', targetAudience: 'Para el producto Aviva Tu Compra' },
-    { id: 'atn', name: 'Aviva Tu Negocio / Contigo', shortName: 'ATN', description: 'Conviértete en experto de Aviva Tu Negocio y Aviva Contigo.', color: '#1A56DB', targetAudience: 'Para Promotores y Gerentes' },
-];
+type ProductDisplay = { id: string; name: string; description: string; color: string; targetAudience: string };
 
-function ProductCard({ product }: { product: typeof FALLBACK_PRODUCTS[0] }) {
+function ProductCard({ product }: { product: ProductDisplay }) {
     return (
         <Card className="bg-card hover:shadow-xl transition-all duration-300 rounded-xl border-2 border-transparent hover:border-primary/30 group overflow-hidden">
             <div className="h-2 w-full" style={{ backgroundColor: product.color }} />
             <CardHeader>
                 <div className="flex items-center gap-3 mb-1">
-                    <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-md" style={{ backgroundColor: product.color }}>
-                        {product.shortName}
+                    <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md" style={{ backgroundColor: product.color }}>
+                        {product.name.charAt(0).toUpperCase()}
                     </div>
                     <CardTitle className="text-xl font-headline text-accent leading-tight">{product.name}</CardTitle>
                 </div>
@@ -112,16 +110,17 @@ function ProductCard({ product }: { product: typeof FALLBACK_PRODUCTS[0] }) {
 export default function Home() {
   const { user, profile, logout } = useAuth();
   const { products, loading: loadingProducts } = useProducts();
-  const [leaderboardBA, setLeaderboardBA] = useState<LeaderboardEntry[]>([]);
-  const [leaderboardATN, setLeaderboardATN] = useState<LeaderboardEntry[]>([]);
+  const [leaderboards, setLeaderboards] = useState<Record<string, LeaderboardEntry[]>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (loadingProducts || products.length === 0) return;
     async function fetchLeaderboards() {
         try {
-            const [baData, atnData] = await Promise.all([getLeaderboard('ba'), getLeaderboard('atn')]);
-            setLeaderboardBA(baData);
-            setLeaderboardATN(atnData);
+            const entries = await Promise.all(products.map(p => getLeaderboard(p.id)));
+            const map: Record<string, LeaderboardEntry[]> = {};
+            products.forEach((p, i) => { map[p.id] = entries[i]; });
+            setLeaderboards(map);
         } catch (error) {
             console.error("Failed to fetch leaderboards", error);
         } finally {
@@ -129,16 +128,21 @@ export default function Home() {
         }
     }
     fetchLeaderboards();
-  }, []);
+  }, [products, loadingProducts]);
 
-  const displayProducts = (!loadingProducts && products.length > 0)
-    ? products.map(p => ({ id: p.id, name: p.name, shortName: p.shortName, description: p.description, color: p.color, targetAudience: p.targetAudience }))
-    : FALLBACK_PRODUCTS;
+  const displayProducts: ProductDisplay[] = products.map(p => ({
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    color: p.color,
+    targetAudience: p.targetAudience,
+  }));
 
   const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
 
   return (
     <ProtectedRoute>
+    <SellerOnboardingGate>
       <div className="flex flex-col min-h-screen bg-background">
         <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
           <div className="max-w-7xl mx-auto text-center">
@@ -200,14 +204,24 @@ export default function Home() {
                         <CardDescription>Los 5 mejores exploradores por puntaje y tiempo. ¡Supera sus récords!</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <Tabs defaultValue="ba" className="w-full">
-                            <TabsList className="grid w-full grid-cols-2">
-                                <TabsTrigger value="ba">Promotores BA</TabsTrigger>
-                                <TabsTrigger value="atn">Aviva Tu Negocio y Contigo</TabsTrigger>
-                            </TabsList>
-                            <TabsContent value="ba">{loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboardBA} />}</TabsContent>
-                            <TabsContent value="atn">{loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboardATN} />}</TabsContent>
-                        </Tabs>
+                        {loadingProducts ? (
+                            <LeaderboardSkeleton />
+                        ) : displayProducts.length === 0 ? (
+                            <p className="p-4 text-center text-muted-foreground">No hay productos configurados aún.</p>
+                        ) : (
+                            <Tabs defaultValue={displayProducts[0]?.id} className="w-full">
+                                <TabsList className={`grid w-full grid-cols-${Math.min(displayProducts.length, 4)}`}>
+                                    {displayProducts.map(p => (
+                                        <TabsTrigger key={p.id} value={p.id}>{p.name}</TabsTrigger>
+                                    ))}
+                                </TabsList>
+                                {displayProducts.map(p => (
+                                    <TabsContent key={p.id} value={p.id}>
+                                        {loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboards[p.id] ?? []} />}
+                                    </TabsContent>
+                                ))}
+                            </Tabs>
+                        )}
                     </CardContent>
                 </Card>
             </div>
@@ -219,6 +233,7 @@ export default function Home() {
           </div>
         </footer>
       </div>
+    </SellerOnboardingGate>
     </ProtectedRoute>
   );
 }

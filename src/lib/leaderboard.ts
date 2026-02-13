@@ -7,7 +7,7 @@ export interface LeaderboardEntry {
   score: number;
   totalQuestions: number;
   time: number; // in seconds
-  quizType: 'ba' | 'atn';
+  quizType: string;
   avatar: string;
   date: string;
 }
@@ -46,7 +46,7 @@ export async function addLeaderboardEntry(entry: Omit<LeaderboardEntry, 'id' | '
  * @param quizType - The type of quiz ('ba' or 'atn').
  * @returns A promise that resolves to an array of the top 5 leaderboard entries.
  */
-export async function getLeaderboard(quizType: 'ba' | 'atn'): Promise<LeaderboardEntry[]> {
+export async function getLeaderboard(quizType: string): Promise<LeaderboardEntry[]> {
     return leaderboardData
         .filter(entry => entry.quizType === quizType)
         .sort((a, b) => {

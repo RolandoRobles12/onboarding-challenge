@@ -160,7 +160,7 @@ export default function AdminDashboard() {
                       className="h-10 w-10 rounded-lg flex items-center justify-center text-white font-bold"
                       style={{ backgroundColor: product.color }}
                     >
-                      {product.shortName}
+                      {product.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1">
                       <h3 className="font-semibold">{product.name}</h3>

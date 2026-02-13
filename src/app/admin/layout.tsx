@@ -16,6 +16,8 @@ import {
   LogOut,
   Menu,
   X,
+  Route,
+  ClipboardList,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -25,6 +27,8 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { name: 'Productos', href: '/admin/products', icon: Package },
+  { name: 'Rutas del Vendedor', href: '/admin/journey', icon: Route },
+  { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
   { name: 'Banco de Preguntas', href: '/admin/questions', icon: HelpCircle },
   { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
   { name: 'Quizzes', href: '/admin/quizzes', icon: FileQuestion },
