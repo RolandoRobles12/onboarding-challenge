@@ -83,6 +83,30 @@ function getDocRef(collectionName: string, docId: string) {
   return doc(firestore, collectionName, docId);
 }
 
+/**
+ * Elimina recursivamente los valores `undefined` de un objeto antes de enviarlo
+ * a Firestore. Firestore rechaza documentos que contengan campos con valor undefined.
+ * Solo procesa objetos planos y arrays; respeta instancias de clases (Timestamp, etc.).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function stripUndefined<T>(data: T): T {
+  if (Array.isArray(data)) {
+    return data.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  if (
+    data !== null &&
+    typeof data === 'object' &&
+    Object.getPrototypeOf(data) === Object.prototype
+  ) {
+    return Object.fromEntries(
+      Object.entries(data as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, stripUndefined(v)])
+    ) as T;
+  }
+  return data;
+}
+
 // ============================================================================
 // ORGANIZACIONES
 // ============================================================================
@@ -151,7 +175,7 @@ export async function createProduct(
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.PRODUCTS));
     await setDoc(docRef, {
-      ...product,
+      ...stripUndefined(product),
       createdBy: userId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -167,7 +191,7 @@ export async function updateProduct(productId: string, updates: Partial<Product>
   try {
     const docRef = getDocRef(COLLECTIONS.PRODUCTS, productId);
     await updateDoc(docRef, {
-      ...updates,
+      ...stripUndefined(updates),
       updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
@@ -237,7 +261,7 @@ export async function createQuiz(
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.QUIZZES));
     await setDoc(docRef, {
-      ...quiz,
+      ...stripUndefined(quiz),
       version: 1,
       createdBy: userId,
       createdAt: serverTimestamp(),
@@ -254,7 +278,7 @@ export async function updateQuiz(quizId: string, updates: Partial<Quiz>): Promis
   try {
     const docRef = getDocRef(COLLECTIONS.QUIZZES, quizId);
     await updateDoc(docRef, {
-      ...updates,
+      ...stripUndefined(updates),
       version: increment(1),
       updatedAt: serverTimestamp(),
     } as DocumentData);
@@ -358,7 +382,7 @@ export async function createQuestion(
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
     await setDoc(docRef, {
-      ...question,
+      ...stripUndefined(question),
       timesUsed: 0,
       averageCorrectRate: 0,
       createdBy: userId,
@@ -376,7 +400,7 @@ export async function updateQuestion(questionId: string, updates: Partial<Questi
   try {
     const docRef = getDocRef(COLLECTIONS.QUESTIONS, questionId);
     await updateDoc(docRef, {
-      ...updates,
+      ...stripUndefined(updates),
       updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
@@ -443,7 +467,7 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
     await updateDoc(docRef, {
-      ...updates,
+      ...stripUndefined(updates),
       updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
@@ -774,7 +798,7 @@ export async function batchCreateQuestions(
     for (const question of questions) {
       const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
       batch.set(docRef, {
-        ...question,
+        ...stripUndefined(question),
         timesUsed: 0,
         averageCorrectRate: 0,
         createdBy: userId,
@@ -836,12 +860,12 @@ export async function saveJourney(
   try {
     if (existingId) {
       const docRef = getDocRef(COLLECTIONS.JOURNEYS, existingId);
-      await updateDoc(docRef, { ...journey, updatedAt: serverTimestamp() } as DocumentData);
+      await updateDoc(docRef, { ...stripUndefined(journey), updatedAt: serverTimestamp() } as DocumentData);
       return existingId;
     }
     const docRef = doc(getCollectionRef(COLLECTIONS.JOURNEYS));
     await setDoc(docRef, {
-      ...journey,
+      ...stripUndefined(journey),
       createdBy: userId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -905,7 +929,7 @@ export async function createOnboardingField(
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.ONBOARDING_FIELDS));
     await setDoc(docRef, {
-      ...field,
+      ...stripUndefined(field),
       createdBy: userId,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -920,7 +944,7 @@ export async function createOnboardingField(
 export async function updateOnboardingField(fieldId: string, updates: Partial<OnboardingField>): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.ONBOARDING_FIELDS, fieldId);
-    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() } as DocumentData);
+    await updateDoc(docRef, { ...stripUndefined(updates), updatedAt: serverTimestamp() } as DocumentData);
   } catch (error) {
     console.error('Error updating onboarding field:', error);
     throw error;
