@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useState } from 'react';
-import { notFound, useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Star, MessageSquareQuote, Download, Timer, Trophy, Zap, Award } from 'lucide-react';
@@ -9,7 +9,6 @@ import Link from 'next/link';
 import { generateMotivationalFeedback, MotivationalFeedbackOutput } from '@/ai/flows/motivational-feedback';
 import { getAvatarComponent, defaultAvatar } from '@/lib/avatars';
 import ProtectedRoute from '@/components/ProtectedRoute';
-import { quizzes } from '@/lib/questions';
 import { addLeaderboardEntry } from '@/lib/leaderboard';
 import { motion } from 'framer-motion';
 import {
@@ -52,14 +51,13 @@ function ResultsContent() {
     const { fire: fireConfetti } = useConfetti();
 
     const quizType = searchParams.get('quizType');
-    const fullName = searchParams.get('fullName');
+    const fullName = searchParams.get('fullName') || searchParams.get('nombre') || 'Participante';
+    const quizTitle = searchParams.get('quizTitle') || 'Quiz';
     const scoreStr = searchParams.get('score');
     const totalQuestionsStr = searchParams.get('totalQuestions');
     const avatarKey = searchParams.get('avatar');
     const startTimeStr = searchParams.get('startTime');
-    const assignedKiosk = searchParams.get('assignedKiosk');
-
-    const quiz = quizzes[quizType || ''];
+    const assignedKiosk = searchParams.get('assignedKiosk') || searchParams.get('kiosco_asignado') || 'N/A';
 
     const [feedback, setFeedback] = useState<MotivationalFeedbackOutput | null>(null);
     const [loadingFeedback, setLoadingFeedback] = useState(true);
@@ -69,7 +67,7 @@ function ResultsContent() {
     const [animationReady, setAnimationReady] = useState(false);
 
     useEffect(() => {
-        if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
+        if (!quizType || !scoreStr || !totalQuestionsStr) {
             router.push('/');
             return;
         }
@@ -84,11 +82,11 @@ function ResultsContent() {
 
             addLeaderboardEntry({
                 fullName,
-                assignedKiosk: assignedKiosk || 'N/A',
+                assignedKiosk,
                 score,
                 totalQuestions,
                 time: durationInSeconds,
-                quizType: quizType as 'ba' | 'atn',
+                quizType,
                 avatar: avatarKey || defaultAvatar,
             }).catch(error => {
                 console.error("Failed to save to leaderboard", error);
@@ -108,7 +106,7 @@ function ResultsContent() {
         async function getFeedback() {
             try {
                 const aiFeedback = await generateMotivationalFeedback({
-                    quizTopic: quiz.title,
+                    quizTopic: quizTitle,
                     score: score,
                 });
                 setFeedback(aiFeedback);
@@ -120,9 +118,9 @@ function ResultsContent() {
             }
         }
         getFeedback();
-    }, [quizType, fullName, scoreStr, totalQuestionsStr, router, quiz, avatarKey, startTimeStr, assignedKiosk]);
+    }, [quizType, fullName, quizTitle, scoreStr, totalQuestionsStr, router, avatarKey, startTimeStr, assignedKiosk]);
 
-    if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
+    if (!quizType || !scoreStr || !totalQuestionsStr) {
         return null;
     }
 
