@@ -315,6 +315,19 @@ export async function publishQuiz(quizId: string): Promise<void> {
   }
 }
 
+export async function unpublishQuiz(quizId: string): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.QUIZZES, quizId);
+    await updateDoc(docRef, {
+      published: false,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error unpublishing quiz:', error);
+    throw error;
+  }
+}
+
 export async function deleteQuiz(quizId: string): Promise<void> {
   try {
     await updateQuiz(quizId, { active: false });
