@@ -49,26 +49,44 @@ function QuestionSelector({
   productId,
   selectedIds,
   onToggle,
+  onSetAll,
 }: {
   productId: string;
   selectedIds: string[];
   onToggle: (id: string) => void;
+  onSetAll: (ids: string[]) => void;
 }) {
   const { questions } = useQuestions(productId || undefined);
   const [search, setSearch] = useState('');
   const [filterDiff, setFilterDiff] = useState('all');
+  const [filterCategory, setFilterCategory] = useState('all');
+
+  const categories = Array.from(new Set(questions.map((q) => q.category).filter(Boolean))) as string[];
 
   const filtered = questions.filter((q) => {
     const matchSearch =
       q.text.toLowerCase().includes(search.toLowerCase()) ||
       (q.category || '').toLowerCase().includes(search.toLowerCase());
     const matchDiff = filterDiff === 'all' || q.difficulty === filterDiff;
-    return matchSearch && matchDiff;
+    const matchCategory = filterCategory === 'all' || q.category === filterCategory;
+    return matchSearch && matchDiff && matchCategory;
   });
+
+  const filteredIds = filtered.map((q) => q.id);
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
+
+  const handleSelectAll = () => {
+    const newIds = Array.from(new Set([...selectedIds, ...filteredIds]));
+    onSetAll(newIds);
+  };
+
+  const handleDeselectAll = () => {
+    onSetAll(selectedIds.filter((id) => !filteredIds.includes(id)));
+  };
 
   return (
     <div className="border rounded-lg p-3 bg-muted/30">
-      <div className="flex gap-2 mb-3">
+      <div className="flex gap-2 mb-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
@@ -79,17 +97,45 @@ function QuestionSelector({
           />
         </div>
         <Select value={filterDiff} onValueChange={setFilterDiff}>
-          <SelectTrigger className="w-28 h-8 text-sm">
+          <SelectTrigger className="w-24 h-8 text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
+            <SelectItem value="all">Dificultad</SelectItem>
             <SelectItem value="easy">Fácil</SelectItem>
             <SelectItem value="medium">Media</SelectItem>
             <SelectItem value="hard">Difícil</SelectItem>
           </SelectContent>
         </Select>
+        {categories.length > 0 && (
+          <Select value={filterCategory} onValueChange={setFilterCategory}>
+            <SelectTrigger className="w-32 h-8 text-sm">
+              <SelectValue placeholder="Categoría" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Categoría</SelectItem>
+              {categories.map((cat) => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
+
+      {filtered.length > 0 && (
+        <div className="flex gap-2 mb-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs gap-1"
+            onClick={allFilteredSelected ? handleDeselectAll : handleSelectAll}
+          >
+            <Check className="h-3 w-3" />
+            {allFilteredSelected ? 'Deseleccionar visibles' : `Seleccionar todas (${filtered.length})`}
+          </Button>
+        </div>
+      )}
 
       <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
         {filtered.length === 0 ? (
@@ -150,7 +196,7 @@ function QuestionSelector({
       </div>
 
       <div className="mt-2 pt-2 border-t text-xs text-muted-foreground">
-        {selectedIds.length} preguntas seleccionadas · {filtered.length} disponibles
+        {selectedIds.length} preguntas seleccionadas · {filtered.length} visibles de {questions.length} totales
       </div>
     </div>
   );
@@ -210,6 +256,12 @@ export default function NewQuizPage() {
             : [...m.questionIds, questionId],
         };
       })
+    );
+  };
+
+  const setMissionQuestions = (missionId: string, questionIds: string[]) => {
+    setMissions((prev) =>
+      prev.map((m) => (m.id === missionId ? { ...m, questionIds } : m))
     );
   };
 
@@ -525,6 +577,7 @@ export default function NewQuizPage() {
                     productId={formData.productId}
                     selectedIds={mission.questionIds}
                     onToggle={(qId) => toggleQuestion(mission.id, qId)}
+                    onSetAll={(ids) => setMissionQuestions(mission.id, ids)}
                   />
                 </div>
               </CardContent>

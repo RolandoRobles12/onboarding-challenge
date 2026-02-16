@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuizzes, useProducts } from '@/hooks/use-firestore';
-import { deleteQuiz, publishQuiz } from '@/lib/firestore-service';
+import { deleteQuiz, publishQuiz, unpublishQuiz } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,7 @@ import {
 import type { Quiz } from '@/lib/types-scalable';
 
 export default function QuizzesPage() {
-  const { quizzes, loading, refresh } = useQuizzes();
+  const { quizzes, loading, refresh } = useQuizzes(undefined, false);
   const { products } = useProducts();
   const [search, setSearch] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -38,9 +38,14 @@ export default function QuizzesPage() {
   const handlePublish = async (quiz: Quiz) => {
     setPublishingId(quiz.id);
     try {
-      await publishQuiz(quiz.id);
+      if (quiz.published) {
+        await unpublishQuiz(quiz.id);
+        toast({ title: 'Evaluación ocultada' });
+      } else {
+        await publishQuiz(quiz.id);
+        toast({ title: '🚀 Evaluación publicada exitosamente' });
+      }
       await refresh();
-      toast({ title: quiz.published ? 'Evaluación despublicada' : '🚀 Evaluación publicada exitosamente' });
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     } finally {
