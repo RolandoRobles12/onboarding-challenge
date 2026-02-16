@@ -18,22 +18,45 @@ import {
   X,
   Route,
   ClipboardList,
+  BookOpen,
+  Target,
+  GraduationCap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useState } from 'react';
 import { AvivaLogo } from '@/components/AvivaLogo';
 
-const navigation = [
+type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
+type NavSection = { section: string; items: NavItem[] };
+
+const navigation: (NavItem | NavSection)[] = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-  { name: 'Productos', href: '/admin/products', icon: Package },
-  { name: 'Rutas del Vendedor', href: '/admin/journey', icon: Route },
-  { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
-  { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
-  { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
-  { name: 'Evaluaciones', href: '/admin/quizzes', icon: FileQuestion },
-  { name: 'Usuarios', href: '/admin/users', icon: Users },
-  { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
+  {
+    section: 'Módulo: Desafíos',
+    items: [
+      { name: 'Productos', href: '/admin/products', icon: Package },
+      { name: 'Rutas del Vendedor', href: '/admin/journey', icon: Route },
+      { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
+      { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
+      { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
+      { name: 'Evaluaciones', href: '/admin/quizzes', icon: Target },
+    ],
+  },
+  {
+    section: 'Módulo: Cursos',
+    items: [
+      { name: 'Cursos', href: '/admin/courses', icon: BookOpen },
+      { name: 'Rutas de Aprendizaje', href: '/admin/learning-paths', icon: GraduationCap },
+    ],
+  },
+  {
+    section: 'Sistema',
+    items: [
+      { name: 'Usuarios', href: '/admin/users', icon: Users },
+      { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
+    ],
+  },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -70,7 +93,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 <AvivaLogo className="h-8 w-8" />
                 <div>
                   <h1 className="text-lg font-bold">Admin Panel</h1>
-                  <p className="text-xs text-white/70">Desafío Aviva</p>
+                  <p className="text-xs text-white/70">Aviva LMS</p>
                 </div>
               </div>
               <Button
@@ -100,24 +123,48 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
             {/* Navigation */}
             <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-              {navigation.map((item) => {
-                const Icon = item.icon;
-                const isActive = pathname === item.href;
-
+              {navigation.map((entry) => {
+                if ('section' in entry) {
+                  return (
+                    <div key={entry.section} className="pt-3 first:pt-0">
+                      <p className="px-3 mb-1 text-xs font-semibold text-white/40 uppercase tracking-wider">
+                        {entry.section}
+                      </p>
+                      {entry.items.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = pathname === item.href;
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className={cn(
+                              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                              isActive ? 'bg-white text-accent' : 'text-white/90 hover:bg-white/10'
+                            )}
+                            onClick={() => setSidebarOpen(false)}
+                          >
+                            <Icon className="h-5 w-5" />
+                            {item.name}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  );
+                }
+                const Icon = entry.icon;
+                const isActive = pathname === entry.href;
                 return (
                   <Link
-                    key={item.href}
-                    href={item.href}
+                    key={entry.href}
+                    href={entry.href}
                     className={cn(
                       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-white text-accent'
-                        : 'text-white/90 hover:bg-white/10'
+                      isActive ? 'bg-white text-accent' : 'text-white/90 hover:bg-white/10'
                     )}
                     onClick={() => setSidebarOpen(false)}
                   >
                     <Icon className="h-5 w-5" />
-                    {item.name}
+                    {entry.name}
                   </Link>
                 );
               })}
@@ -158,7 +205,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-foreground">
-                {navigation.find((item) => item.href === pathname)?.name || 'Admin Panel'}
+                {(() => {
+                  for (const entry of navigation) {
+                    if ('section' in entry) {
+                      const found = entry.items.find((i) => i.href === pathname);
+                      if (found) return found.name;
+                    } else if (entry.href === pathname) {
+                      return entry.name;
+                    }
+                  }
+                  return 'Admin Panel';
+                })()}
               </h2>
             </div>
 

@@ -2,234 +2,242 @@
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
-import { Award, LogOut, Trophy, Rocket, ShieldCheck } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getAvatarComponent } from '@/lib/avatars';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useProducts } from '@/hooks/use-firestore';
-import { cn } from '@/lib/utils';
+import {
+  LogOut,
+  ShieldCheck,
+  Target,
+  BookOpen,
+  Route,
+  Award,
+  ChevronRight,
+  Zap,
+  Lock,
+} from 'lucide-react';
+import type { LMSModuleCard } from '@/lib/types-lms';
 
-function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
-    if (data.length === 0) {
-        return <p className="p-4 text-center text-muted-foreground">Aún no hay participantes. ¡Sé el primero!</p>;
-    }
-    return (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    <TableHead className="w-[50px]">Pos.</TableHead>
-                    <TableHead>Explorador</TableHead>
-                    <TableHead className="text-right">Puntaje</TableHead>
-                    <TableHead className="text-right">Tiempo</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {data.map((entry, index) => {
-                    const Avatar = getAvatarComponent(entry.avatar);
-                    const minutes = Math.floor(entry.time / 60);
-                    const seconds = entry.time % 60;
-                    return (
-                        <TableRow key={entry.id} className={cn(index === 0 && 'bg-yellow-50')}>
-                            <TableCell className="font-medium">
-                                <div className="flex justify-center items-center">
-                                    {index === 0 ? <Award className="h-5 w-5 text-yellow-500" /> : index + 1}
-                                </div>
-                            </TableCell>
-                            <TableCell>
-                                <div className="flex items-center gap-3">
-                                    <Avatar className="h-8 w-8 text-muted-foreground" />
-                                    <div>
-                                        <div className="font-medium">{entry.fullName}</div>
-                                        <div className="text-xs text-muted-foreground">{entry.assignedKiosk}</div>
-                                    </div>
-                                </div>
-                            </TableCell>
-                            <TableCell className="text-right font-mono">
-                                <span className="font-semibold">{entry.score}</span>
-                                <span className="text-muted-foreground">/{entry.totalQuestions}</span>
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm">{`${minutes}m ${seconds.toString().padStart(2, '0')}s`}</TableCell>
-                        </TableRow>
-                    );
-                })}
-            </TableBody>
-        </Table>
-    );
+const LMS_MODULES: LMSModuleCard[] = [
+  {
+    id: 'challenges',
+    title: 'Desafíos',
+    description:
+      'Evaluaciones gamificadas por producto. Pon a prueba tu conocimiento, sube en el ranking y gana certificados.',
+    icon: 'Target',
+    href: '/challenges',
+    color: '#7C3AED',
+    gradient: 'from-violet-600 to-purple-700',
+    status: 'active',
+    adminHref: '/admin/quizzes',
+  },
+  {
+    id: 'courses',
+    title: 'Cursos',
+    description:
+      'Contenido estructurado con videos, presentaciones, documentos y evaluaciones. Aprende a tu ritmo.',
+    icon: 'BookOpen',
+    href: '/courses',
+    color: '#0284C7',
+    gradient: 'from-sky-500 to-blue-600',
+    status: 'coming_soon',
+    adminHref: '/admin/courses',
+  },
+  {
+    id: 'learning_paths',
+    title: 'Rutas de Aprendizaje',
+    description:
+      'Itinerarios formativos secuenciales. Combina cursos, desafíos y evaluaciones en programas completos.',
+    icon: 'Route',
+    href: '/learning-paths',
+    color: '#059669',
+    gradient: 'from-emerald-500 to-green-600',
+    status: 'coming_soon',
+    adminHref: '/admin/learning-paths',
+  },
+  {
+    id: 'certifications',
+    title: 'Mis Certificados',
+    description:
+      'Consulta todos tus certificados, fechas de vencimiento y procesos de re-certificación activos.',
+    icon: 'Award',
+    href: '/certifications',
+    color: '#D97706',
+    gradient: 'from-amber-500 to-orange-500',
+    status: 'coming_soon',
+  },
+];
+
+function ModuleIcon({ name, className }: { name: string; className?: string }) {
+  const icons: Record<string, React.ComponentType<{ className?: string }>> = {
+    Target,
+    BookOpen,
+    Route,
+    Award,
+  };
+  const Icon = icons[name] ?? Target;
+  return <Icon className={className} />;
 }
 
-function LeaderboardSkeleton() {
-    return (
-        <div className="space-y-2">
-            {[...Array(5)].map((_, i) => (
-                <div key={i} className="flex items-center space-x-4 p-2">
-                    <Skeleton className="h-8 w-8 rounded-full" />
-                    <div className="space-y-2 flex-grow"><Skeleton className="h-4 w-3/4" /></div>
-                    <Skeleton className="h-4 w-1/4" />
-                </div>
-            ))}
+function ModuleCard({ mod }: { mod: LMSModuleCard }) {
+  const isActive = mod.status === 'active';
+  const isBeta = mod.status === 'beta';
+
+  return (
+    <Card
+      className={`relative overflow-hidden border-2 transition-all duration-300 group ${
+        isActive
+          ? 'hover:shadow-xl hover:-translate-y-1 border-transparent hover:border-primary/20 cursor-pointer'
+          : 'opacity-75 border-dashed border-muted'
+      }`}
+    >
+      {/* Top color bar */}
+      <div className={`h-1.5 w-full bg-gradient-to-r ${mod.gradient}`} />
+
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between">
+          <div
+            className={`h-12 w-12 rounded-xl flex items-center justify-center text-white shadow-md bg-gradient-to-br ${mod.gradient}`}
+          >
+            <ModuleIcon name={mod.icon} className="h-6 w-6" />
+          </div>
+          {!isActive && (
+            <Badge variant="secondary" className="text-xs">
+              <Lock className="h-3 w-3 mr-1" />
+              Próximamente
+            </Badge>
+          )}
+          {isBeta && (
+            <Badge className="text-xs bg-amber-100 text-amber-800 border-amber-300">
+              <Zap className="h-3 w-3 mr-1" />
+              Beta
+            </Badge>
+          )}
         </div>
-    );
+        <CardTitle className="text-lg font-bold mt-3">{mod.title}</CardTitle>
+      </CardHeader>
+
+      <CardContent className="pt-0 space-y-4">
+        <CardDescription className="text-sm leading-relaxed text-foreground/70">
+          {mod.description}
+        </CardDescription>
+
+        {isActive ? (
+          <Button asChild className={`w-full text-white bg-gradient-to-r ${mod.gradient} hover:opacity-90`}>
+            <Link href={mod.href}>
+              Ir al módulo <ChevronRight className="ml-1 h-4 w-4" />
+            </Link>
+          </Button>
+        ) : (
+          <Button variant="outline" className="w-full" disabled>
+            Disponible pronto
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
-type ProductDisplay = { id: string; name: string; description: string; color: string };
-
-function ProductCard({ product }: { product: ProductDisplay }) {
-    return (
-        <Card className="bg-card hover:shadow-xl transition-all duration-300 rounded-xl border-2 border-transparent hover:border-primary/30 group overflow-hidden">
-            <div className="h-2 w-full" style={{ backgroundColor: product.color }} />
-            <CardHeader>
-                <div className="flex items-center gap-3 mb-1">
-                    <div className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md" style={{ backgroundColor: product.color }}>
-                        {product.name.charAt(0).toUpperCase()}
-                    </div>
-                    <CardTitle className="text-xl font-headline text-accent leading-tight">{product.name}</CardTitle>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <p className="mb-6 text-card-foreground/80 text-sm leading-relaxed">{product.description}</p>
-                <Button asChild size="lg" className="w-full rounded-lg text-white font-semibold shadow-md transition-transform group-hover:scale-[1.02]" style={{ backgroundColor: product.color }}>
-                    <Link href={`/${product.id}`}>
-                        Iniciar Misión <Rocket className="ml-2 h-4 w-4" />
-                    </Link>
-                </Button>
-            </CardContent>
-        </Card>
-    );
-}
-
-export default function Home() {
+export default function LMSDashboard() {
   const { user, profile, logout } = useAuth();
-  const { products, loading: loadingProducts } = useProducts();
-  const [leaderboards, setLeaderboards] = useState<Record<string, LeaderboardEntry[]>>({});
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (loadingProducts || products.length === 0) return;
-    async function fetchLeaderboards() {
-        try {
-            const entries = await Promise.all(products.map(p => getLeaderboard(p.id)));
-            const map: Record<string, LeaderboardEntry[]> = {};
-            products.forEach((p, i) => { map[p.id] = entries[i]; });
-            setLeaderboards(map);
-        } catch (error) {
-            console.error("Failed to fetch leaderboards", error);
-        } finally {
-            setLoading(false);
-        }
-    }
-    fetchLeaderboards();
-  }, [products, loadingProducts]);
-
-  const displayProducts: ProductDisplay[] = products.map(p => ({
-    id: p.id,
-    name: p.name,
-    description: p.description,
-    color: p.color,
-  }));
-
   const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
+  const firstName = user?.displayName?.split(' ')[0] || 'Explorador';
 
   return (
     <ProtectedRoute>
-    <SellerOnboardingGate>
-      <div className="flex flex-col min-h-screen bg-background">
-        <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
-          <div className="max-w-7xl mx-auto text-center">
-            <div className="w-full relative flex justify-center items-center mb-3">
-              <Link href="/" className="flex-grow flex justify-center">
-                <AvivaLogo className="h-12 sm:h-16 w-auto" />
-              </Link>
-              <div className="absolute right-0 flex items-center gap-2">
-                {isAdmin && (
-                  <Link href="/admin">
-                    <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 hidden sm:flex gap-1">
-                      <ShieldCheck className="h-3.5 w-3.5" /> Admin
+      <SellerOnboardingGate>
+        <div className="flex flex-col min-h-screen bg-background">
+          {/* Header */}
+          <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
+            <div className="max-w-7xl mx-auto">
+              <div className="flex items-center justify-between mb-4">
+                <Link href="/" aria-label="Aviva LMS">
+                  <AvivaLogo className="h-10 sm:h-12 w-auto" />
+                </Link>
+                <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <Link href="/admin">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 hidden sm:flex gap-1"
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" /> Admin
+                      </Button>
+                    </Link>
+                  )}
+                  {user && (
+                    <Button
+                      variant="ghost"
+                      onClick={logout}
+                      className="text-accent-foreground hover:bg-accent/20"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span className="hidden sm:inline">Salir</span>
                     </Button>
-                  </Link>
-                )}
-                {user && (
-                  <Button variant="ghost" onClick={logout} className="text-accent-foreground hover:bg-accent/20">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span className="hidden sm:inline">Salir</span>
-                  </Button>
-                )}
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h1 className="text-2xl sm:text-4xl font-bold font-headline">Aviva LMS</h1>
+                <p className="mt-1 text-sm sm:text-base text-accent-foreground/80">
+                  Bienvenido, <span className="font-semibold">{firstName}</span>. ¿Qué quieres aprender hoy?
+                </p>
               </div>
             </div>
-            <h1 className="text-3xl sm:text-5xl font-bold font-headline">Desafío Aviva</h1>
-            <p className="mt-2 text-base sm:text-lg text-accent-foreground/80">
-              {user ? `Bienvenido de nuevo, ${user.displayName?.split(' ')[0] || 'Explorador'}` : 'Tu aventura de conocimiento ha comenzado.'}
-            </p>
-          </div>
-        </header>
+          </header>
 
-        <main className="flex-grow flex flex-col items-center p-4 md:p-8 space-y-8 md:space-y-12">
-            {/* Products */}
-            <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
-                <h2 className="text-xl font-bold mb-4 text-center text-foreground/80">Elige tu misión</h2>
-                {loadingProducts ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <Skeleton className="h-48" />
-                        <Skeleton className="h-48" />
-                    </div>
-                ) : (
-                    <div className={cn(
-                        'grid gap-6',
-                        displayProducts.length === 1 ? 'grid-cols-1 max-w-sm mx-auto' :
-                        displayProducts.length <= 2 ? 'grid-cols-1 md:grid-cols-2' :
-                        'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                    )}>
-                        {displayProducts.map((product) => <ProductCard key={product.id} product={product} />)}
-                    </div>
-                )}
+          {/* Main */}
+          <main className="flex-grow p-4 md:p-8">
+            <div className="max-w-7xl mx-auto space-y-8">
+
+              {/* Module grid */}
+              <section>
+                <h2 className="text-lg font-semibold text-foreground/70 mb-4 uppercase tracking-wide text-sm">
+                  Módulos de aprendizaje
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                  {LMS_MODULES.map((mod) => (
+                    <ModuleCard key={mod.id} mod={mod} />
+                  ))}
+                </div>
+              </section>
+
+              {/* Info strip */}
+              <section className="rounded-xl border border-primary/10 bg-primary/5 p-5">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Zap className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-foreground">Plataforma en evolución</h3>
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      Aviva LMS está creciendo. Los módulos de <strong>Cursos</strong>,{' '}
+                      <strong>Rutas de Aprendizaje</strong> y <strong>Mis Certificados</strong> estarán
+                      disponibles próximamente. Por ahora, comienza con los{' '}
+                      <Link href="/challenges" className="text-primary underline underline-offset-2 font-medium">
+                        Desafíos
+                      </Link>
+                      .
+                    </p>
+                  </div>
+                </div>
+              </section>
+
             </div>
+          </main>
 
-            {/* Leaderboard */}
-            <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
-                <Card className="bg-card shadow-lg rounded-xl border-primary/20">
-                    <CardHeader>
-                        <CardTitle className="text-2xl font-headline text-accent flex items-center gap-2">
-                            <Trophy className="text-yellow-500" /> Salón de la Fama
-                        </CardTitle>
-                        <CardDescription>Los 5 mejores exploradores por puntaje y tiempo. ¡Supera sus récords!</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {loadingProducts ? (
-                            <LeaderboardSkeleton />
-                        ) : displayProducts.length === 0 ? (
-                            <p className="p-4 text-center text-muted-foreground">No hay productos configurados aún.</p>
-                        ) : (
-                            <Tabs defaultValue={displayProducts[0]?.id} className="w-full">
-                                <TabsList className={`grid w-full grid-cols-${Math.min(displayProducts.length, 4)}`}>
-                                    {displayProducts.map(p => (
-                                        <TabsTrigger key={p.id} value={p.id}>{p.name}</TabsTrigger>
-                                    ))}
-                                </TabsList>
-                                {displayProducts.map(p => (
-                                    <TabsContent key={p.id} value={p.id}>
-                                        {loading ? <LeaderboardSkeleton /> : <LeaderboardTable data={leaderboards[p.id] ?? []} />}
-                                    </TabsContent>
-                                ))}
-                            </Tabs>
-                        )}
-                    </CardContent>
-                </Card>
-            </div>
-        </main>
-
-        <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8 md:mt-12">
-          <div className="max-w-7xl mx-auto text-center text-sm">
+          {/* Footer */}
+          <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8">
+            <div className="max-w-7xl mx-auto text-center text-sm">
               <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
-          </div>
-        </footer>
-      </div>
-    </SellerOnboardingGate>
+            </div>
+          </footer>
+        </div>
+      </SellerOnboardingGate>
     </ProtectedRoute>
   );
 }
