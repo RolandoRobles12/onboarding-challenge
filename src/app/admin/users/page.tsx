@@ -52,9 +52,10 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
 
-  // Edit role dialog
+  // Edit user dialog
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [newRole, setNewRole] = useState<UserRole>('seller');
+  const [newProducto, setNewProducto] = useState<string>('');
   const [savingRole, setSavingRole] = useState(false);
 
   // Whitelist add dialog
@@ -107,15 +108,22 @@ export default function UsersPage() {
   const handleEditRole = (user: UserProfile) => {
     setEditingUser(user);
     setNewRole(user.rol);
+    setNewProducto(user.producto || '');
   };
 
   const handleSaveRole = async () => {
     if (!editingUser) return;
     setSavingRole(true);
     try {
-      await updateUserProfile(editingUser.uid, { rol: newRole });
-      setUsers((prev) => prev.map((u) => (u.uid === editingUser.uid ? { ...u, rol: newRole } : u)));
-      toast({ title: 'Rol actualizado correctamente' });
+      const updates: Partial<UserProfile> = { rol: newRole };
+      if (newProducto) updates.producto = newProducto;
+      await updateUserProfile(editingUser.uid, updates);
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.uid === editingUser.uid ? { ...u, rol: newRole, producto: newProducto || u.producto } : u
+        )
+      );
+      toast({ title: 'Usuario actualizado correctamente' });
       setEditingUser(null);
     } catch (err: any) {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -273,7 +281,7 @@ export default function UsersPage() {
                       className="gap-1 flex-shrink-0"
                       disabled={user.uid === currentUser?.uid}
                     >
-                      <UserCog className="h-3.5 w-3.5" /> Rol
+                      <UserCog className="h-3.5 w-3.5" /> Editar
                     </Button>
                   </CardContent>
                 </Card>
@@ -346,27 +354,51 @@ export default function UsersPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Edit Role Dialog */}
+      {/* Edit User Dialog */}
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cambiar Rol</DialogTitle>
+            <DialogTitle>Editar Usuario</DialogTitle>
             <DialogDescription>
-              Cambia el rol de <strong>{editingUser?.nombre || editingUser?.email}</strong>
+              Edita el rol y producto asignado a <strong>{editingUser?.nombre || editingUser?.email}</strong>
             </DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <Label>Nuevo Rol</Label>
-            <Select value={newRole} onValueChange={(v) => setNewRole(v as UserRole)}>
-              <SelectTrigger className="mt-2">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
-                  <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>Rol</Label>
+              <Select value={newRole} onValueChange={(v) => setNewRole(v as UserRole)}>
+                <SelectTrigger className="mt-2">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
+                    <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Producto asignado</Label>
+              <Select value={newProducto} onValueChange={setNewProducto}>
+                <SelectTrigger className="mt-2">
+                  <SelectValue placeholder="Sin producto asignado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Sin producto asignado</SelectItem>
+                  {products.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: p.color }} />
+                        {p.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                El producto define qué journey verá el usuario en su dashboard.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
