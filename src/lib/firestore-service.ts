@@ -39,12 +39,19 @@ import type {
   Journey,
   OnboardingField,
 } from './types-scalable';
+import type {
+  Course,
+  LearningPath,
+  CourseEnrollment,
+  LessonProgress,
+} from './types-lms';
 
 // ============================================================================
 // CONSTANTES
 // ============================================================================
 
 const COLLECTIONS = {
+  // --- Módulo: Desafíos (Challenge Module) ---
   ORGANIZATIONS: 'organizations',
   PRODUCTS: 'products',
   QUIZZES: 'quizzes',
@@ -57,6 +64,12 @@ const COLLECTIONS = {
   ANALYTICS: 'analytics',
   JOURNEYS: 'journeys',
   ONBOARDING_FIELDS: 'onboarding_fields',
+  // --- Módulo: Cursos (Course Module) ---
+  COURSES: 'courses',
+  ENROLLMENTS: 'enrollments',
+  LESSON_PROGRESS: 'lesson_progress',
+  // --- Módulo: Rutas de Aprendizaje (Learning Paths Module) ---
+  LEARNING_PATHS: 'learning_paths',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -974,6 +987,235 @@ export async function saveSellerOnboardingData(
     } as DocumentData);
   } catch (error) {
     console.error('Error saving seller onboarding data:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// LMS - MÓDULO CURSOS (Course Module)
+// ============================================================================
+
+export async function getCourses(organizationId: string = DEFAULT_ORG_ID): Promise<Course[]> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.COURSES);
+    const q = query(
+      colRef,
+      where('organizationId', '==', organizationId),
+      where('status', '==', 'published'),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Course));
+  } catch (error) {
+    console.error('Error fetching courses:', error);
+    throw error;
+  }
+}
+
+export async function getCourseById(courseId: string): Promise<Course | null> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.COURSES, courseId);
+    const snapshot = await getDoc(docRef);
+    if (!snapshot.exists()) return null;
+    return { id: snapshot.id, ...snapshot.data() } as Course;
+  } catch (error) {
+    console.error('Error fetching course:', error);
+    throw error;
+  }
+}
+
+export async function createCourse(
+  courseData: Omit<Course, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<string> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.COURSES);
+    const docRef = doc(colRef);
+    await setDoc(docRef, {
+      ...courseData,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating course:', error);
+    throw error;
+  }
+}
+
+export async function updateCourse(
+  courseId: string,
+  updates: Partial<Omit<Course, 'id' | 'createdAt'>>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.COURSES, courseId);
+    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() } as DocumentData);
+  } catch (error) {
+    console.error('Error updating course:', error);
+    throw error;
+  }
+}
+
+export async function deleteCourse(courseId: string): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.COURSES, courseId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error deleting course:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// LMS - INSCRIPCIONES (Enrollments)
+// ============================================================================
+
+export async function enrollUserInCourse(
+  enrollmentData: Omit<CourseEnrollment, 'id' | 'updatedAt'>
+): Promise<string> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
+    const docRef = doc(colRef);
+    await setDoc(docRef, {
+      ...enrollmentData,
+      status: 'enrolled',
+      completedLessonIds: [],
+      completedModuleIds: [],
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error enrolling user in course:', error);
+    throw error;
+  }
+}
+
+export async function getUserEnrollments(userId: string): Promise<CourseEnrollment[]> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
+    const q = query(colRef, where('userId', '==', userId), orderBy('enrolledAt', 'desc'));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CourseEnrollment));
+  } catch (error) {
+    console.error('Error fetching user enrollments:', error);
+    throw error;
+  }
+}
+
+export async function updateEnrollmentProgress(
+  enrollmentId: string,
+  updates: Partial<Pick<CourseEnrollment, 'completedLessonIds' | 'completedModuleIds' | 'status' | 'overallScore' | 'completedAt' | 'lastAccessedAt'>>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, enrollmentId);
+    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() } as DocumentData);
+  } catch (error) {
+    console.error('Error updating enrollment progress:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// LMS - MÓDULO RUTAS DE APRENDIZAJE (Learning Paths Module)
+// ============================================================================
+
+export async function getLearningPaths(
+  organizationId: string = DEFAULT_ORG_ID
+): Promise<LearningPath[]> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.LEARNING_PATHS);
+    const q = query(
+      colRef,
+      where('organizationId', '==', organizationId),
+      where('status', '==', 'published'),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LearningPath));
+  } catch (error) {
+    console.error('Error fetching learning paths:', error);
+    throw error;
+  }
+}
+
+export async function createLearningPath(
+  pathData: Omit<LearningPath, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<string> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.LEARNING_PATHS);
+    const docRef = doc(colRef);
+    await setDoc(docRef, {
+      ...pathData,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating learning path:', error);
+    throw error;
+  }
+}
+
+export async function updateLearningPath(
+  pathId: string,
+  updates: Partial<Omit<LearningPath, 'id' | 'createdAt'>>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.LEARNING_PATHS, pathId);
+    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() } as DocumentData);
+  } catch (error) {
+    console.error('Error updating learning path:', error);
+    throw error;
+  }
+}
+
+export async function deleteLearningPath(pathId: string): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.LEARNING_PATHS, pathId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error deleting learning path:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// LMS - PROGRESO DE LECCIONES (Lesson Progress)
+// ============================================================================
+
+export async function upsertLessonProgress(
+  progressData: Omit<LessonProgress, 'id' | 'updatedAt'>
+): Promise<void> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.LESSON_PROGRESS);
+    // Use composite key as document ID for idempotency
+    const docId = `${progressData.userId}_${progressData.lessonId}`;
+    const docRef = doc(colRef, docId);
+    await setDoc(
+      docRef,
+      { ...progressData, updatedAt: serverTimestamp() },
+      { merge: true }
+    );
+  } catch (error) {
+    console.error('Error upserting lesson progress:', error);
+    throw error;
+  }
+}
+
+export async function getLessonProgressForCourse(
+  userId: string,
+  courseId: string
+): Promise<LessonProgress[]> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.LESSON_PROGRESS);
+    const q = query(
+      colRef,
+      where('userId', '==', userId),
+      where('courseId', '==', courseId)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LessonProgress));
+  } catch (error) {
+    console.error('Error fetching lesson progress:', error);
     throw error;
   }
 }

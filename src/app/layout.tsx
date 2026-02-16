@@ -4,8 +4,8 @@ import { Toaster } from "@/components/ui/toaster"
 import { AuthProvider } from '@/context/AuthContext';
 
 export const metadata: Metadata = {
-  title: 'Desafío Aviva',
-  description: 'Proceso de onboarding gamificado para nuevos ingresos en Aviva.',
+  title: 'Aviva LMS',
+  description: 'Plataforma de aprendizaje y desarrollo para el equipo comercial de Aviva.',
 };
 
 export default function RootLayout({
