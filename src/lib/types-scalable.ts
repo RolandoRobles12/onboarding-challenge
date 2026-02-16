@@ -491,6 +491,16 @@ export interface Journey {
   createdBy: string;
 }
 
+export interface UserJourneyProgress {
+  id: string; // `${userId}_${journeyId}`
+  userId: string;
+  journeyId: string;
+  productId: string;
+  completedStepIds: string[];
+  startedAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 // ============================================================================
 // CAMPOS DE INGRESO DINÁMICOS (ONBOARDING POST-LOGIN)
 // ============================================================================

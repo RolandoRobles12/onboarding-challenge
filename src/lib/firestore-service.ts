@@ -37,6 +37,7 @@ import type {
   QuizAnalytics,
   Organization,
   Journey,
+  UserJourneyProgress,
   OnboardingField,
 } from './types-scalable';
 import type {
@@ -63,6 +64,7 @@ const COLLECTIONS = {
   WHITELIST: 'whitelist',
   ANALYTICS: 'analytics',
   JOURNEYS: 'journeys',
+  JOURNEY_PROGRESS: 'journey_progress',
   ONBOARDING_FIELDS: 'onboarding_fields',
   // --- Módulo: Cursos (Course Module) ---
   COURSES: 'courses',
@@ -909,6 +911,63 @@ export async function deleteJourney(journeyId: string): Promise<void> {
     await deleteDoc(docRef);
   } catch (error) {
     console.error('Error deleting journey:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// PROGRESO DE JOURNEY DEL USUARIO
+// ============================================================================
+
+export async function getUserJourneyProgress(
+  userId: string,
+  journeyId: string
+): Promise<UserJourneyProgress | null> {
+  try {
+    const docRef = doc(
+      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      `${userId}_${journeyId}`
+    );
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as UserJourneyProgress;
+  } catch (error) {
+    console.error('Error getting journey progress:', error);
+    return null;
+  }
+}
+
+export async function markJourneyStepComplete(
+  userId: string,
+  journeyId: string,
+  productId: string,
+  stepId: string
+): Promise<void> {
+  try {
+    const docId = `${userId}_${journeyId}`;
+    const docRef = doc(collection(db, COLLECTIONS.JOURNEY_PROGRESS), docId);
+    const snap = await getDoc(docRef);
+
+    if (!snap.exists()) {
+      await setDoc(docRef, {
+        userId,
+        journeyId,
+        productId,
+        completedStepIds: [stepId],
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      const existing = snap.data().completedStepIds as string[] ?? [];
+      if (!existing.includes(stepId)) {
+        await updateDoc(docRef, {
+          completedStepIds: [...existing, stepId],
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error marking step complete:', error);
     throw error;
   }
 }
