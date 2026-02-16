@@ -480,6 +480,13 @@ export default function LMSDashboard() {
                 <AdminPanel name={firstName} />
               ) : user && profile ? (
                 <JourneyDashboard userId={user.uid} profile={profile} />
+              ) : user && !profile ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-28 w-full rounded-xl" />
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-20 w-full rounded-xl" />
+                  ))}
+                </div>
               ) : null}
             </div>
           </main>
