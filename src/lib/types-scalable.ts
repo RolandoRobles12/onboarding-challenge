@@ -475,7 +475,24 @@ export interface JourneyStep {
   config: {
     quizId?: string; // para pasos de tipo 'quiz'
     description?: string;
+    signerIds?: string[]; // para pasos de tipo 'certificate'
   };
+}
+
+// ============================================================================
+// FIRMANTES DE CERTIFICADO
+// ============================================================================
+
+export interface CertificateSigner {
+  id: string;
+  organizationId: string;
+  name: string;
+  position: string; // cargo / título
+  active: boolean;
+  order: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
 }
 
 export interface Journey {

@@ -39,6 +39,7 @@ import type {
   Journey,
   UserJourneyProgress,
   OnboardingField,
+  CertificateSigner,
 } from './types-scalable';
 import type {
   Course,
@@ -66,6 +67,7 @@ const COLLECTIONS = {
   JOURNEYS: 'journeys',
   JOURNEY_PROGRESS: 'journey_progress',
   ONBOARDING_FIELDS: 'onboarding_fields',
+  CERTIFICATE_SIGNERS: 'certificate_signers',
   // --- Módulo: Cursos (Course Module) ---
   COURSES: 'courses',
   ENROLLMENTS: 'enrollments',
@@ -1288,6 +1290,79 @@ export async function getLessonProgressForCourse(
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LessonProgress));
   } catch (error) {
     console.error('Error fetching lesson progress:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// FIRMANTES DE CERTIFICADO
+// ============================================================================
+
+export async function getCertificateSigners(orgId: string = DEFAULT_ORG_ID): Promise<CertificateSigner[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.CERTIFICATE_SIGNERS),
+      where('organizationId', '==', orgId),
+      where('active', '==', true),
+      orderBy('order', 'asc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CertificateSigner));
+  } catch (error) {
+    console.error('Error getting certificate signers:', error);
+    return [];
+  }
+}
+
+export async function getAllCertificateSigners(orgId: string = DEFAULT_ORG_ID): Promise<CertificateSigner[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.CERTIFICATE_SIGNERS),
+      where('organizationId', '==', orgId),
+      orderBy('order', 'asc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CertificateSigner));
+  } catch (error) {
+    console.error('Error getting all certificate signers:', error);
+    return [];
+  }
+}
+
+export async function createCertificateSigner(
+  signer: Omit<CertificateSigner, 'id' | 'createdAt' | 'updatedAt'>,
+  userId: string
+): Promise<string> {
+  try {
+    const docRef = doc(getCollectionRef(COLLECTIONS.CERTIFICATE_SIGNERS));
+    await setDoc(docRef, {
+      ...signer,
+      createdBy: userId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating certificate signer:', error);
+    throw error;
+  }
+}
+
+export async function updateCertificateSigner(signerId: string, updates: Partial<CertificateSigner>): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.CERTIFICATE_SIGNERS, signerId);
+    await updateDoc(docRef, { ...stripUndefined(updates), updatedAt: serverTimestamp() } as DocumentData);
+  } catch (error) {
+    console.error('Error updating certificate signer:', error);
+    throw error;
+  }
+}
+
+export async function deleteCertificateSigner(signerId: string): Promise<void> {
+  try {
+    await updateCertificateSigner(signerId, { active: false });
+  } catch (error) {
+    console.error('Error deleting certificate signer:', error);
     throw error;
   }
 }

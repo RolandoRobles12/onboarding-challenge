@@ -1,64 +1,100 @@
 'use client'
 
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Certificate } from '@/components/Certificate';
-import { quizzes } from '@/lib/questions';
+import type { CertificateSignerData } from '@/components/Certificate';
+import { getJourneyByProduct, getCertificateSigners } from '@/lib/firestore-service';
 
 function CertificateContent() {
-    const searchParams = useSearchParams();
-    const router = useRouter();
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
-    const quizType = searchParams.get('quizType');
-    const fullName = searchParams.get('fullName');
-    const scoreStr = searchParams.get('score');
-    const totalQuestionsStr = searchParams.get('totalQuestions');
+  const quizType = searchParams.get('quizType');
+  const fullName = searchParams.get('fullName') || searchParams.get('nombre') || '';
+  const quizTitle = searchParams.get('quizTitle') || 'Quiz';
+  const scoreStr = searchParams.get('score');
+  const totalQuestionsStr = searchParams.get('totalQuestions');
 
-    const quiz = quizzes[quizType || ''];
+  const [signers, setSigners] = useState<CertificateSignerData[]>([]);
 
-    useEffect(() => {
-        if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
-            router.push('/');
-        }
-    }, [quizType, fullName, scoreStr, totalQuestionsStr, quiz, router]);
-
-
-    if (!quizType || !fullName || !scoreStr || !totalQuestionsStr || !quiz) {
-        return null;
+  useEffect(() => {
+    if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
+      router.push('/');
+      return;
     }
 
-    const score = parseInt(scoreStr, 10);
-    const totalQuestions = parseInt(totalQuestionsStr, 10);
+    // Load signers configured for this product's certificate step
+    async function loadSigners() {
+      try {
+        const [journey, allSigners] = await Promise.all([
+          getJourneyByProduct(quizType!),
+          getCertificateSigners(),
+        ]);
+
+        if (journey) {
+          const certStep = journey.steps.find(s => s.type === 'certificate');
+          const signerIds: string[] = certStep?.config?.signerIds ?? [];
+
+          if (signerIds.length > 0) {
+            // Filter and order signers by the configured IDs
+            const ordered = signerIds
+              .map(id => allSigners.find(s => s.id === id))
+              .filter((s): s is typeof allSigners[0] => s !== undefined)
+              .map(s => ({ name: s.name, position: s.position }));
+            setSigners(ordered);
+            return;
+          }
+        }
+
+        // Fallback: use first available active signers
+        if (allSigners.length > 0) {
+          setSigners(allSigners.slice(0, 2).map(s => ({ name: s.name, position: s.position })));
+        }
+      } catch {
+        // Certificate renders with default fallback signer
+      }
+    }
+
+    loadSigners();
+  }, [quizType, fullName, scoreStr, totalQuestionsStr, router]);
+
+  if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
+    return null;
+  }
+
+  const score = parseInt(scoreStr, 10);
+  const totalQuestions = parseInt(totalQuestionsStr, 10);
 
   return (
     <Certificate
-        fullName={fullName}
-        quizTitle={quiz.title}
-        score={score}
-        totalQuestions={totalQuestions}
-        date={new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+      fullName={fullName}
+      quizTitle={quizTitle}
+      score={score}
+      totalQuestions={totalQuestions}
+      date={new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
+      signers={signers}
     />
   );
 }
-
 
 export default function CertificatePage() {
   return (
     <ProtectedRoute>
       <Suspense fallback={
-          <Card className="rounded-lg">
-              <CardHeader>
-                  <CardTitle>Generando certificado...</CardTitle>
-              </CardHeader>
-              <CardContent>
-                  <p>Estamos preparando tu reconocimiento. ¡Un momento!</p>
-              </CardContent>
-          </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardTitle>Generando certificado...</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p>Estamos preparando tu reconocimiento. ¡Un momento!</p>
+          </CardContent>
+        </Card>
       }>
-          <CertificateContent />
+        <CertificateContent />
       </Suspense>
     </ProtectedRoute>
-  )
+  );
 }

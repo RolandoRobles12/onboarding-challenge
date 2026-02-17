@@ -21,6 +21,7 @@ import {
   BookOpen,
   Target,
   GraduationCap,
+  PenLine,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -37,6 +38,7 @@ const navigation: (NavItem | NavSection)[] = [
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
       { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
+      { name: 'Firmantes de Certificado', href: '/admin/certificate-signers', icon: PenLine },
       { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
-import { getQuizzes, getJourneyByProduct, saveJourney, deleteJourney } from '@/lib/firestore-service';
+import { getQuizzes, getJourneyByProduct, saveJourney, deleteJourney, getAllCertificateSigners } from '@/lib/firestore-service';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +14,7 @@ import {
   Route, Plus, Trash2, GripVertical, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw
 } from 'lucide-react';
-import type { Journey, JourneyStep, JourneyStepType } from '@/lib/types-scalable';
+import type { Journey, JourneyStep, JourneyStepType, CertificateSigner } from '@/lib/types-scalable';
 import type { Quiz } from '@/lib/types-scalable';
 
 const STEP_TYPE_CONFIG: Record<JourneyStepType, { label: string; icon: React.ElementType; defaultTitle: string }> = {
@@ -29,6 +29,7 @@ function StepCard({
   index,
   total,
   quizzes,
+  signers,
   onUpdate,
   onRemove,
   onMoveUp,
@@ -38,6 +39,7 @@ function StepCard({
   index: number;
   total: number;
   quizzes: Quiz[];
+  signers: CertificateSigner[];
   onUpdate: (s: JourneyStep) => void;
   onRemove: () => void;
   onMoveUp: () => void;
@@ -119,6 +121,49 @@ function StepCard({
           </div>
         )}
 
+        {step.type === 'certificate' && (
+          <div className="space-y-2">
+            <Label className="text-xs">Firmantes del certificado (máx. 3)</Label>
+            {signers.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">
+                No hay firmantes activos. Créalos en{' '}
+                <a href="/admin/certificate-signers" className="underline">Firmantes de Certificado</a>.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {signers.map(signer => {
+                  const selectedIds: string[] = step.config.signerIds ?? [];
+                  const checked = selectedIds.includes(signer.id);
+                  const atMax = selectedIds.length >= 3 && !checked;
+                  return (
+                    <label
+                      key={signer.id}
+                      className={`flex items-center gap-2.5 text-sm cursor-pointer rounded-md px-2 py-1.5 border transition-colors ${
+                        checked ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted/50'
+                      } ${atMax ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 accent-primary"
+                        checked={checked}
+                        disabled={atMax}
+                        onChange={() => {
+                          const next = checked
+                            ? selectedIds.filter(id => id !== signer.id)
+                            : [...selectedIds, signer.id];
+                          onUpdate({ ...step, config: { ...step.config, signerIds: next } });
+                        }}
+                      />
+                      <span className="font-medium">{signer.name}</span>
+                      <span className="text-muted-foreground">— {signer.position}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -145,9 +190,15 @@ export default function JourneyPage() {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [steps, setSteps] = useState<JourneyStep[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [signers, setSigners] = useState<CertificateSigner[]>([]);
   const [journeyName, setJourneyName] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Load signers once (not per-product)
+  useEffect(() => {
+    getAllCertificateSigners().then(setSigners).catch(() => setSigners([]));
+  }, []);
 
   useEffect(() => {
     if (!selectedProductId) return;
@@ -363,6 +414,7 @@ export default function JourneyPage() {
                           index={index}
                           total={steps.length}
                           quizzes={quizzes}
+                          signers={signers}
                           onUpdate={(s) => updateStep(index, s)}
                           onRemove={() => removeStep(index)}
                           onMoveUp={() => moveStep(index, 'up')}
