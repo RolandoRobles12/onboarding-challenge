@@ -5,8 +5,6 @@ import * as htmlToImage from 'html-to-image';
 import jsPDF from 'jspdf';
 import { Button } from '@/components/ui/button';
 import { Download, Home } from 'lucide-react';
-import { AvivaLogo } from './AvivaLogo';
-import { JaguarMascot } from './JaguarMascot';
 import Link from 'next/link';
 import type { CertificateConfig } from '@/lib/types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from '@/lib/types-scalable';
@@ -112,14 +110,12 @@ export function Certificate({
 
           {/* ── Columna izquierda: todo el contenido ── */}
           <div className="flex flex-col justify-between h-full py-8 px-10"
-            style={{ width: (cfg.mascotUrl || cfg.showMascot) ? '65%' : '100%' }}>
+            style={{ width: (cfg.mascotUrl && cfg.showMascot) ? '65%' : '100%' }}>
 
             {/* Top: logo + subtitle + title */}
             <div className="flex flex-col gap-1">
-              {(cfg.logoUrl || cfg.showLogo) && (
-                cfg.logoUrl
-                  ? <img src={cfg.logoUrl} alt="Logo" className="h-9 w-auto object-contain" style={{ maxWidth: '180px' }} />
-                  : <AvivaLogo className={`h-9 w-auto ${lightBg ? '' : 'brightness-0 invert'}`} />
+              {cfg.logoUrl && cfg.showLogo && (
+                <img src={cfg.logoUrl} alt="Logo" className="h-9 w-auto object-contain" style={{ maxWidth: '180px' }} />
               )}
               <p className="text-[10px] md:text-xs tracking-[0.35em] uppercase font-light mt-1" style={{ color: textSecondary }}>
                 {cfg.subtitle}
@@ -184,18 +180,15 @@ export function Certificate({
             </div>
           </div>
 
-          {/* ── Columna derecha: mascota ── */}
-          {(cfg.mascotUrl || cfg.showMascot) && (
+          {/* ── Columna derecha: mascota (solo si hay imagen subida) ── */}
+          {cfg.mascotUrl && cfg.showMascot && (
             <div className="flex items-end justify-center pb-0 pointer-events-none" style={{ width: '35%' }}>
-              {cfg.mascotUrl
-                ? <img
-                    src={cfg.mascotUrl}
-                    alt="Mascota"
-                    className="w-full h-auto object-contain"
-                    style={{ maxHeight: '90%', opacity: 0.95 }}
-                  />
-                : <JaguarMascot className="w-full h-auto opacity-90" style={{ maxHeight: '90%' } as React.CSSProperties} />
-              }
+              <img
+                src={cfg.mascotUrl}
+                alt="Mascota"
+                className="w-full h-auto object-contain"
+                style={{ maxHeight: '90%', opacity: 0.95 }}
+              />
             </div>
           )}
         </div>
