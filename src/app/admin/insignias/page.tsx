@@ -46,17 +46,12 @@ import { useToast } from '@/hooks/use-toast';
 import { Medal, Plus, Pencil, Trash2, Gift } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
-// ─── Presets ──────────────────────────────────────────────────────────────────
-const EMOJI_PRESETS = ['🏆','⭐','🎯','🔥','💪','🚀','🌟','💎','🥇','🎖️','🎓','🏅','⚡','🦁','🐆','🦊','🌈','🎪','🏋️','🎵'];
-const COLOR_PRESETS = [
-  { label: 'Aviva Verde',  value: '#0a6b3e' },
-  { label: 'Dorado',       value: '#b8860b' },
-  { label: 'Azul',         value: '#1a4faa' },
-  { label: 'Morado',       value: '#6a1aaa' },
-  { label: 'Rojo',         value: '#aa1a1a' },
-  { label: 'Naranja',      value: '#cc5500' },
-  { label: 'Rosa',         value: '#aa1a6a' },
-  { label: 'Marino',       value: '#0a2a4a' },
+// ─── Sugerencias de emojis (no restrictivas) ──────────────────────────────────
+const EMOJI_SUGGESTIONS = [
+  '🏆','⭐','🎯','🔥','💪','🚀','🌟','💎','🥇','🎖️',
+  '🎓','🏅','⚡','🦁','🐆','🦊','🌈','🎪','🏋️','🎵',
+  '🥈','🥉','🎁','🔑','🌺','🎯','🦋','🐉','🦅','🌙',
+  '✨','🎊','🎉','🏄','🤿','🛡️','⚔️','🔮','🧩','🎸',
 ];
 
 const DEFAULT_FORM = { name: '', description: '', emoji: '🏅', color: '#0a6b3e', category: '' };
@@ -304,43 +299,54 @@ export default function InsigniasPage() {
             <div className="space-y-1.5">
               <Label>Emoji *</Label>
               <div className="space-y-2">
-                <Input value={form.emoji} onChange={e => setForm({ ...form, emoji: e.target.value })} placeholder="🏅" className="text-2xl w-24" maxLength={8} />
-                <div className="flex flex-wrap gap-1.5">
-                  {EMOJI_PRESETS.map(e => (
-                    <button
-                      key={e}
-                      onClick={() => setForm({ ...form, emoji: e })}
-                      className={`text-xl p-1 rounded hover:bg-muted transition-colors ${form.emoji === e ? 'bg-muted ring-2 ring-primary' : ''}`}
-                    >
-                      {e}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={form.emoji}
+                    onChange={e => setForm({ ...form, emoji: e.target.value })}
+                    placeholder="🏅"
+                    className="text-2xl w-28"
+                    maxLength={8}
+                  />
+                  <span className="text-xs text-muted-foreground">Escribe cualquier emoji o símbolo</span>
                 </div>
+                <details className="group">
+                  <summary className="text-xs text-muted-foreground cursor-pointer select-none hover:text-foreground transition-colors">
+                    Sugerencias ({EMOJI_SUGGESTIONS.length}) ▸
+                  </summary>
+                  <div className="flex flex-wrap gap-1.5 mt-2 max-h-28 overflow-y-auto">
+                    {EMOJI_SUGGESTIONS.map(e => (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => setForm({ ...form, emoji: e })}
+                        className={`text-xl p-1 rounded hover:bg-muted transition-colors ${form.emoji === e ? 'bg-muted ring-2 ring-primary' : ''}`}
+                      >
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                </details>
               </div>
             </div>
 
             <div className="space-y-1.5">
               <Label>Color de fondo</Label>
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <input type="color" value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="h-9 w-12 rounded border cursor-pointer" />
-                  <Input value={form.color} onChange={e => setForm({ ...form, color: e.target.value })} className="font-mono text-sm" maxLength={7} />
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {COLOR_PRESETS.map(p => (
-                    <button
-                      key={p.value}
-                      onClick={() => setForm({ ...form, color: p.value })}
-                      className="h-7 w-7 rounded-full border-2 transition-all hover:scale-110"
-                      style={{
-                        background: p.value,
-                        borderColor: form.color === p.value ? 'white' : 'transparent',
-                        boxShadow: form.color === p.value ? '0 0 0 2px #000' : 'none',
-                      }}
-                      title={p.label}
-                    />
-                  ))}
-                </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={form.color}
+                  onChange={e => setForm({ ...form, color: e.target.value })}
+                  className="h-10 w-14 rounded border cursor-pointer p-0.5"
+                  title="Selecciona cualquier color"
+                />
+                <Input
+                  value={form.color}
+                  onChange={e => setForm({ ...form, color: e.target.value })}
+                  className="font-mono text-sm w-32"
+                  maxLength={7}
+                  placeholder="#026149"
+                />
+                <span className="text-xs text-muted-foreground">Cualquier color hex</span>
               </div>
             </div>
 

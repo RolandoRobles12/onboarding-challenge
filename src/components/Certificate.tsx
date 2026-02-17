@@ -11,6 +11,16 @@ import Link from 'next/link';
 import type { CertificateConfig } from '@/lib/types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from '@/lib/types-scalable';
 
+/** Devuelve true si el color hex es claro (necesita texto oscuro) */
+function isLightColor(hex: string): boolean {
+  const clean = hex.replace('#', '');
+  if (clean.length < 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 155;
+}
+
 export interface CertificateSignerData {
   name: string;
   position: string;
@@ -40,6 +50,14 @@ export function Certificate({
 
   // Merge with defaults so every field is always defined
   const cfg = { ...DEFAULT_CERTIFICATE_CONFIG, ...config };
+
+  // Colores adaptativos: si el fondo es claro, usar texto oscuro
+  const lightBg = isLightColor(cfg.bgColorStart);
+  const textPrimary   = lightBg ? '#111827' : '#ffffff';
+  const textSecondary = lightBg ? '#374151' : 'rgba(255,255,255,0.75)';
+  const borderColor   = lightBg ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.30)';
+  const scoreBg       = lightBg ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.15)';
+  const scoreBorder   = lightBg ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.25)';
 
   const handleDownload = async () => {
     const element = certificateRef.current;
@@ -71,74 +89,85 @@ export function Certificate({
         className="w-full max-w-4xl relative overflow-hidden"
         style={{
           aspectRatio: '1.414 / 1',
-          background: `linear-gradient(135deg, ${cfg.bgColorStart} 0%, ${cfg.bgColorEnd} 100%)`,
+          background: cfg.bgColorStart,
           fontFamily: 'Georgia, serif',
         }}
       >
         {/* Decorative borders */}
-        <div className="absolute inset-3 border border-white/30 pointer-events-none z-20" />
-        <div className="absolute inset-5 border border-white/15 pointer-events-none z-20" />
+        <div className="absolute inset-3 pointer-events-none z-20" style={{ border: `1px solid ${borderColor}` }} />
+        <div className="absolute inset-5 pointer-events-none z-20" style={{ border: `1px solid ${borderColor.replace('0.30', '0.15').replace('0.15', '0.07')}` }} />
 
         {/* Dot watermark */}
         <div
-          className="absolute inset-0 opacity-[0.04] z-0"
+          className="absolute inset-0 z-0"
           style={{
-            backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)',
+            opacity: lightBg ? 0.06 : 0.04,
+            backgroundImage: `radial-gradient(circle, ${lightBg ? '#000' : '#fff'} 1px, transparent 1px)`,
             backgroundSize: '28px 28px',
           }}
         />
 
         {/* ── Mascot (right side, behind content) ── */}
-        {cfg.showMascot && (
-          <div className="absolute right-6 bottom-0 z-10 pointer-events-none" style={{ height: '82%', aspectRatio: '200/260' }}>
-            <JaguarMascot className="h-full w-auto opacity-90" />
+        {(cfg.mascotUrl || cfg.showMascot) && (
+          <div className="absolute right-6 bottom-0 z-10 pointer-events-none" style={{ height: '82%', aspectRatio: cfg.mascotUrl ? 'auto' : '200/260' }}>
+            {cfg.mascotUrl
+              ? <img src={cfg.mascotUrl} alt="Mascota" className="h-full w-auto object-contain" style={{ opacity: 0.9 }} />
+              : <JaguarMascot className="h-full w-auto opacity-90" />
+            }
           </div>
         )}
 
         {/* ── Main content ── */}
-        <div className="relative z-30 h-full flex flex-col items-start justify-between py-8 px-12 text-white">
+        <div className="relative z-30 h-full flex flex-col items-start justify-between py-8 px-12">
 
           {/* Top row: logo + subtitle */}
           <div className="flex flex-col gap-1">
-            {cfg.showLogo && (
-              <AvivaLogo className="h-9 w-auto brightness-0 invert" />
+            {(cfg.logoUrl || cfg.showLogo) && (
+              cfg.logoUrl
+                ? <img src={cfg.logoUrl} alt="Logo" className="h-9 w-auto object-contain" style={{ maxWidth: '180px' }} />
+                : <AvivaLogo className={`h-9 w-auto ${lightBg ? '' : 'brightness-0 invert'}`} />
             )}
-            <p className="text-[10px] md:text-xs tracking-[0.35em] uppercase font-light text-white/70 mt-1">
+            <p className="text-[10px] md:text-xs tracking-[0.35em] uppercase font-light mt-1" style={{ color: textSecondary }}>
               {cfg.subtitle}
             </p>
-            <h1 className="text-base md:text-xl font-bold tracking-widest uppercase text-white">
+            <h1 className="text-base md:text-xl font-bold tracking-widest uppercase" style={{ color: textPrimary }}>
               {cfg.title}
             </h1>
           </div>
 
           {/* Center: recipient block */}
           <div className="flex flex-col gap-3 max-w-[60%]">
-            <p className="text-xs md:text-sm text-white/80 font-light tracking-wide">
+            <p className="text-xs md:text-sm font-light tracking-wide" style={{ color: textSecondary }}>
               {cfg.bodyPrefix}
             </p>
 
             {/* Name */}
             <div>
               <h2
-                className="text-2xl md:text-4xl font-bold text-white leading-tight"
-                style={{ fontFamily: 'Georgia, serif', letterSpacing: '0.03em' }}
+                className="text-2xl md:text-4xl font-bold leading-tight"
+                style={{ fontFamily: 'Georgia, serif', letterSpacing: '0.03em', color: textPrimary }}
               >
                 {fullName}
               </h2>
-              <div className="h-0.5 bg-white/50 mt-2 w-full max-w-xs" />
+              <div className="h-0.5 mt-2 w-full max-w-xs" style={{ background: lightBg ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.5)' }} />
             </div>
 
-            <p className="text-xs md:text-sm text-white/85 leading-relaxed">
+            <p className="text-xs md:text-sm leading-relaxed" style={{ color: textSecondary }}>
               {cfg.bodySuffix}{' '}
-              <strong className="text-white font-semibold">{quizTitle}</strong>{' '}
+              <strong style={{ color: textPrimary, fontWeight: 600 }}>{quizTitle}</strong>{' '}
               con una puntuación de{' '}
-              <strong className="text-white font-semibold">{percentage}%</strong>
+              <strong style={{ color: textPrimary, fontWeight: 600 }}>{percentage}%</strong>
             </p>
 
             {/* Score pill */}
-            <div className="inline-flex items-center gap-2 bg-white/15 rounded-full px-4 py-1.5 border border-white/25 self-start">
-              <span className="text-yellow-300">★</span>
-              <span className="text-sm font-semibold">{score} / {totalQuestions} correctas · {percentage}%</span>
+            <div
+              className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 self-start"
+              style={{ background: scoreBg, border: `1px solid ${scoreBorder}` }}
+            >
+              <span style={{ color: '#f59e0b' }}>★</span>
+              <span className="text-sm font-semibold" style={{ color: textPrimary }}>
+                {score} / {totalQuestions} correctas · {percentage}%
+              </span>
             </div>
           </div>
 
@@ -148,9 +177,9 @@ export function Certificate({
             <div className="flex items-end gap-8 flex-wrap">
               {displaySigners.map((signer, i) => (
                 <div key={i} className="text-center min-w-[90px]">
-                  <div className="border-t border-white/60 pt-2 mt-8">
-                    <p className="text-xs font-semibold leading-tight">{signer.name}</p>
-                    <p className="text-[10px] text-white/70 leading-tight mt-0.5">{signer.position}</p>
+                  <div className="pt-2 mt-8" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
+                    <p className="text-xs font-semibold leading-tight" style={{ color: textPrimary }}>{signer.name}</p>
+                    <p className="text-[10px] leading-tight mt-0.5" style={{ color: textSecondary }}>{signer.position}</p>
                   </div>
                 </div>
               ))}
@@ -158,9 +187,9 @@ export function Certificate({
 
             {/* Date */}
             <div className="text-right shrink-0">
-              <div className="border-t border-white/60 pt-2 mt-8 inline-block min-w-[90px]">
-                <p className="text-xs font-semibold">Fecha</p>
-                <p className="text-[10px] text-white/70 mt-0.5">{date}</p>
+              <div className="pt-2 mt-8 inline-block min-w-[90px]" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
+                <p className="text-xs font-semibold" style={{ color: textPrimary }}>Fecha</p>
+                <p className="text-[10px] mt-0.5" style={{ color: textSecondary }}>{date}</p>
               </div>
             </div>
           </div>

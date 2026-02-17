@@ -541,12 +541,15 @@ export interface CertificateConfig {
   subtitle: string;       // "Desafío Aviva"
   bodyPrefix: string;     // "Este certificado se otorga a"
   bodySuffix: string;     // "Por haber completado exitosamente el módulo de"
-  // Visuales
+  // Imágenes personalizadas (base64 data-URL o URL externa)
+  logoUrl?: string;       // imagen del logo (reemplaza al SVG AvivaLogo)
+  mascotUrl?: string;     // imagen de la mascota (reemplaza al SVG JaguarMascot)
+  // Visuales (mantenidos por compatibilidad, logoUrl/mascotUrl tienen prioridad)
   showLogo: boolean;
   showMascot: boolean;
-  // Colores (hex)
-  bgColorStart: string;   // inicio del gradiente
-  bgColorEnd: string;     // fin del gradiente
+  // Color sólido de fondo (hex)
+  bgColorStart: string;   // color de fondo (bgColorEnd = bgColorStart para fondo sólido)
+  bgColorEnd: string;
   updatedAt: Timestamp;
 }
 
@@ -557,8 +560,10 @@ export const DEFAULT_CERTIFICATE_CONFIG: Omit<CertificateConfig, 'organizationId
   bodySuffix: 'Por haber completado exitosamente el módulo de',
   showLogo: true,
   showMascot: true,
-  bgColorStart: '#0a6b3e',
-  bgColorEnd: '#1aaa64',
+  logoUrl: undefined,
+  mascotUrl: undefined,
+  bgColorStart: '#026149',
+  bgColorEnd: '#026149',
 };
 
 export interface Journey {

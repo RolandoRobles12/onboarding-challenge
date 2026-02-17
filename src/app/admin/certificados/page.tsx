@@ -50,19 +50,21 @@ import {
   UserCheck,
   Save,
   RotateCcw,
+  Upload,
+  X,
+  ImageIcon,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 const DEFAULT_SIGNER_FORM = { name: '', position: '' };
 type EditableConfig = Omit<CertificateConfig, 'organizationId' | 'updatedAt'>;
 
-const PRESET_THEMES = [
-  { label: 'Aviva Verde',      bgColorStart: '#0a6b3e', bgColorEnd: '#1aaa64' },
-  { label: 'Azul Marino',      bgColorStart: '#0a2d6b', bgColorEnd: '#1a6aaa' },
-  { label: 'Violeta',          bgColorStart: '#4a0a6b', bgColorEnd: '#8a1aaa' },
-  { label: 'Rojo Corporativo', bgColorStart: '#6b0a0a', bgColorEnd: '#aa2a1a' },
-  { label: 'Gris Elegante',    bgColorStart: '#2a2a2a', bgColorEnd: '#4a4a4a' },
-  { label: 'Dorado',           bgColorStart: '#6b4a0a', bgColorEnd: '#aa841a' },
+/** 4 opciones de color para el certificado */
+const CERT_COLORS = [
+  { label: 'Mint claro',   value: '#b0f5cd' },
+  { label: 'Verde medio',  value: '#16b877' },
+  { label: 'Verde oscuro', value: '#026149' },
+  { label: 'Blanco',       value: '#FFFFFF' },
 ];
 
 // ─── Main page ────────────────────────────────────────────────────────────────
@@ -177,6 +179,25 @@ export default function CertificadosPage() {
   // ── Template helpers ───────────────────────────────────────────────────────
   function setConfigField<K extends keyof EditableConfig>(key: K, value: EditableConfig[K]) {
     setCertConfig(prev => ({ ...prev, [key]: value }));
+  }
+
+  /** Convierte un archivo a base64 data-URL y lo guarda en el campo indicado */
+  function handleImageUpload(field: 'logoUrl' | 'mascotUrl', file: File | undefined) {
+    if (!file) return;
+    const maxMB = 2;
+    if (file.size > maxMB * 1024 * 1024) {
+      toast({ variant: 'destructive', title: 'Imagen demasiado grande', description: `Máximo ${maxMB} MB.` });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => {
+      const result = e.target?.result as string;
+      setConfigField(field, result);
+      // Al subir una imagen, habilitar el campo correspondiente
+      if (field === 'logoUrl') setConfigField('showLogo', true);
+      if (field === 'mascotUrl') setConfigField('showMascot', true);
+    };
+    reader.readAsDataURL(file);
   }
 
   async function handleSaveConfig() {
@@ -409,71 +430,150 @@ export default function CertificadosPage() {
                     </CardContent>
                   </Card>
 
-                  {/* Visuales */}
+                  {/* Color de fondo */}
                   <Card>
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-base">Elementos visuales</CardTitle>
+                      <CardTitle className="text-base">Color de fondo</CardTitle>
+                      <CardDescription>Elige uno de los 4 colores oficiales</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {CERT_COLORS.map(c => {
+                          const isSelected = certConfig.bgColorStart === c.value;
+                          return (
+                            <button
+                              key={c.value}
+                              onClick={() => {
+                                setConfigField('bgColorStart', c.value);
+                                setConfigField('bgColorEnd', c.value);
+                              }}
+                              className="flex flex-col items-center gap-2 p-2 rounded-xl border-2 transition-all hover:scale-105"
+                              style={{
+                                borderColor: isSelected ? '#026149' : 'transparent',
+                                boxShadow: isSelected ? '0 0 0 2px #026149' : '0 0 0 1px #e5e7eb',
+                              }}
+                            >
+                              <div
+                                className="h-12 w-full rounded-lg"
+                                style={{
+                                  background: c.value,
+                                  border: c.value === '#FFFFFF' ? '1px solid #d1d5db' : 'none',
+                                }}
+                              />
+                              <span className="text-xs font-medium text-center leading-tight">{c.label}</span>
+                              <span className="text-[10px] text-muted-foreground font-mono">{c.value}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Imágenes */}
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Imágenes del certificado</CardTitle>
+                      <CardDescription>Sube tu propio logo y tu mascota. Máximo 2 MB por imagen (PNG, JPG, SVG)</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-5">
-                      {/* Toggles */}
-                      <div className="space-y-3">
+
+                      {/* Logo */}
+                      <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-medium">Mostrar logo Aviva</p>
-                            <p className="text-xs text-muted-foreground">Logo en la esquina superior izquierda</p>
+                            <p className="text-sm font-medium">Logo</p>
+                            <p className="text-xs text-muted-foreground">Aparece en la esquina superior izquierda</p>
                           </div>
                           <Switch checked={certConfig.showLogo} onCheckedChange={v => setConfigField('showLogo', v)} />
                         </div>
+                        {certConfig.showLogo && (
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {certConfig.logoUrl ? (
+                              <div className="relative">
+                                <img
+                                  src={certConfig.logoUrl}
+                                  alt="Logo"
+                                  className="h-12 w-auto rounded border object-contain bg-muted/30 p-1"
+                                  style={{ maxWidth: '160px' }}
+                                />
+                                <button
+                                  onClick={() => setConfigField('logoUrl', undefined)}
+                                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
+                                  title="Quitar imagen"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="h-12 w-28 rounded border border-dashed flex items-center justify-center bg-muted/20">
+                                <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                            <label className="cursor-pointer">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={e => handleImageUpload('logoUrl', e.target.files?.[0])}
+                              />
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium border rounded-md px-3 py-1.5 hover:bg-muted transition-colors">
+                                <Upload className="h-4 w-4" />
+                                {certConfig.logoUrl ? 'Cambiar imagen' : 'Subir logo'}
+                              </span>
+                            </label>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Mascota */}
+                      <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-medium">Mostrar mascota jaguar</p>
-                            <p className="text-xs text-muted-foreground">Jaguar decorativo en la zona derecha</p>
+                            <p className="text-sm font-medium">Mascota / imagen decorativa</p>
+                            <p className="text-xs text-muted-foreground">Aparece en la zona derecha del certificado</p>
                           </div>
                           <Switch checked={certConfig.showMascot} onCheckedChange={v => setConfigField('showMascot', v)} />
                         </div>
-                      </div>
-
-                      {/* Preset themes */}
-                      <div className="space-y-2">
-                        <Label>Tema de color</Label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {PRESET_THEMES.map(theme => (
-                            <button
-                              key={theme.label}
-                              onClick={() => {
-                                setConfigField('bgColorStart', theme.bgColorStart);
-                                setConfigField('bgColorEnd', theme.bgColorEnd);
-                              }}
-                              className="relative rounded-lg overflow-hidden h-12 border-2 transition-all hover:scale-105 flex items-center justify-center"
-                              style={{
-                                background: `linear-gradient(135deg, ${theme.bgColorStart}, ${theme.bgColorEnd})`,
-                                borderColor: certConfig.bgColorStart === theme.bgColorStart ? 'white' : 'transparent',
-                                boxShadow: certConfig.bgColorStart === theme.bgColorStart ? '0 0 0 2px #000, 0 0 0 4px white' : 'none',
-                              }}
-                              title={theme.label}
-                            >
-                              <span className="text-white text-[10px] font-medium drop-shadow">{theme.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Custom colors */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Color inicial</Label>
-                          <div className="flex gap-2">
-                            <input type="color" value={certConfig.bgColorStart} onChange={e => setConfigField('bgColorStart', e.target.value)} className="h-9 w-12 rounded border cursor-pointer" />
-                            <Input value={certConfig.bgColorStart} onChange={e => setConfigField('bgColorStart', e.target.value)} className="font-mono text-sm" maxLength={7} />
+                        {certConfig.showMascot && (
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {certConfig.mascotUrl ? (
+                              <div className="relative">
+                                <img
+                                  src={certConfig.mascotUrl}
+                                  alt="Mascota"
+                                  className="h-16 w-auto rounded border object-contain bg-muted/30 p-1"
+                                  style={{ maxWidth: '80px' }}
+                                />
+                                <button
+                                  onClick={() => setConfigField('mascotUrl', undefined)}
+                                  className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
+                                  title="Quitar imagen"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="h-16 w-12 rounded border border-dashed flex items-center justify-center bg-muted/20">
+                                <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                              </div>
+                            )}
+                            <label className="cursor-pointer">
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={e => handleImageUpload('mascotUrl', e.target.files?.[0])}
+                              />
+                              <span className="inline-flex items-center gap-1.5 text-sm font-medium border rounded-md px-3 py-1.5 hover:bg-muted transition-colors">
+                                <Upload className="h-4 w-4" />
+                                {certConfig.mascotUrl ? 'Cambiar imagen' : 'Subir mascota'}
+                              </span>
+                            </label>
                           </div>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Color final</Label>
-                          <div className="flex gap-2">
-                            <input type="color" value={certConfig.bgColorEnd} onChange={e => setConfigField('bgColorEnd', e.target.value)} className="h-9 w-12 rounded border cursor-pointer" />
-                            <Input value={certConfig.bgColorEnd} onChange={e => setConfigField('bgColorEnd', e.target.value)} className="font-mono text-sm" maxLength={7} />
-                          </div>
-                        </div>
+                        )}
+                        {certConfig.showMascot && !certConfig.mascotUrl && (
+                          <p className="text-xs text-muted-foreground">Si no subes una imagen, se usará el jaguar predeterminado.</p>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
