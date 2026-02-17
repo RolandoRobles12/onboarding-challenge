@@ -418,9 +418,9 @@ function AdminPanel({ name }: { name: string }) {
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 
 export default function LMSDashboard() {
-  const { user, profile, logout } = useAuth();
+  const { user, profile, logout, loading: authLoading } = useAuth();
   const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
-  const firstName = user?.displayName?.split(' ')[0] || profile?.nombre?.split(' ')[0] || 'Explorador';
+  const firstName = profile?.nombre?.split(' ')[0] || user?.displayName?.split(' ')[0] || 'tú';
 
   return (
     <ProtectedRoute>
@@ -478,16 +478,16 @@ export default function LMSDashboard() {
               {/* Content */}
               {isAdmin ? (
                 <AdminPanel name={firstName} />
-              ) : user && profile ? (
-                <JourneyDashboard userId={user.uid} profile={profile} />
-              ) : user && !profile ? (
+              ) : profile ? (
+                <JourneyDashboard userId={profile.uid} profile={profile} />
+              ) : (
                 <div className="space-y-3">
                   <Skeleton className="h-28 w-full rounded-xl" />
                   {[1, 2, 3].map((i) => (
                     <Skeleton key={i} className="h-20 w-full rounded-xl" />
                   ))}
                 </div>
-              ) : null}
+              )}
             </div>
           </main>
 

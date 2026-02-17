@@ -105,10 +105,12 @@ export default function UsersPage() {
     });
   }, [users, search, filterRole]);
 
+  const NONE_PRODUCT = '__none__';
+
   const handleEditRole = (user: UserProfile) => {
     setEditingUser(user);
     setNewRole(user.rol);
-    setNewProducto(user.producto || '');
+    setNewProducto(user.producto || NONE_PRODUCT);
   };
 
   const handleSaveRole = async () => {
@@ -116,11 +118,13 @@ export default function UsersPage() {
     setSavingRole(true);
     try {
       const updates: Partial<UserProfile> = { rol: newRole };
-      if (newProducto) updates.producto = newProducto;
+      if (newProducto && newProducto !== NONE_PRODUCT) updates.producto = newProducto;
       await updateUserProfile(editingUser.uid, updates);
       setUsers((prev) =>
         prev.map((u) =>
-          u.uid === editingUser.uid ? { ...u, rol: newRole, producto: newProducto || u.producto } : u
+          u.uid === editingUser.uid
+            ? { ...u, rol: newRole, ...(newProducto && newProducto !== NONE_PRODUCT ? { producto: newProducto } : {}) }
+            : u
         )
       );
       toast({ title: 'Usuario actualizado correctamente' });
@@ -384,7 +388,7 @@ export default function UsersPage() {
                   <SelectValue placeholder="Sin producto asignado" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sin producto asignado</SelectItem>
+                  <SelectItem value={NONE_PRODUCT}>Sin producto asignado</SelectItem>
                   {products.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       <span className="flex items-center gap-2">
