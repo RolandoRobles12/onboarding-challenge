@@ -9,7 +9,9 @@ import {
   deleteCourse,
   publishCourse,
   archiveCourse,
+  getQuizzes,
 } from '@/lib/firestore-service';
+import type { Quiz } from '@/lib/types-scalable';
 import type { Course, CourseModule, Lesson, LessonType, ContentNavigation } from '@/lib/types-lms';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -154,6 +156,7 @@ export default function AdminCoursesPage() {
   // ── Datos ──
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [availableQuizzes, setAvailableQuizzes] = useState<Quiz[]>([]);
 
   // ── Vista ──
   const [view, setView] = useState<'list' | 'editor'>('list');
@@ -193,8 +196,12 @@ export default function AdminCoursesPage() {
 
   const loadCourses = useCallback(async () => {
     setLoading(true);
-    const data = await getCourses();
+    const [data, quizzes] = await Promise.all([
+      getCourses(),
+      getQuizzes(undefined, false).catch(() => []),
+    ]);
     setCourses(data);
+    setAvailableQuizzes(quizzes);
     setLoading(false);
   }, []);
 
@@ -445,6 +452,12 @@ export default function AdminCoursesPage() {
     setLessonDialog({ open: false, moduleId: '', editing: null });
   }
 
+  function handleUpdateModuleQuiz(modId: string, quizId: string | null) {
+    setModules(prev => prev.map(m =>
+      m.id === modId ? { ...m, assessmentQuizId: quizId ?? undefined } : m
+    ));
+  }
+
   function handleRemoveLesson(moduleId: string, lessonId: string) {
     setModules(prev => prev.map(m => m.id === moduleId
       ? { ...m, lessons: m.lessons.filter(l => l.id !== lessonId).map((l, i) => ({ ...l, order: i })) }
@@ -482,6 +495,7 @@ export default function AdminCoursesPage() {
       courseForm={courseForm}
       setCourseForm={setCourseForm}
       modules={modules}
+      availableQuizzes={availableQuizzes}
       expandedModuleId={expandedModuleId}
       setExpandedModuleId={setExpandedModuleId}
       editingModuleId={editingModuleId}
@@ -503,6 +517,7 @@ export default function AdminCoursesPage() {
       onSaveModuleTitle={saveModuleTitle}
       onRemoveModule={handleRemoveModule}
       onMoveModule={handleMoveModule}
+      onUpdateModuleQuiz={handleUpdateModuleQuiz}
       onOpenLessonDialog={openLessonDialog}
       onSaveLesson={handleSaveLesson}
       onCloseLessonDialog={() => setLessonDialog({ open: false, moduleId: '', editing: null })}
@@ -719,6 +734,7 @@ interface EditorProps {
   courseForm: CourseForm;
   setCourseForm: React.Dispatch<React.SetStateAction<CourseForm>>;
   modules: CourseModule[];
+  availableQuizzes: Quiz[];
   expandedModuleId: string | null;
   setExpandedModuleId: React.Dispatch<React.SetStateAction<string | null>>;
   editingModuleId: string | null;
@@ -740,6 +756,7 @@ interface EditorProps {
   onSaveModuleTitle: (id: string) => void;
   onRemoveModule: (id: string) => void;
   onMoveModule: (id: string, dir: 'up' | 'down') => void;
+  onUpdateModuleQuiz: (modId: string, quizId: string | null) => void;
   onOpenLessonDialog: (moduleId: string, lesson?: Lesson) => void;
   onSaveLesson: () => void;
   onCloseLessonDialog: () => void;
@@ -749,12 +766,13 @@ interface EditorProps {
 }
 
 function CourseEditor({
-  course, courseForm, setCourseForm, modules,
+  course, courseForm, setCourseForm, modules, availableQuizzes,
   expandedModuleId, setExpandedModuleId,
   editingModuleId, moduleTitle, setModuleTitle, moduleDesc, setModuleDesc,
   lessonDialog, lessonForm, setLessonForm,
   saving, onBack, onSaveAll, onPublish, onArchive, onDelete,
   onAddModule, onStartEditModule, onSaveModuleTitle, onRemoveModule, onMoveModule,
+  onUpdateModuleQuiz,
   onOpenLessonDialog, onSaveLesson, onCloseLessonDialog, onRemoveLesson,
   onMoveLessonUp, onMoveLessonDown,
 }: EditorProps) {
@@ -1020,6 +1038,38 @@ function CourseEditor({
                       <Plus className="h-3.5 w-3.5" />
                       Añadir lección
                     </Button>
+
+                    {/* Module assessment quiz */}
+                    <div className="mt-3 pt-3 border-t space-y-1.5">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                        <HelpCircle className="h-3.5 w-3.5" />
+                        Evaluación al finalizar el módulo (opcional)
+                      </p>
+                      <Select
+                        value={mod.assessmentQuizId || '__none__'}
+                        onValueChange={v => onUpdateModuleQuiz(mod.id, v === '__none__' ? null : v)}
+                      >
+                        <SelectTrigger className="h-8 text-sm">
+                          <SelectValue placeholder="Sin evaluación" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Sin evaluación</SelectItem>
+                          {availableQuizzes.length === 0 ? (
+                            <SelectItem value="empty" disabled>No hay quizzes disponibles</SelectItem>
+                          ) : (
+                            availableQuizzes.map(q => (
+                              <SelectItem key={q.id} value={q.id}>
+                                <span className="flex items-center gap-2">
+                                  <HelpCircle className="h-3 w-3 text-purple-600" />
+                                  {q.title}
+                                </span>
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[11px] text-muted-foreground">El vendedor completará esta evaluación después de ver todas las lecciones del módulo.</p>
+                    </div>
                   </CardContent>
                 )}
               </Card>

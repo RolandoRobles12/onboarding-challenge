@@ -94,6 +94,8 @@ export interface CourseModule {
   lessons: Lesson[];
   prerequisiteModuleIds: string[];
   isOptional: boolean;
+  /** Quiz/evaluación que se muestra al finalizar todas las lecciones del módulo. */
+  assessmentQuizId?: string;
 }
 
 // ============================================================================

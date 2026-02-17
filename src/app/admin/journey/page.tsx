@@ -22,9 +22,12 @@ import { toast } from '@/hooks/use-toast';
 import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
-  BookOpen, Swords, Medal, Info,
+  BookOpen, Swords, Medal, Info, ListChecks, Pencil, X, ClipboardList,
 } from 'lucide-react';
-import type { Journey, JourneyStep, JourneyStepType, CertificateSigner } from '@/lib/types-scalable';
+import type {
+  Journey, JourneyStep, JourneyStepType, JourneyStage,
+  JourneyFormType, ChecklistItem, CertificateSigner,
+} from '@/lib/types-scalable';
 import type { Quiz, Badge as BadgeType } from '@/lib/types-scalable';
 import type { Course } from '@/lib/types-lms';
 
@@ -38,10 +41,10 @@ const STEP_TYPE_CONFIG: Record<JourneyStepType, {
   color: string;
 }> = {
   info_form: {
-    label: 'Formulario de datos',
-    description: 'Recopila información del vendedor al inicio',
+    label: 'Formulario',
+    description: 'Recopila información o evaluación del vendedor',
     icon: FileText,
-    defaultTitle: 'Datos del Jaguar Aviva',
+    defaultTitle: 'Formulario',
     color: 'text-blue-600',
   },
   course: {
@@ -86,24 +89,45 @@ const STEP_TYPE_CONFIG: Record<JourneyStepType, {
     defaultTitle: 'Obtener insignia',
     color: 'text-pink-600',
   },
+  checklist: {
+    label: 'Lista de verificación',
+    description: 'El vendedor confirma ítems antes de avanzar',
+    icon: ListChecks,
+    defaultTitle: 'Lista de verificación',
+    color: 'text-indigo-600',
+  },
 };
 
-// ─── StepCard ────────────────────────────────────────────────────────────────
+const FORM_TYPE_CONFIG: Record<JourneyFormType, { label: string; description: string; emoji: string }> = {
+  seller_data: {
+    label: 'Datos del vendedor',
+    description: 'Recopila información básica (nombre, kiosko, fecha de ingreso)',
+    emoji: '📝',
+  },
+  experience_rating: {
+    label: 'El vendedor evalúa su experiencia',
+    description: 'El vendedor califica la calidad de su capacitación y aprendizaje',
+    emoji: '⭐',
+  },
+  trainer_rating: {
+    label: 'El vendedor evalúa a su capacitador',
+    description: 'El vendedor califica el desempeño de su trainer o supervisor',
+    emoji: '👨‍🏫',
+  },
+  seller_evaluation: {
+    label: 'El capacitador evalúa al vendedor',
+    description: 'El evaluador o gerente califica el desempeño del vendedor',
+    emoji: '🎯',
+  },
+};
 
-function StepCard({
-  step,
-  index,
-  total,
-  quizzes,
-  courses,
-  signers,
-  badges,
-  onUpdate,
-  onRemove,
-  onMoveUp,
-  onMoveDown,
+// ─── ActionCard ───────────────────────────────────────────────────────────────
+
+function ActionCard({
+  action, index, total, quizzes, courses, signers, badges,
+  onUpdate, onRemove, onMoveUp, onMoveDown,
 }: {
-  step: JourneyStep;
+  action: JourneyStep;
   index: number;
   total: number;
   quizzes: Quiz[];
@@ -115,11 +139,11 @@ function StepCard({
   onMoveUp: () => void;
   onMoveDown: () => void;
 }) {
-  const cfg = STEP_TYPE_CONFIG[step.type];
+  const cfg = STEP_TYPE_CONFIG[action.type];
   const Icon = cfg.icon;
 
   return (
-    <div className="flex items-start gap-3 p-4 border rounded-lg bg-card shadow-sm">
+    <div className="flex items-start gap-3 p-3 border rounded-lg bg-card shadow-sm ml-3">
       {/* Reorder controls */}
       <div className="flex flex-col gap-1 pt-1">
         <button
@@ -127,7 +151,7 @@ function StepCard({
           disabled={index === 0}
           className="text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
-          <ChevronUp className="h-4 w-4" />
+          <ChevronUp className="h-3.5 w-3.5" />
         </button>
         <span className="text-xs text-muted-foreground text-center font-mono">{index + 1}</span>
         <button
@@ -135,33 +159,33 @@ function StepCard({
           disabled={index === total - 1}
           className="text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
         >
-          <ChevronDown className="h-4 w-4" />
+          <ChevronDown className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Step icon */}
-      <div className={`h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-0.5`}>
-        <Icon className={`h-4 w-4 ${cfg.color}`} />
+      {/* Action icon */}
+      <div className="h-8 w-8 rounded-lg bg-muted flex items-center justify-center shrink-0 mt-0.5">
+        <Icon className={`h-3.5 w-3.5 ${cfg.color}`} />
       </div>
 
       {/* Content */}
-      <div className="flex-1 space-y-3 min-w-0">
+      <div className="flex-1 space-y-2 min-w-0">
         {/* Type + Title row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div className="space-y-1">
-            <Label className="text-xs">Tipo de paso</Label>
+            <Label className="text-xs">Tipo de acción</Label>
             <Select
-              value={step.type}
+              value={action.type}
               onValueChange={(v) =>
                 onUpdate({
-                  ...step,
+                  ...action,
                   type: v as JourneyStepType,
                   title: STEP_TYPE_CONFIG[v as JourneyStepType].defaultTitle,
                   config: {},
                 })
               }
             >
-              <SelectTrigger className="h-8 text-sm">
+              <SelectTrigger className="h-7 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -170,7 +194,7 @@ function StepCard({
                   return (
                     <SelectItem key={type} value={type}>
                       <span className="flex items-center gap-2">
-                        <StepIcon className={`h-3.5 w-3.5 ${c.color}`} />
+                        <StepIcon className={`h-3 w-3 ${c.color}`} />
                         <span>{c.label}</span>
                       </span>
                     </SelectItem>
@@ -178,33 +202,133 @@ function StepCard({
                 })}
               </SelectContent>
             </Select>
-            <p className="text-[11px] text-muted-foreground">{cfg.description}</p>
+            <p className="text-[10px] text-muted-foreground leading-tight">{cfg.description}</p>
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Título del paso</Label>
+            <Label className="text-xs">Título de la acción</Label>
             <Input
-              className="h-8 text-sm"
-              value={step.title}
-              onChange={(e) => onUpdate({ ...step, title: e.target.value })}
+              className="h-7 text-xs"
+              value={action.title}
+              onChange={(e) => onUpdate({ ...action, title: e.target.value })}
               placeholder={cfg.defaultTitle}
             />
           </div>
         </div>
 
+        {/* info_form: formType selector */}
+        {action.type === 'info_form' && (
+          <div className="space-y-1">
+            <Label className="text-xs">Tipo de formulario</Label>
+            <Select
+              value={action.config.formType || 'seller_data'}
+              onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, formType: v as JourneyFormType } })}
+            >
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(FORM_TYPE_CONFIG).map(([type, c]) => (
+                  <SelectItem key={type} value={type}>
+                    <span className="flex items-center gap-2">
+                      <span>{c.emoji}</span>
+                      <span>{c.label}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {action.config.formType && FORM_TYPE_CONFIG[action.config.formType] && (
+              <p className="text-[10px] text-muted-foreground">
+                {FORM_TYPE_CONFIG[action.config.formType].description}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* checklist: item builder */}
+        {action.type === 'checklist' && (
+          <div className="space-y-2">
+            <Label className="text-xs">Ítems de verificación</Label>
+            <div className="space-y-1.5">
+              {(action.config.checklistItems || []).map((item, i) => (
+                <div key={item.id} className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={item.required}
+                    onChange={() => {
+                      const items = [...(action.config.checklistItems || [])];
+                      items[i] = { ...item, required: !item.required };
+                      onUpdate({ ...action, config: { ...action.config, checklistItems: items } });
+                    }}
+                    className="h-3.5 w-3.5 accent-primary"
+                    title="Obligatorio para avanzar"
+                  />
+                  <Input
+                    value={item.text}
+                    className="h-7 text-xs flex-1"
+                    onChange={(e) => {
+                      const items = [...(action.config.checklistItems || [])];
+                      items[i] = { ...item, text: e.target.value };
+                      onUpdate({ ...action, config: { ...action.config, checklistItems: items } });
+                    }}
+                    placeholder="Descripción del ítem..."
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-6 w-6 text-destructive hover:text-destructive"
+                    onClick={() =>
+                      onUpdate({
+                        ...action,
+                        config: {
+                          ...action.config,
+                          checklistItems: (action.config.checklistItems || []).filter((_, j) => j !== i),
+                        },
+                      })
+                    }
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-xs border-dashed gap-1 text-muted-foreground"
+                onClick={() => {
+                  const newItem: ChecklistItem = { id: crypto.randomUUID(), text: '', required: true };
+                  onUpdate({
+                    ...action,
+                    config: {
+                      ...action.config,
+                      checklistItems: [...(action.config.checklistItems || []), newItem],
+                    },
+                  });
+                }}
+              >
+                <Plus className="h-3 w-3" /> Agregar ítem
+              </Button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              El checkbox indica si el ítem es obligatorio para avanzar.
+            </p>
+          </div>
+        )}
+
         {/* Course selector */}
-        {step.type === 'course' && (
+        {action.type === 'course' && (
           <div className="space-y-1">
             <Label className="text-xs">Curso asignado</Label>
             <Select
-              value={step.config.courseId || ''}
-              onValueChange={(v) => onUpdate({ ...step, config: { ...step.config, courseId: v } })}
+              value={action.config.courseId || ''}
+              onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, courseId: v } })}
             >
-              <SelectTrigger className="h-8 text-sm">
+              <SelectTrigger className="h-7 text-xs">
                 <SelectValue placeholder="Selecciona un curso..." />
               </SelectTrigger>
               <SelectContent>
-                {courses.length === 0 ? (
+                {courses.filter(c => c.status === 'published').length === 0 ? (
                   <SelectItem value="none" disabled>No hay cursos publicados</SelectItem>
                 ) : (
                   courses
@@ -212,7 +336,7 @@ function StepCard({
                     .map(c => (
                       <SelectItem key={c.id} value={c.id}>
                         <span className="flex items-center gap-2">
-                          <BookOpen className="h-3.5 w-3.5 text-emerald-600" />
+                          <BookOpen className="h-3 w-3 text-emerald-600" />
                           {c.title}
                         </span>
                       </SelectItem>
@@ -224,16 +348,16 @@ function StepCard({
         )}
 
         {/* Challenge / Quiz selector */}
-        {(step.type === 'challenge' || step.type === 'quiz') && (
+        {(action.type === 'challenge' || action.type === 'quiz') && (
           <div className="space-y-1">
             <Label className="text-xs">
-              {step.type === 'challenge' ? 'Desafío asignado' : 'Quiz asignado'}
+              {action.type === 'challenge' ? 'Desafío asignado' : 'Quiz asignado'}
             </Label>
             <Select
-              value={step.config.quizId || ''}
-              onValueChange={(v) => onUpdate({ ...step, config: { ...step.config, quizId: v } })}
+              value={action.config.quizId || ''}
+              onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, quizId: v } })}
             >
-              <SelectTrigger className="h-8 text-sm">
+              <SelectTrigger className="h-7 text-xs">
                 <SelectValue placeholder="Selecciona un desafío..." />
               </SelectTrigger>
               <SelectContent>
@@ -243,7 +367,7 @@ function StepCard({
                   quizzes.map(q => (
                     <SelectItem key={q.id} value={q.id}>
                       <span className="flex items-center gap-2">
-                        <Swords className="h-3.5 w-3.5 text-orange-600" />
+                        <Swords className="h-3 w-3 text-orange-600" />
                         {q.title}
                       </span>
                     </SelectItem>
@@ -255,7 +379,7 @@ function StepCard({
         )}
 
         {/* Certificate signers */}
-        {step.type === 'certificate' && (
+        {action.type === 'certificate' && (
           <div className="space-y-2">
             <Label className="text-xs">Firmantes del certificado (máx. 3)</Label>
             {signers.length === 0 ? (
@@ -264,32 +388,32 @@ function StepCard({
                 <a href="/admin/certificados" className="underline text-primary">Certificados</a>.
               </p>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {signers.map(signer => {
-                  const selectedIds: string[] = step.config.signerIds ?? [];
+                  const selectedIds: string[] = action.config.signerIds ?? [];
                   const checked = selectedIds.includes(signer.id);
                   const atMax = selectedIds.length >= 3 && !checked;
                   return (
                     <label
                       key={signer.id}
-                      className={`flex items-center gap-2.5 text-sm cursor-pointer rounded-md px-2 py-1.5 border transition-colors ${
+                      className={`flex items-center gap-2 text-xs cursor-pointer rounded px-2 py-1 border transition-colors ${
                         checked ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted/50'
                       } ${atMax ? 'opacity-40 cursor-not-allowed' : ''}`}
                     >
                       <input
                         type="checkbox"
-                        className="h-3.5 w-3.5 accent-primary"
+                        className="h-3 w-3 accent-primary"
                         checked={checked}
                         disabled={atMax}
                         onChange={() => {
                           const next = checked
                             ? selectedIds.filter(id => id !== signer.id)
                             : [...selectedIds, signer.id];
-                          onUpdate({ ...step, config: { ...step.config, signerIds: next } });
+                          onUpdate({ ...action, config: { ...action.config, signerIds: next } });
                         }}
                       />
                       <span className="font-medium">{signer.name}</span>
-                      <span className="text-muted-foreground text-xs">— {signer.position}</span>
+                      <span className="text-muted-foreground">— {signer.position}</span>
                     </label>
                   );
                 })}
@@ -299,18 +423,18 @@ function StepCard({
         )}
 
         {/* Badge selector */}
-        {step.type === 'badge' && (
+        {action.type === 'badge' && (
           <div className="space-y-1">
             <Label className="text-xs">Insignia a otorgar</Label>
             <Select
-              value={step.config.badgeId || ''}
-              onValueChange={(v) => onUpdate({ ...step, config: { ...step.config, badgeId: v } })}
+              value={action.config.badgeId || ''}
+              onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, badgeId: v } })}
             >
-              <SelectTrigger className="h-8 text-sm">
+              <SelectTrigger className="h-7 text-xs">
                 <SelectValue placeholder="Selecciona una insignia..." />
               </SelectTrigger>
               <SelectContent>
-                {badges.length === 0 ? (
+                {badges.filter(b => b.active).length === 0 ? (
                   <SelectItem value="none" disabled>No hay insignias activas</SelectItem>
                 ) : (
                   badges
@@ -329,52 +453,255 @@ function StepCard({
           </div>
         )}
 
-        {/* Score mínimo (para cursos y desafíos) */}
-        {(step.type === 'course' || step.type === 'challenge' || step.type === 'quiz') && (
+        {/* Minimum score (for courses, challenges, quizzes) */}
+        {(action.type === 'course' || action.type === 'challenge' || action.type === 'quiz') && (
           <div className="space-y-1">
             <Label className="text-xs">Score mínimo para avanzar (%)</Label>
             <Input
-              className="h-8 text-sm w-32"
+              className="h-7 text-xs w-24"
               type="number"
               min={0}
               max={100}
-              value={step.config.minimumScore ?? ''}
+              value={action.config.minimumScore ?? ''}
               onChange={(e) =>
                 onUpdate({
-                  ...step,
+                  ...action,
                   config: {
-                    ...step.config,
+                    ...action.config,
                     minimumScore: e.target.value ? parseInt(e.target.value) : undefined,
                   },
                 })
               }
-              placeholder="Ej: 70"
+              placeholder="70"
             />
-            <p className="text-[11px] text-muted-foreground">Deja vacío para no requerir mínimo</p>
+            <p className="text-[10px] text-muted-foreground">Deja vacío para no requerir mínimo</p>
           </div>
         )}
 
-        {/* Required */}
+        {/* Required toggle */}
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
-            id={`req-${step.id}`}
-            checked={step.required}
-            onChange={(e) => onUpdate({ ...step, required: e.target.checked })}
-            className="h-3.5 w-3.5"
+            id={`req-${action.id}`}
+            checked={action.required}
+            onChange={(e) => onUpdate({ ...action, required: e.target.checked })}
+            className="h-3 w-3"
           />
-          <Label htmlFor={`req-${step.id}`} className="text-xs font-normal">Paso obligatorio</Label>
+          <Label htmlFor={`req-${action.id}`} className="text-xs font-normal">Acción obligatoria</Label>
         </div>
       </div>
 
       <Button
         variant="ghost"
         size="icon"
-        className="text-destructive hover:text-destructive mt-1 shrink-0"
+        className="text-destructive hover:text-destructive mt-1 shrink-0 h-7 w-7"
         onClick={onRemove}
       >
-        <Trash2 className="h-4 w-4" />
+        <Trash2 className="h-3.5 w-3.5" />
       </Button>
+    </div>
+  );
+}
+
+// ─── StageCard ────────────────────────────────────────────────────────────────
+
+const STAGE_COLORS = [
+  { border: 'border-blue-200', bg: 'bg-blue-50/40', header: 'bg-blue-50 border-blue-200', num: 'bg-blue-100 text-blue-700' },
+  { border: 'border-emerald-200', bg: 'bg-emerald-50/40', header: 'bg-emerald-50 border-emerald-200', num: 'bg-emerald-100 text-emerald-700' },
+  { border: 'border-orange-200', bg: 'bg-orange-50/40', header: 'bg-orange-50 border-orange-200', num: 'bg-orange-100 text-orange-700' },
+  { border: 'border-purple-200', bg: 'bg-purple-50/40', header: 'bg-purple-50 border-purple-200', num: 'bg-purple-100 text-purple-700' },
+  { border: 'border-pink-200', bg: 'bg-pink-50/40', header: 'bg-pink-50 border-pink-200', num: 'bg-pink-100 text-pink-700' },
+];
+
+function StageCard({
+  stage, stageIndex, totalStages, quizzes, courses, signers, badges,
+  onUpdate, onRemove, onMoveUp, onMoveDown,
+}: {
+  stage: JourneyStage;
+  stageIndex: number;
+  totalStages: number;
+  quizzes: Quiz[];
+  courses: Course[];
+  signers: CertificateSigner[];
+  badges: BadgeType[];
+  onUpdate: (s: JourneyStage) => void;
+  onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState(stage.title);
+  const color = STAGE_COLORS[stageIndex % STAGE_COLORS.length];
+
+  const saveTitle = () => {
+    onUpdate({ ...stage, title: titleInput.trim() || stage.title });
+    setEditingTitle(false);
+  };
+
+  const addAction = () => {
+    const newAction: JourneyStep = {
+      id: crypto.randomUUID(),
+      type: 'challenge',
+      order: stage.actions.length,
+      title: 'Nueva acción',
+      required: true,
+      config: {},
+    };
+    onUpdate({ ...stage, actions: [...stage.actions, newAction] });
+  };
+
+  const insertAction = (afterIndex: number) => {
+    const newAction: JourneyStep = {
+      id: crypto.randomUUID(),
+      type: 'challenge',
+      order: afterIndex + 1,
+      title: 'Nueva acción',
+      required: true,
+      config: {},
+    };
+    const newActions = [...stage.actions];
+    newActions.splice(afterIndex + 1, 0, newAction);
+    onUpdate({ ...stage, actions: newActions });
+  };
+
+  const updateAction = (index: number, updated: JourneyStep) => {
+    const newActions = [...stage.actions];
+    newActions[index] = updated;
+    onUpdate({ ...stage, actions: newActions });
+  };
+
+  const removeAction = (index: number) => {
+    onUpdate({ ...stage, actions: stage.actions.filter((_, i) => i !== index) });
+  };
+
+  const moveAction = (index: number, dir: 'up' | 'down') => {
+    const newActions = [...stage.actions];
+    const target = dir === 'up' ? index - 1 : index + 1;
+    if (target < 0 || target >= newActions.length) return;
+    [newActions[index], newActions[target]] = [newActions[target], newActions[index]];
+    onUpdate({ ...stage, actions: newActions });
+  };
+
+  return (
+    <div className={`border-2 rounded-xl overflow-hidden ${color.border} ${color.bg}`}>
+      {/* Stage header */}
+      <div className={`flex items-center gap-3 px-4 py-3 border-b ${color.header}`}>
+        <div className={`h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${color.num}`}>
+          {stageIndex + 1}
+        </div>
+
+        {editingTitle ? (
+          <div className="flex-1 flex items-center gap-2">
+            <Input
+              value={titleInput}
+              onChange={e => setTitleInput(e.target.value)}
+              className="h-7 text-sm flex-1"
+              autoFocus
+              onKeyDown={e => { if (e.key === 'Enter') saveTitle(); if (e.key === 'Escape') setEditingTitle(false); }}
+              onBlur={saveTitle}
+            />
+          </div>
+        ) : (
+          <button
+            className="flex-1 text-left font-semibold text-sm hover:text-primary transition-colors flex items-center gap-1.5"
+            onClick={() => { setEditingTitle(true); setTitleInput(stage.title); }}
+          >
+            {stage.title}
+            <Pencil className="h-3 w-3 opacity-40" />
+          </button>
+        )}
+
+        <Badge variant="secondary" className="text-xs shrink-0">
+          {stage.actions.length} {stage.actions.length === 1 ? 'acción' : 'acciones'}
+        </Badge>
+
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={onMoveUp}
+            disabled={stageIndex === 0}
+            className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 rounded"
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onMoveDown}
+            disabled={stageIndex === totalStages - 1}
+            className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 rounded"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={onRemove} className="p-1 text-destructive hover:text-destructive/80 rounded">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="p-1 text-muted-foreground hover:text-foreground rounded ml-1"
+          >
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Stage body */}
+      {expanded && (
+        <div className="px-4 py-3 space-y-2">
+          {/* Optional description */}
+          <Input
+            value={stage.description || ''}
+            onChange={e => onUpdate({ ...stage, description: e.target.value })}
+            placeholder="Descripción opcional de esta etapa..."
+            className="h-7 text-xs border-0 border-b rounded-none px-0 bg-transparent focus-visible:ring-0 focus-visible:border-primary text-muted-foreground"
+          />
+
+          {/* Actions list */}
+          {stage.actions.length === 0 ? (
+            <div className="border-2 border-dashed rounded-lg py-6 text-center text-muted-foreground text-sm">
+              <ClipboardList className="h-6 w-6 mx-auto mb-1 opacity-40" />
+              <p>No hay acciones en esta etapa.</p>
+            </div>
+          ) : (
+            <div className="space-y-0">
+              {stage.actions.map((action, actionIdx) => (
+                <div key={action.id}>
+                  <ActionCard
+                    action={action}
+                    index={actionIdx}
+                    total={stage.actions.length}
+                    quizzes={quizzes}
+                    courses={courses}
+                    signers={signers}
+                    badges={badges}
+                    onUpdate={(a) => updateAction(actionIdx, a)}
+                    onRemove={() => removeAction(actionIdx)}
+                    onMoveUp={() => moveAction(actionIdx, 'up')}
+                    onMoveDown={() => moveAction(actionIdx, 'down')}
+                  />
+                  {/* Insert action connector */}
+                  <div className="flex items-center gap-2 py-0.5 group">
+                    <div className="flex-1 border-l border-dashed border-muted ml-8 h-4" />
+                    <button
+                      onClick={() => insertAction(actionIdx)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 px-2 py-0.5 rounded-full border border-dashed border-muted hover:border-primary transition-all opacity-0 group-hover:opacity-100"
+                    >
+                      <Plus className="h-3 w-3" /> insertar acción
+                    </button>
+                    <div className="flex-1 border-r border-dashed border-muted mr-4 h-4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button
+            variant="outline"
+            className="w-full border-dashed text-muted-foreground text-xs h-8 hover:text-foreground"
+            onClick={addAction}
+          >
+            <Plus className="h-3.5 w-3.5 mr-1" /> Agregar acción
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -387,7 +714,7 @@ export default function JourneyPage() {
 
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [journey, setJourney] = useState<Journey | null>(null);
-  const [steps, setSteps] = useState<JourneyStep[]>([]);
+  const [stages, setStages] = useState<JourneyStage[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [signers, setSigners] = useState<CertificateSigner[]>([]);
@@ -396,9 +723,8 @@ export default function JourneyPage() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Load global resources (not per-product)
+  // Load global resources
   useEffect(() => {
-    // getCertificateSigners only returns active signers — deleted ones won't appear
     getCertificateSigners().then(setSigners).catch(() => setSigners([]));
     getCourses().then(setCourses).catch(() => setCourses([]));
     getAllBadges().then(setBadges).catch(() => setBadges([]));
@@ -418,18 +744,56 @@ export default function JourneyPage() {
 
         if (existingJourney) {
           setJourney(existingJourney);
-          setSteps([...existingJourney.steps].sort((a, b) => a.order - b.order));
           setJourneyName(existingJourney.name);
+
+          // Backward compat: if stages[], use them; if steps[], wrap in one stage
+          const anyJ = existingJourney as any;
+          if (anyJ.stages && anyJ.stages.length > 0) {
+            setStages(
+              [...anyJ.stages]
+                .sort((a: JourneyStage, b: JourneyStage) => a.order - b.order)
+                .map((s: JourneyStage) => ({
+                  ...s,
+                  actions: [...(s.actions || [])].sort((a: any, b: any) => a.order - b.order),
+                }))
+            );
+          } else if (existingJourney.steps && existingJourney.steps.length > 0) {
+            setStages([{
+              id: crypto.randomUUID(),
+              order: 0,
+              title: 'Etapa principal',
+              required: true,
+              actions: [...existingJourney.steps].sort((a, b) => a.order - b.order),
+            }]);
+          } else {
+            setStages([]);
+          }
         } else {
           setJourney(null);
-          setSteps([
-            { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del Jaguar Aviva', required: true, config: {} },
-            { id: crypto.randomUUID(), type: 'challenge', order: 1, title: 'Desafío de producto', required: true, config: {} },
-            { id: crypto.randomUUID(), type: 'results', order: 2, title: 'Ver resultados', required: true, config: {} },
-            { id: crypto.randomUUID(), type: 'certificate', order: 3, title: 'Obtener certificado', required: false, config: {} },
-          ]);
           const product = products.find(p => p.id === selectedProductId);
           setJourneyName(`Ruta de ${product?.name || 'Producto'}`);
+          // Default 3-stage structure
+          setStages([
+            {
+              id: crypto.randomUUID(), order: 0, title: 'Bienvenida', required: true,
+              actions: [
+                { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del vendedor', required: true, config: { formType: 'seller_data' as JourneyFormType } },
+              ],
+            },
+            {
+              id: crypto.randomUUID(), order: 1, title: 'Capacitación', required: true,
+              actions: [
+                { id: crypto.randomUUID(), type: 'challenge', order: 0, title: 'Desafío de producto', required: true, config: {} },
+                { id: crypto.randomUUID(), type: 'results', order: 1, title: 'Ver resultados', required: true, config: {} },
+              ],
+            },
+            {
+              id: crypto.randomUUID(), order: 2, title: 'Cierre', required: false,
+              actions: [
+                { id: crypto.randomUUID(), type: 'certificate', order: 0, title: 'Obtener certificado', required: false, config: {} },
+              ],
+            },
+          ]);
         }
 
         setQuizzes(productQuizzes);
@@ -444,48 +808,51 @@ export default function JourneyPage() {
     load();
   }, [selectedProductId, products]);
 
-  const addStep = () => {
-    const newStep: JourneyStep = {
+  // ── Stage management ────────────────────────────────────────────────────
+
+  const addStage = () => {
+    const newStage: JourneyStage = {
       id: crypto.randomUUID(),
-      type: 'challenge',
-      order: steps.length,
-      title: 'Nuevo paso',
+      order: stages.length,
+      title: `Etapa ${stages.length + 1}`,
       required: true,
-      config: {},
+      actions: [],
     };
-    setSteps([...steps, newStep]);
+    setStages([...stages, newStage]);
   };
 
-  const insertStep = (afterIndex: number) => {
-    const newStep: JourneyStep = {
+  const insertStage = (afterIndex: number) => {
+    const newStage: JourneyStage = {
       id: crypto.randomUUID(),
-      type: 'challenge',
       order: afterIndex + 1,
-      title: 'Nuevo paso',
+      title: 'Nueva etapa',
       required: true,
-      config: {},
+      actions: [],
     };
-    const newSteps = [...steps];
-    newSteps.splice(afterIndex + 1, 0, newStep);
-    setSteps(newSteps);
+    const newStages = [...stages];
+    newStages.splice(afterIndex + 1, 0, newStage);
+    setStages(newStages);
   };
 
-  const updateStep = (index: number, updated: JourneyStep) => {
-    const newSteps = [...steps];
-    newSteps[index] = updated;
-    setSteps(newSteps);
+  const updateStage = (index: number, updated: JourneyStage) => {
+    const newStages = [...stages];
+    newStages[index] = updated;
+    setStages(newStages);
   };
 
-  const removeStep = (index: number) => {
-    setSteps(steps.filter((_, i) => i !== index));
+  const removeStage = (index: number) => {
+    setStages(stages.filter((_, i) => i !== index));
   };
 
-  const moveStep = (index: number, direction: 'up' | 'down') => {
-    const newSteps = [...steps];
-    const target = direction === 'up' ? index - 1 : index + 1;
-    [newSteps[index], newSteps[target]] = [newSteps[target], newSteps[index]];
-    setSteps(newSteps);
+  const moveStage = (index: number, dir: 'up' | 'down') => {
+    const newStages = [...stages];
+    const target = dir === 'up' ? index - 1 : index + 1;
+    if (target < 0 || target >= newStages.length) return;
+    [newStages[index], newStages[target]] = [newStages[target], newStages[index]];
+    setStages(newStages);
   };
+
+  // ── Save ────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
     if (!selectedProductId) return;
@@ -497,15 +864,23 @@ export default function JourneyPage() {
 
     setSaving(true);
     try {
-      const stepsWithOrder = steps.map((s, i) => ({ ...s, order: i }));
+      const stagesWithOrder = stages.map((s, i) => ({
+        ...s,
+        order: i,
+        actions: s.actions.map((a, j) => ({ ...a, order: j })),
+      }));
+      // Keep a flattened steps[] for backward compat with older readers
+      const flatSteps = stagesWithOrder.flatMap(s => s.actions);
+
       await saveJourney(
         {
           organizationId: 'aviva-credito',
           productId: selectedProductId,
           name: journeyName,
-          steps: stepsWithOrder,
+          stages: stagesWithOrder,
+          steps: flatSteps,
           active: true,
-        },
+        } as any,
         userId,
         journey?.id
       );
@@ -523,18 +898,18 @@ export default function JourneyPage() {
     try {
       await deleteJourney(journey.id);
       setJourney(null);
-      setSteps([]);
+      setStages([]);
       toast({ title: 'Ruta eliminada' });
     } catch {
       toast({ variant: 'destructive', title: 'Error', description: 'No se pudo eliminar la ruta.' });
     }
   };
 
-  // Step type summary for visual indicator
-  const stepTypeCounts = steps.reduce(
-    (acc, s) => ({ ...acc, [s.type]: (acc[s.type] || 0) + 1 }),
-    {} as Record<string, number>
-  );
+  // Summary
+  const totalActions = stages.reduce((sum, s) => sum + s.actions.length, 0);
+  const actionTypeCounts = stages
+    .flatMap(s => s.actions)
+    .reduce((acc, a) => ({ ...acc, [a.type]: (acc[a.type] || 0) + 1 }), {} as Record<string, number>);
 
   return (
     <div className="space-y-6">
@@ -544,7 +919,7 @@ export default function JourneyPage() {
           <Route className="h-6 w-6" /> Rutas del Jaguar Aviva
         </h1>
         <p className="text-muted-foreground">
-          Diseña el camino de aprendizaje del vendedor: combina formularios, cursos, desafíos y certificados
+          Diseña el camino de aprendizaje en etapas. Cada etapa contiene acciones (cursos, desafíos, formularios, etc.)
         </p>
       </div>
 
@@ -553,9 +928,9 @@ export default function JourneyPage() {
         <CardContent className="py-3 flex gap-3 items-start">
           <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
           <p className="text-xs text-blue-700 leading-relaxed">
-            Cada ruta está vinculada a un <strong>producto</strong>. Los pasos pueden ser:
-            formularios de datos, <strong>cursos</strong> del LMS, <strong>desafíos</strong> gamificados,
-            evaluaciones, resultados, insignias y certificados. El vendedor los recorre en el orden definido.
+            Cada ruta tiene <strong>etapas</strong> (ej: Bienvenida, Capacitación, Cierre). Dentro de cada etapa
+            puedes insertar múltiples <strong>acciones</strong>: formularios de datos, evaluaciones del capacitador,
+            cursos, desafíos, listas de verificación y certificados — en cualquier orden.
           </p>
         </CardContent>
       </Card>
@@ -607,12 +982,18 @@ export default function JourneyPage() {
                   <div className="space-y-1">
                     <CardTitle>{journey ? 'Editar Ruta' : 'Nueva Ruta'}</CardTitle>
                     <CardDescription>
-                      Define los pasos que verá el vendedor al recorrer este producto.
+                      Define las etapas y acciones que verá el vendedor al recorrer este producto.
                     </CardDescription>
-                    {/* Step type summary */}
-                    {steps.length > 0 && (
+                    {/* Summary badges */}
+                    {stages.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pt-1">
-                        {Object.entries(stepTypeCounts).map(([type, count]) => {
+                        <Badge variant="outline" className="text-xs">
+                          {stages.length} etapa{stages.length !== 1 ? 's' : ''}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {totalActions} acción{totalActions !== 1 ? 'es' : ''}
+                        </Badge>
+                        {Object.entries(actionTypeCounts).map(([type, count]) => {
                           const cfg = STEP_TYPE_CONFIG[type as JourneyStepType];
                           if (!cfg) return null;
                           const StepIcon = cfg.icon;
@@ -646,6 +1027,7 @@ export default function JourneyPage() {
               </CardHeader>
 
               <CardContent className="space-y-4">
+                {/* Journey name */}
                 <div className="space-y-2 max-w-sm">
                   <Label>Nombre de la ruta</Label>
                   <Input
@@ -655,49 +1037,49 @@ export default function JourneyPage() {
                   />
                 </div>
 
+                {/* Stages */}
                 <div className="space-y-2">
-                  <Label>Pasos del journey ({steps.length})</Label>
-                  {steps.length === 0 ? (
-                    <div className="border-2 border-dashed rounded-lg py-8 text-center text-muted-foreground">
+                  <Label>Etapas ({stages.length})</Label>
+                  {stages.length === 0 ? (
+                    <div className="border-2 border-dashed rounded-lg py-10 text-center text-muted-foreground">
                       <Route className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                      <p>No hay pasos. Agrega el primero.</p>
+                      <p>No hay etapas. Agrega la primera.</p>
                     </div>
                   ) : (
                     <div className="space-y-0">
-                      {steps.map((step, index) => (
-                        <div key={step.id}>
-                          <StepCard
-                            step={step}
-                            index={index}
-                            total={steps.length}
+                      {stages.map((stage, stageIdx) => (
+                        <div key={stage.id}>
+                          <StageCard
+                            stage={stage}
+                            stageIndex={stageIdx}
+                            totalStages={stages.length}
                             quizzes={quizzes}
                             courses={courses}
                             signers={signers}
                             badges={badges}
-                            onUpdate={(s) => updateStep(index, s)}
-                            onRemove={() => removeStep(index)}
-                            onMoveUp={() => moveStep(index, 'up')}
-                            onMoveDown={() => moveStep(index, 'down')}
+                            onUpdate={(s) => updateStage(stageIdx, s)}
+                            onRemove={() => removeStage(stageIdx)}
+                            onMoveUp={() => moveStage(stageIdx, 'up')}
+                            onMoveDown={() => moveStage(stageIdx, 'down')}
                           />
-                          {/* Insert step connector */}
-                          <div className="flex items-center gap-2 py-1 group">
-                            <div className="flex-1 border-l-2 border-dashed border-muted ml-5 h-5" />
+                          {/* Insert stage connector */}
+                          <div className="flex items-center gap-2 py-2 group">
+                            <div className="flex-1 border-l-2 border-dashed border-muted ml-8 h-6" />
                             <button
-                              onClick={() => insertStep(index)}
-                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 px-2 py-1 rounded-full border border-dashed border-muted hover:border-primary transition-all opacity-0 group-hover:opacity-100"
-                              title="Insertar paso aquí"
+                              onClick={() => insertStage(stageIdx)}
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 px-3 py-1 rounded-full border border-dashed border-muted hover:border-primary transition-all opacity-0 group-hover:opacity-100"
                             >
-                              <Plus className="h-3 w-3" /> Insertar paso aquí
+                              <Plus className="h-3 w-3" /> Insertar etapa aquí
                             </button>
-                            <div className="flex-1 border-r-2 border-dashed border-muted mr-5 h-5" />
+                            <div className="flex-1 border-r-2 border-dashed border-muted mr-8 h-6" />
                           </div>
                         </div>
                       ))}
                     </div>
                   )}
 
-                  <Button variant="outline" className="w-full" onClick={addStep}>
-                    <Plus className="h-4 w-4 mr-2" /> Agregar paso
+                  <Button variant="outline" className="w-full border-dashed" onClick={addStage}>
+                    <Plus className="h-4 w-4 mr-2" /> Agregar etapa
                   </Button>
                 </div>
               </CardContent>

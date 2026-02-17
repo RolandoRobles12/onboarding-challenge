@@ -508,7 +508,21 @@ export type JourneyStepType =
   | 'quiz'        // Evaluación formal (alias de challenge para compatibilidad)
   | 'results'     // Pantalla de resultados
   | 'certificate' // Emisión de certificado
-  | 'badge';      // Otorgamiento de insignia
+  | 'badge'       // Otorgamiento de insignia
+  | 'checklist';  // Lista de verificación antes de avanzar
+
+/** Subtipo de formulario para pasos info_form */
+export type JourneyFormType =
+  | 'seller_data'        // Datos básicos del vendedor (kiosko, fecha de ingreso, etc.)
+  | 'experience_rating'  // El vendedor evalúa su propia experiencia de aprendizaje
+  | 'trainer_rating'     // El vendedor evalúa a su capacitador
+  | 'seller_evaluation'; // El evaluador/capacitador evalúa al vendedor
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  required: boolean; // si es obligatorio marcarlo para avanzar
+}
 
 export interface JourneyStep {
   id: string;
@@ -517,13 +531,25 @@ export interface JourneyStep {
   title: string;
   required: boolean;
   config: {
-    quizId?: string;      // para pasos de tipo 'quiz' / 'challenge'
-    courseId?: string;    // para pasos de tipo 'course'
+    quizId?: string;          // para pasos de tipo 'quiz' / 'challenge'
+    courseId?: string;        // para pasos de tipo 'course'
     description?: string;
-    signerIds?: string[]; // para pasos de tipo 'certificate'
-    badgeId?: string;     // para pasos de tipo 'badge'
-    minimumScore?: number; // % mínimo para avanzar al siguiente paso
+    signerIds?: string[];     // para pasos de tipo 'certificate'
+    badgeId?: string;         // para pasos de tipo 'badge'
+    minimumScore?: number;    // % mínimo para avanzar al siguiente paso
+    formType?: JourneyFormType;         // para pasos de tipo 'info_form'
+    checklistItems?: ChecklistItem[];   // para pasos de tipo 'checklist'
   };
+}
+
+/** Etapa dentro de una ruta. Contiene una o más acciones ordenadas. */
+export interface JourneyStage {
+  id: string;
+  order: number;
+  title: string;
+  description?: string;
+  required: boolean;
+  actions: JourneyStep[];
 }
 
 // ============================================================================
@@ -618,7 +644,10 @@ export interface Journey {
   productId: string;
   name: string;
   description?: string;
-  steps: JourneyStep[];
+  /** Etapas que contienen acciones (nuevo modelo). */
+  stages: JourneyStage[];
+  /** @deprecated - flat list kept for backward compat; use stages instead. */
+  steps?: JourneyStep[];
   active: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
