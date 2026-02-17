@@ -180,7 +180,7 @@ function ResultsContent() {
                                 ¡Misión Cumplida, {fullName}!
                             </CardTitle>
                             <CardDescription className="text-base mt-1">
-                                Has completado tu entrenamiento en <strong>{quiz.title}</strong>
+                                Has completado tu entrenamiento en <strong>{quizTitle}</strong>
                             </CardDescription>
                         </motion.div>
                     </CardHeader>
