@@ -33,6 +33,7 @@ interface RuntimeQuestion {
   options: Option[];
   isTricky?: boolean;
   isMultiSelect?: boolean;
+  type?: string; // 'fill_in_the_blank' | 'open_text' | 'single_choice' | ...
 }
 interface RuntimeMission {
   id: string;
@@ -79,6 +80,10 @@ function QuizComponent() {
   });
   const [showParticles, setShowParticles] = useState(false);
   const [particleType, setParticleType] = useState<'correct' | 'wrong'>('correct');
+  // Fill-in-the-blank state: word the user tapped from word bank
+  const [fillAnswer, setFillAnswer] = useState<string | null>(null);
+  // Open text state
+  const [openAnswer, setOpenAnswer] = useState('');
 
   const quizType = searchParams.get('quizType') || '';
   const avatarKey = searchParams.get('avatar');
@@ -116,6 +121,7 @@ function QuizComponent() {
               .filter(Boolean)
               .map((q) => ({
                 text: q.text,
+                type: q.type,
                 options: q.options
                   .sort((a, b) => a.order - b.order)
                   .map((o) => ({ text: o.text, isCorrect: o.isCorrect })),
@@ -301,6 +307,8 @@ function QuizComponent() {
       specialFeedback: null,
       lifeUsedMessage: lifeUsed ? "¡Has usado una vida extra para continuar!" : null,
     };
+    setFillAnswer(null);
+    setOpenAnswer('');
 
     if (gameState.currentQuestionIndex < (currentMission?.questions.length || 0) - 1) {
       setGameState(prev => ({
@@ -449,6 +457,157 @@ function QuizComponent() {
 
   const questionKey = `${gameState.currentMissionIndex}-${gameState.currentQuestionIndex}`;
 
+  // ── Fill-in-the-blank: tap-to-place word bank ─────────────────────────────
+  const renderFillInBlank = () => {
+    const correctWord = currentQuestion.options.find(o => o.isCorrect)?.text ?? '';
+    const words = [...currentQuestion.options].sort(() => Math.random() - 0.5);
+    const parts = currentQuestion.text.split(/_{2,}/);
+    const isCorrect = fillAnswer === correctWord;
+
+    return (
+      <div className="space-y-5">
+        {/* Question text with blank slot */}
+        <div className="text-base font-medium leading-relaxed flex flex-wrap items-center gap-x-1.5 gap-y-2">
+          {parts.map((part, i) => (
+            <span key={i} className="contents">
+              <span>{part}</span>
+              {i < parts.length - 1 && (
+                <button
+                  className={cn(
+                    'min-w-[7rem] px-3 py-1.5 rounded-lg border-b-2 text-sm font-semibold transition-all',
+                    gameState.isAnswered
+                      ? isCorrect
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-destructive bg-destructive/10 text-destructive'
+                      : fillAnswer
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-muted-foreground/40 text-muted-foreground/60',
+                  )}
+                  onClick={() => !gameState.isAnswered && setFillAnswer(null)}
+                >
+                  {fillAnswer ?? '— toca una palabra —'}
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+
+        {/* Word bank */}
+        {!gameState.isAnswered && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Arrastra o toca la respuesta correcta
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {words.map((w, i) => (
+                <button
+                  key={i}
+                  onClick={() => setFillAnswer(w.text)}
+                  disabled={fillAnswer === w.text}
+                  className={cn(
+                    'px-4 py-2 rounded-xl border-2 text-sm font-medium transition-all select-none',
+                    fillAnswer === w.text
+                      ? 'border-primary/20 bg-primary/5 text-primary/40 cursor-not-allowed'
+                      : 'border-primary/40 bg-card text-primary hover:bg-primary/10 active:scale-95',
+                  )}
+                >
+                  {w.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Verify button */}
+        {!gameState.isAnswered && fillAnswer && (
+          <Button
+            onClick={() => processAnswer(currentQuestion.options.filter(o => o.text === fillAnswer))}
+            className="w-full text-primary-foreground bg-primary hover:bg-primary/90"
+            size="lg"
+          >
+            <Check className="mr-2 h-4 w-4" /> Verificar respuesta
+          </Button>
+        )}
+
+        {/* Post-answer reveal */}
+        {gameState.isAnswered && !isCorrect && (
+          <div className="text-sm text-muted-foreground bg-muted rounded-lg px-4 py-3">
+            La respuesta correcta era: <strong className="text-foreground">{correctWord}</strong>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Open text: textarea + valid keywords hint ──────────────────────────────
+  const renderOpenText = () => {
+    const keywords = currentQuestion.options.map(o => o.text);
+
+    const handleOpenTextSubmit = () => {
+      const lower = openAnswer.toLowerCase();
+      const matched = currentQuestion.options.filter(o =>
+        lower.includes(o.text.toLowerCase())
+      );
+      const correctMatched = matched.filter(o => o.isCorrect);
+      const isCorrect = correctMatched.length > 0;
+      processAnswer(isCorrect ? currentQuestion.options.filter(o => o.isCorrect).slice(0, 1) : []);
+    };
+
+    return (
+      <div className="space-y-4">
+        <textarea
+          className={cn(
+            'w-full rounded-xl border-2 p-4 text-sm resize-none h-28 transition-colors focus:outline-none',
+            gameState.isAnswered
+              ? gameState.lastAnswerWasCorrect
+                ? 'border-green-400 bg-green-50'
+                : 'border-destructive/40 bg-destructive/5'
+              : 'border-primary/30 focus:border-primary',
+          )}
+          placeholder="Escribe tu respuesta aquí..."
+          value={openAnswer}
+          onChange={e => setOpenAnswer(e.target.value)}
+          disabled={gameState.isAnswered}
+        />
+
+        {/* Valid keywords — always visible as a guide */}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
+            Respuestas válidas
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {keywords.map((kw, i) => (
+              <span
+                key={i}
+                className={cn(
+                  'text-xs px-2.5 py-1 rounded-lg font-medium border',
+                  gameState.isAnswered
+                    ? currentQuestion.options[i]?.isCorrect
+                      ? 'bg-green-100 border-green-300 text-green-700'
+                      : 'bg-muted border-muted text-muted-foreground'
+                    : 'bg-amber-100 border-amber-300 text-amber-800',
+                )}
+              >
+                {kw}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {!gameState.isAnswered && (
+          <Button
+            onClick={handleOpenTextSubmit}
+            disabled={!openAnswer.trim()}
+            className="w-full text-primary-foreground bg-primary hover:bg-primary/90"
+            size="lg"
+          >
+            <Check className="mr-2 h-4 w-4" /> Verificar respuesta
+          </Button>
+        )}
+      </div>
+    );
+  };
+
   const renderOptions = () => {
     return currentQuestion.options.map((option, index) => {
       const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
@@ -565,10 +724,14 @@ function QuizComponent() {
               <CardDescription>{currentMission.title}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {renderOptions()}
+              {currentQuestion.type === 'fill_in_the_blank'
+                ? renderFillInBlank()
+                : currentQuestion.type === 'open_text'
+                ? renderOpenText()
+                : renderOptions()}
             </CardContent>
 
-            {currentQuestion.isMultiSelect && !gameState.isAnswered && (
+            {currentQuestion.isMultiSelect && !gameState.isAnswered && currentQuestion.type !== 'fill_in_the_blank' && currentQuestion.type !== 'open_text' && (
               <CardFooter>
                 <Button onClick={handleVerifyMultiSelectAnswer} disabled={gameState.selectedOptions.length === 0} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
                   <Check className="mr-2" />
