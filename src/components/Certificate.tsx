@@ -1,12 +1,10 @@
 'use client'
 
-import { useRef } from 'react';
+import React, { useRef } from 'react';
 import * as htmlToImage from 'html-to-image';
 import jsPDF from 'jspdf';
 import { Button } from '@/components/ui/button';
 import { Download, Home } from 'lucide-react';
-import { AvivaLogo } from './AvivaLogo';
-import { JaguarMascot } from './JaguarMascot';
 import Link from 'next/link';
 import type { CertificateConfig } from '@/lib/types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from '@/lib/types-scalable';
@@ -107,92 +105,92 @@ export function Certificate({
           }}
         />
 
-        {/* ── Mascot (right side, behind content) ── */}
-        {(cfg.mascotUrl || cfg.showMascot) && (
-          <div className="absolute right-6 bottom-0 z-10 pointer-events-none" style={{ height: '82%', aspectRatio: cfg.mascotUrl ? 'auto' : '200/260' }}>
-            {cfg.mascotUrl
-              ? <img src={cfg.mascotUrl} alt="Mascota" className="h-full w-auto object-contain" style={{ opacity: 0.9 }} />
-              : <JaguarMascot className="h-full w-auto opacity-90" />
-            }
-          </div>
-        )}
+        {/* ── Two-column layout: texto | mascota ── */}
+        <div className="relative z-10 h-full flex flex-row">
 
-        {/* ── Main content ── */}
-        <div className="relative z-30 h-full flex flex-col items-start justify-between py-8 px-12">
+          {/* ── Columna izquierda: todo el contenido ── */}
+          <div className="flex flex-col justify-between h-full py-8 px-10"
+            style={{ width: (cfg.mascotUrl && cfg.showMascot) ? '65%' : '100%' }}>
 
-          {/* Top row: logo + subtitle */}
-          <div className="flex flex-col gap-1">
-            {(cfg.logoUrl || cfg.showLogo) && (
-              cfg.logoUrl
-                ? <img src={cfg.logoUrl} alt="Logo" className="h-9 w-auto object-contain" style={{ maxWidth: '180px' }} />
-                : <AvivaLogo className={`h-9 w-auto ${lightBg ? '' : 'brightness-0 invert'}`} />
-            )}
-            <p className="text-[10px] md:text-xs tracking-[0.35em] uppercase font-light mt-1" style={{ color: textSecondary }}>
-              {cfg.subtitle}
-            </p>
-            <h1 className="text-base md:text-xl font-bold tracking-widest uppercase" style={{ color: textPrimary }}>
-              {cfg.title}
-            </h1>
-          </div>
+            {/* Top: logo + subtitle + title */}
+            <div className="flex flex-col gap-1">
+              {cfg.logoUrl && cfg.showLogo && (
+                <img src={cfg.logoUrl} alt="Logo" className="h-9 w-auto object-contain" style={{ maxWidth: '180px' }} />
+              )}
+              <p className="text-[10px] md:text-xs tracking-[0.35em] uppercase font-light mt-1" style={{ color: textSecondary }}>
+                {cfg.subtitle}
+              </p>
+              <h1 className="text-base md:text-xl font-bold tracking-widest uppercase" style={{ color: textPrimary }}>
+                {cfg.title}
+              </h1>
+            </div>
 
-          {/* Center: recipient block */}
-          <div className="flex flex-col gap-3 max-w-[60%]">
-            <p className="text-xs md:text-sm font-light tracking-wide" style={{ color: textSecondary }}>
-              {cfg.bodyPrefix}
-            </p>
+            {/* Center: recipient block */}
+            <div className="flex flex-col gap-3">
+              <p className="text-xs md:text-sm font-light tracking-wide" style={{ color: textSecondary }}>
+                {cfg.bodyPrefix}
+              </p>
 
-            {/* Name */}
-            <div>
-              <h2
-                className="text-2xl md:text-4xl font-bold leading-tight"
-                style={{ fontFamily: 'Georgia, serif', letterSpacing: '0.03em', color: textPrimary }}
+              {/* Name */}
+              <div>
+                <h2
+                  className="text-2xl md:text-4xl font-bold leading-tight"
+                  style={{ fontFamily: 'Georgia, serif', letterSpacing: '0.03em', color: textPrimary }}
+                >
+                  {fullName}
+                </h2>
+                <div className="h-0.5 mt-2 w-full max-w-xs" style={{ background: lightBg ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.5)' }} />
+              </div>
+
+              <p className="text-xs md:text-sm leading-relaxed" style={{ color: textSecondary }}>
+                {cfg.bodySuffix}{' '}
+                <strong style={{ color: textPrimary, fontWeight: 600 }}>{quizTitle}</strong>{' '}
+                con una puntuación de{' '}
+                <strong style={{ color: textPrimary, fontWeight: 600 }}>{percentage}%</strong>
+              </p>
+
+              {/* Score pill */}
+              <div
+                className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 self-start"
+                style={{ background: scoreBg, border: `1px solid ${scoreBorder}` }}
               >
-                {fullName}
-              </h2>
-              <div className="h-0.5 mt-2 w-full max-w-xs" style={{ background: lightBg ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.5)' }} />
+                <span style={{ color: '#f59e0b' }}>★</span>
+                <span className="text-sm font-semibold" style={{ color: textPrimary }}>
+                  {score} / {totalQuestions} correctas · {percentage}%
+                </span>
+              </div>
             </div>
 
-            <p className="text-xs md:text-sm leading-relaxed" style={{ color: textSecondary }}>
-              {cfg.bodySuffix}{' '}
-              <strong style={{ color: textPrimary, fontWeight: 600 }}>{quizTitle}</strong>{' '}
-              con una puntuación de{' '}
-              <strong style={{ color: textPrimary, fontWeight: 600 }}>{percentage}%</strong>
-            </p>
-
-            {/* Score pill */}
-            <div
-              className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 self-start"
-              style={{ background: scoreBg, border: `1px solid ${scoreBorder}` }}
-            >
-              <span style={{ color: '#f59e0b' }}>★</span>
-              <span className="text-sm font-semibold" style={{ color: textPrimary }}>
-                {score} / {totalQuestions} correctas · {percentage}%
-              </span>
-            </div>
-          </div>
-
-          {/* Bottom: signers + date */}
-          <div className="flex items-end justify-between w-full max-w-[62%] gap-6">
-            {/* Signers */}
-            <div className="flex items-end gap-8 flex-wrap">
+            {/* Bottom: signers + date */}
+            <div className="flex items-end gap-6 flex-wrap">
               {displaySigners.map((signer, i) => (
                 <div key={i} className="text-center min-w-[90px]">
-                  <div className="pt-2 mt-8" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
+                  <div className="pt-2 mt-6" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
                     <p className="text-xs font-semibold leading-tight" style={{ color: textPrimary }}>{signer.name}</p>
                     <p className="text-[10px] leading-tight mt-0.5" style={{ color: textSecondary }}>{signer.position}</p>
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* Date */}
-            <div className="text-right shrink-0">
-              <div className="pt-2 mt-8 inline-block min-w-[90px]" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
-                <p className="text-xs font-semibold" style={{ color: textPrimary }}>Fecha</p>
-                <p className="text-[10px] mt-0.5" style={{ color: textSecondary }}>{date}</p>
+              <div className="ml-auto text-right shrink-0">
+                <div className="pt-2 mt-6 inline-block min-w-[90px]" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
+                  <p className="text-xs font-semibold" style={{ color: textPrimary }}>Fecha</p>
+                  <p className="text-[10px] mt-0.5" style={{ color: textSecondary }}>{date}</p>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* ── Columna derecha: mascota (solo si hay imagen subida) ── */}
+          {cfg.mascotUrl && cfg.showMascot && (
+            <div className="flex items-end justify-center pb-0 pointer-events-none" style={{ width: '35%' }}>
+              <img
+                src={cfg.mascotUrl}
+                alt="Mascota"
+                className="w-full h-auto object-contain"
+                style={{ maxHeight: '90%', opacity: 0.95 }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
