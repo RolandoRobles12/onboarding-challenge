@@ -10,12 +10,19 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   getJourneyByProduct,
+  getOnboardingFields,
   getProduct,
   getUserJourneyProgress,
   markJourneyStepComplete,
 } from '@/lib/firestore-service';
-import type { Journey, UserJourneyProgress, JourneyStep, Product } from '@/lib/types-scalable';
+import type { Journey, UserJourneyProgress, JourneyStep, Product, OnboardingField } from '@/lib/types-scalable';
 import {
   LogOut,
   ShieldCheck,
@@ -49,7 +56,7 @@ const STEP_META: Record<
     icon: HelpCircle,
     actionLabel: 'Comenzar evaluación',
     revisitLabel: 'Repetir evaluación',
-    href: (productId) => `/${productId}/quiz`,
+    href: (productId) => `/${productId}/quiz?quizType=${productId}`,
   },
   results: {
     icon: BarChart2,
@@ -73,6 +80,7 @@ function StepCard({
   status,
   productId,
   onMarkComplete,
+  onViewData,
   productColor,
 }: {
   step: JourneyStep;
@@ -80,6 +88,7 @@ function StepCard({
   status: 'completed' | 'current' | 'upcoming';
   productId: string;
   onMarkComplete: (stepId: string) => void;
+  onViewData: () => void;
   productColor: string;
 }) {
   const meta = STEP_META[step.type] ?? STEP_META.quiz;
@@ -161,8 +170,22 @@ function StepCard({
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2 mt-3">
-          {isCompleted && (
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          {/* info_form completed: "Ver mis datos" opens modal */}
+          {isCompleted && step.type === 'info_form' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1 text-green-700 hover:text-green-800 hover:bg-green-50"
+              onClick={onViewData}
+            >
+              <Icon className="h-3 w-3" />
+              Ver mis datos
+            </Button>
+          )}
+
+          {/* other completed steps: link to revisit */}
+          {isCompleted && step.type !== 'info_form' && (
             <Button
               variant="ghost"
               size="sm"
@@ -176,6 +199,31 @@ function StepCard({
             </Button>
           )}
 
+          {/* info_form current: view data + mark complete */}
+          {isCurrent && step.type === 'info_form' && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 text-sm"
+                onClick={onViewData}
+              >
+                <FileText className="h-3.5 w-3.5" />
+                Ver mis datos
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1.5 text-sm text-muted-foreground"
+                onClick={() => onMarkComplete(step.id)}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Marcar completado
+              </Button>
+            </>
+          )}
+
+          {/* other current steps: navigate */}
           {isCurrent && step.type !== 'info_form' && (
             <Button
               size="sm"
@@ -187,18 +235,6 @@ function StepCard({
                 {meta.actionLabel}
                 <ChevronRight className="h-3.5 w-3.5" />
               </Link>
-            </Button>
-          )}
-
-          {isCurrent && step.type === 'info_form' && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 text-sm"
-              onClick={() => onMarkComplete(step.id)}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Marcar como completado
             </Button>
           )}
         </div>
@@ -220,6 +256,8 @@ function JourneyDashboard({ userId, profile }: { userId: string; profile: NonNul
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [onboardingFields, setOnboardingFields] = useState<OnboardingField[]>([]);
+  const [showDataModal, setShowDataModal] = useState(false);
 
   const productId = profile.producto || '';
 
@@ -230,12 +268,14 @@ function JourneyDashboard({ userId, profile }: { userId: string; profile: NonNul
 
     async function load() {
       try {
-        const [foundProduct, foundJourney] = await Promise.all([
+        const [foundProduct, foundJourney, fields] = await Promise.all([
           getProduct(productId),
           getJourneyByProduct(productId),
+          getOnboardingFields(),
         ]);
         setProduct(foundProduct);
         setJourney(foundJourney);
+        setOnboardingFields(fields);
 
         if (foundJourney) {
           const prog = await getUserJourneyProgress(userId, foundJourney.id);
@@ -405,12 +445,58 @@ function JourneyDashboard({ userId, profile }: { userId: string; profile: NonNul
                 status={stepStatus}
                 productId={productId}
                 onMarkComplete={handleMarkComplete}
+                onViewData={() => setShowDataModal(true)}
                 productColor={productColor}
               />
             );
           })}
         </div>
       </div>
+
+      {/* ── Datos del Jaguar Aviva modal ── */}
+      <Dialog open={showDataModal} onOpenChange={setShowDataModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Mis datos
+            </DialogTitle>
+          </DialogHeader>
+
+          {profile.onboardingData && Object.keys(profile.onboardingData).length > 0 ? (
+            <div className="space-y-3 mt-2">
+              {onboardingFields.length > 0 ? (
+                onboardingFields.map((field) => {
+                  const value = profile.onboardingData?.[field.fieldKey];
+                  if (!value) return null;
+                  return (
+                    <div key={field.id} className="flex flex-col gap-0.5">
+                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        {field.label}
+                      </span>
+                      <span className="text-sm font-medium">{value}</span>
+                    </div>
+                  );
+                })
+              ) : (
+                // Fallback: show raw key-value pairs if fields not loaded
+                Object.entries(profile.onboardingData).map(([key, value]) => (
+                  <div key={key} className="flex flex-col gap-0.5">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      {key.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-sm font-medium">{value}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground mt-2">
+              Aún no hay datos registrados en tu perfil.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

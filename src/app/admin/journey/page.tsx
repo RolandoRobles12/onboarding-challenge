@@ -18,7 +18,7 @@ import type { Journey, JourneyStep, JourneyStepType } from '@/lib/types-scalable
 import type { Quiz } from '@/lib/types-scalable';
 
 const STEP_TYPE_CONFIG: Record<JourneyStepType, { label: string; icon: React.ElementType; defaultTitle: string }> = {
-  info_form: { label: 'Formulario de datos', icon: FileText, defaultTitle: 'Datos del vendedor' },
+  info_form: { label: 'Formulario de datos', icon: FileText, defaultTitle: 'Datos del Jaguar Aviva' },
   quiz: { label: 'Quiz / Evaluación', icon: HelpCircle, defaultTitle: 'Evaluación de producto' },
   results: { label: 'Resultados', icon: BarChart2, defaultTitle: 'Ver resultados' },
   certificate: { label: 'Certificado', icon: Award, defaultTitle: 'Obtener certificado' },
@@ -168,7 +168,7 @@ export default function JourneyPage() {
           setJourney(null);
           // Default journey steps
           setSteps([
-            { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del vendedor', required: true, config: {} },
+            { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del Jaguar Aviva', required: true, config: {} },
             { id: crypto.randomUUID(), type: 'quiz', order: 1, title: 'Evaluación de producto', required: true, config: {} },
             { id: crypto.randomUUID(), type: 'results', order: 2, title: 'Ver resultados', required: true, config: {} },
             { id: crypto.randomUUID(), type: 'certificate', order: 3, title: 'Obtener certificado', required: false, config: {} },
@@ -240,7 +240,7 @@ export default function JourneyPage() {
         userId,
         journey?.id
       );
-      toast({ title: 'Ruta guardada', description: 'La ruta del vendedor se guardó correctamente.' });
+      toast({ title: 'Ruta guardada', description: 'La ruta del Jaguar Aviva se guardó correctamente.' });
     } catch (error) {
       console.error(error);
       toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la ruta.' });
@@ -265,10 +265,10 @@ export default function JourneyPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Route className="h-6 w-6" /> Rutas del Vendedor
+          <Route className="h-6 w-6" /> Rutas del Jaguar Aviva
         </h1>
         <p className="text-muted-foreground">
-          Define el journey que seguirá el vendedor para cada producto
+          Define el journey que seguirá el Jaguar Aviva para cada producto
         </p>
       </div>
 
@@ -321,7 +321,7 @@ export default function JourneyPage() {
                       {journey ? 'Editar Ruta' : 'Nueva Ruta'}
                     </CardTitle>
                     <CardDescription>
-                      Arrastra para reordenar. Define qué pasos verá el vendedor al completar el producto.
+                      Arrastra para reordenar. Define qué pasos verá el Jaguar Aviva al completar el producto.
                     </CardDescription>
                   </div>
                   <div className="flex gap-2">

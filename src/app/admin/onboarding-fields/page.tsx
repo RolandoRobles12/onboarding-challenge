@@ -218,7 +218,7 @@ export default function OnboardingFieldsPage() {
             <ClipboardList className="h-6 w-6" /> Campos de Ingreso
           </h1>
           <p className="text-muted-foreground">
-            Define los campos que verá el vendedor al ingresar por primera vez
+            Define los campos que verá el Jaguar Aviva al ingresar por primera vez
           </p>
         </div>
         <Button onClick={() => openDialog()}>
@@ -237,7 +237,7 @@ export default function OnboardingFieldsPage() {
             <ClipboardList className="h-12 w-12 mx-auto text-muted-foreground mb-3 opacity-40" />
             <p className="text-muted-foreground font-medium">No hay campos definidos</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Crea el primer campo que verán los vendedores al hacer login
+              Crea el primer campo que verán los Jaguares Aviva al hacer login
             </p>
             <Button className="mt-4" onClick={() => openDialog()}>
               <Plus className="h-4 w-4 mr-2" /> Crear primer campo
@@ -302,7 +302,7 @@ export default function OnboardingFieldsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Vista previa del formulario</CardTitle>
-            <CardDescription>Así verán los vendedores este formulario al ingresar por primera vez</CardDescription>
+            <CardDescription>Así verán los Jaguares Aviva este formulario al ingresar por primera vez</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="max-w-md space-y-4 p-4 border rounded-lg bg-muted/30">
@@ -381,7 +381,7 @@ export default function OnboardingFieldsPage() {
                   id="placeholder"
                   value={form.placeholder}
                   onChange={(e) => setForm({ ...form, placeholder: e.target.value })}
-                  placeholder="Texto de ayuda que verá el vendedor"
+                  placeholder="Texto de ayuda que verá el Jaguar Aviva"
                 />
               </div>
 

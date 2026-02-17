@@ -176,7 +176,7 @@ export default function SellerOnboardingGate({ children }: Props) {
                 <ClipboardList className="h-7 w-7 text-primary" />
               </div>
               <CardTitle className="text-2xl font-headline text-accent">
-                ¡Bienvenido, {profile?.nombre?.split(' ')[0] || 'vendedor'}!
+                ¡Bienvenido, {profile?.nombre?.split(' ')[0] || 'Jaguar Aviva'}!
               </CardTitle>
               <CardDescription className="text-base mt-1">
                 Antes de comenzar, necesitamos algunos datos sobre ti.
