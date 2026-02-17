@@ -1537,3 +1537,110 @@ export async function revokeBadge(userBadgeId: string): Promise<void> {
     throw error;
   }
 }
+
+// ============================================================================
+// CURSOS (Course Authoring Module)
+// ============================================================================
+
+/** Devuelve todos los cursos de una organización */
+export async function getCourses(orgId: string = DEFAULT_ORG_ID): Promise<Course[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.COURSES),
+      where('organizationId', '==', orgId),
+      orderBy('createdAt', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as Course);
+  } catch (error) {
+    console.error('Error getting courses:', error);
+    return [];
+  }
+}
+
+/** Devuelve un curso por ID */
+export async function getCourse(courseId: string): Promise<Course | null> {
+  try {
+    const snap = await getDoc(getDocRef(COLLECTIONS.COURSES, courseId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as Course;
+  } catch (error) {
+    console.error('Error getting course:', error);
+    return null;
+  }
+}
+
+/** Crea un nuevo curso (status: draft) */
+export async function createCourse(
+  data: Omit<Course, 'id' | 'createdAt' | 'updatedAt' | 'publishedAt'>,
+  authorId: string
+): Promise<string> {
+  try {
+    const docRef = doc(getCollectionRef(COLLECTIONS.COURSES));
+    await setDoc(docRef, stripUndefined({
+      ...data,
+      authorId,
+      status: 'draft',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating course:', error);
+    throw error;
+  }
+}
+
+/** Actualiza campos de un curso existente */
+export async function updateCourse(
+  courseId: string,
+  updates: Partial<Omit<Course, 'id' | 'createdAt'>>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.COURSES, courseId);
+    await updateDoc(docRef, stripUndefined({
+      ...updates,
+      updatedAt: serverTimestamp(),
+    }) as WithFieldValue<DocumentData>);
+  } catch (error) {
+    console.error('Error updating course:', error);
+    throw error;
+  }
+}
+
+/** Elimina un curso y su progreso asociado */
+export async function deleteCourse(courseId: string): Promise<void> {
+  try {
+    await deleteDoc(getDocRef(COLLECTIONS.COURSES, courseId));
+  } catch (error) {
+    console.error('Error deleting course:', error);
+    throw error;
+  }
+}
+
+/** Publica un curso (draft → published) */
+export async function publishCourse(courseId: string): Promise<void> {
+  try {
+    await updateDoc(getDocRef(COLLECTIONS.COURSES, courseId), {
+      status: 'published',
+      publishedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error publishing course:', error);
+    throw error;
+  }
+}
+
+/** Archiva un curso (published → archived) */
+export async function archiveCourse(courseId: string): Promise<void> {
+  try {
+    await updateDoc(getDocRef(COLLECTIONS.COURSES, courseId), {
+      status: 'archived',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Error archiving course:', error);
+    throw error;
+  }
+}
