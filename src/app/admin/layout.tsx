@@ -36,7 +36,7 @@ const navigation: (NavItem | NavSection)[] = [
     section: 'Módulo: Desafíos',
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
-      { name: 'Rutas del Vendedor', href: '/admin/journey', icon: Route },
+      { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
       { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },

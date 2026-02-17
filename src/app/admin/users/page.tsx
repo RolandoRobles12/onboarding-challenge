@@ -31,7 +31,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: 'Super Admin',
   admin: 'Admin',
   trainer: 'Trainer',
-  seller: 'Vendedor',
+  seller: 'Jaguar Aviva',
 };
 
 const ROLE_COLORS: Record<UserRole, string> = {
