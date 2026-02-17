@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   getJourneyByProduct,
-  getProducts,
+  getProduct,
   getUserJourneyProgress,
   markJourneyStepComplete,
 } from '@/lib/firestore-service';
@@ -219,19 +219,21 @@ function JourneyDashboard({ userId, profile }: { userId: string; profile: NonNul
   const [progress, setProgress] = useState<UserJourneyProgress | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const productId = profile.producto || '';
 
   useEffect(() => {
     if (!productId) { setLoading(false); return; }
+    setLoading(true);
+    setLoadError(false);
 
     async function load() {
       try {
-        const [allProducts, foundJourney] = await Promise.all([
-          getProducts(),
+        const [foundProduct, foundJourney] = await Promise.all([
+          getProduct(productId),
           getJourneyByProduct(productId),
         ]);
-        const foundProduct = allProducts.find((p) => p.id === productId) ?? null;
         setProduct(foundProduct);
         setJourney(foundJourney);
 
@@ -240,7 +242,8 @@ function JourneyDashboard({ userId, profile }: { userId: string; profile: NonNul
           setProgress(prog);
         }
       } catch (err) {
-        console.error(err);
+        console.error('JourneyDashboard load error:', err);
+        setLoadError(true);
       } finally {
         setLoading(false);
       }
@@ -264,6 +267,24 @@ function JourneyDashboard({ userId, profile }: { userId: string; profile: NonNul
         {[1, 2, 3, 4].map((i) => (
           <Skeleton key={i} className="h-20 w-full rounded-xl" />
         ))}
+      </div>
+    );
+  }
+
+  // ── Load error ──
+  if (loadError) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-destructive/30 py-12 text-center gap-3">
+        <AlertCircle className="h-10 w-10 text-destructive/60" />
+        <div>
+          <h3 className="font-semibold">No se pudo cargar tu ruta</h3>
+          <p className="text-muted-foreground text-sm mt-1">
+            Verifica tu conexión y recarga la página.
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+          Recargar página
+        </Button>
       </div>
     );
   }
@@ -418,7 +439,7 @@ function AdminPanel({ name }: { name: string }) {
 // ─── Main dashboard ───────────────────────────────────────────────────────────
 
 export default function LMSDashboard() {
-  const { user, profile, logout, loading: authLoading } = useAuth();
+  const { user, profile, logout, refreshProfile } = useAuth();
   const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
   const firstName = profile?.nombre?.split(' ')[0] || user?.displayName?.split(' ')[0] || 'tú';
 
@@ -480,12 +501,33 @@ export default function LMSDashboard() {
                 <AdminPanel name={firstName} />
               ) : profile ? (
                 <JourneyDashboard userId={profile.uid} profile={profile} />
+              ) : user ? (
+                /* Authenticated but profile failed to load */
+                <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-14 text-center gap-3">
+                  <AlertCircle className="h-10 w-10 text-muted-foreground" />
+                  <div>
+                    <h3 className="font-semibold">No se pudo cargar tu perfil</h3>
+                    <p className="text-muted-foreground text-sm mt-1 max-w-xs">
+                      Hubo un problema al obtener tus datos. Intenta recargar tu sesión.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => refreshProfile()}>
+                    Recargar perfil
+                  </Button>
+                </div>
               ) : (
-                <div className="space-y-3">
-                  <Skeleton className="h-28 w-full rounded-xl" />
-                  {[1, 2, 3].map((i) => (
-                    <Skeleton key={i} className="h-20 w-full rounded-xl" />
-                  ))}
+                /* Not authenticated */
+                <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-14 text-center gap-3">
+                  <AlertCircle className="h-10 w-10 text-muted-foreground" />
+                  <div>
+                    <h3 className="font-semibold">Sesión no iniciada</h3>
+                    <p className="text-muted-foreground text-sm mt-1">
+                      Por favor inicia sesión para ver tu agenda.
+                    </p>
+                  </div>
+                  <Button asChild size="sm">
+                    <Link href="/login">Iniciar sesión</Link>
+                  </Button>
                 </div>
               )}
             </div>

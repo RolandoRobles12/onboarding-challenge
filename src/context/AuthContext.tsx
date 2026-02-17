@@ -129,15 +129,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (whitelistEntry) {
           try {
             await markWhitelistAsUsed(whitelistEntry.id);
-            console.log('Whitelist marked as used');
           } catch (error) {
             console.error('Error marking whitelist as used:', error);
-            // No es crítico, continuar
           }
         }
 
-        // Cargar el perfil recién creado
-        userProfile = await getUserProfile(currentUser.uid);
+        // Usar los datos recién creados directamente en vez de re-fetchear
+        // (evita race condition de consistencia eventual en Firestore)
+        userProfile = {
+          uid: currentUser.uid,
+          ...profileData,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+        } as UserProfile;
       }
 
       setProfile(userProfile);
