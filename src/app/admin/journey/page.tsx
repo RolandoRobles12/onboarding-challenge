@@ -456,6 +456,20 @@ export default function JourneyPage() {
     setSteps([...steps, newStep]);
   };
 
+  const insertStep = (afterIndex: number) => {
+    const newStep: JourneyStep = {
+      id: crypto.randomUUID(),
+      type: 'challenge',
+      order: afterIndex + 1,
+      title: 'Nuevo paso',
+      required: true,
+      config: {},
+    };
+    const newSteps = [...steps];
+    newSteps.splice(afterIndex + 1, 0, newStep);
+    setSteps(newSteps);
+  };
+
   const updateStep = (index: number, updated: JourneyStep) => {
     const newSteps = [...steps];
     newSteps[index] = updated;
@@ -649,22 +663,35 @@ export default function JourneyPage() {
                       <p>No hay pasos. Agrega el primero.</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-0">
                       {steps.map((step, index) => (
-                        <StepCard
-                          key={step.id}
-                          step={step}
-                          index={index}
-                          total={steps.length}
-                          quizzes={quizzes}
-                          courses={courses}
-                          signers={signers}
-                          badges={badges}
-                          onUpdate={(s) => updateStep(index, s)}
-                          onRemove={() => removeStep(index)}
-                          onMoveUp={() => moveStep(index, 'up')}
-                          onMoveDown={() => moveStep(index, 'down')}
-                        />
+                        <div key={step.id}>
+                          <StepCard
+                            step={step}
+                            index={index}
+                            total={steps.length}
+                            quizzes={quizzes}
+                            courses={courses}
+                            signers={signers}
+                            badges={badges}
+                            onUpdate={(s) => updateStep(index, s)}
+                            onRemove={() => removeStep(index)}
+                            onMoveUp={() => moveStep(index, 'up')}
+                            onMoveDown={() => moveStep(index, 'down')}
+                          />
+                          {/* Insert step connector */}
+                          <div className="flex items-center gap-2 py-1 group">
+                            <div className="flex-1 border-l-2 border-dashed border-muted ml-5 h-5" />
+                            <button
+                              onClick={() => insertStep(index)}
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 px-2 py-1 rounded-full border border-dashed border-muted hover:border-primary transition-all opacity-0 group-hover:opacity-100"
+                              title="Insertar paso aquí"
+                            >
+                              <Plus className="h-3 w-3" /> Insertar paso aquí
+                            </button>
+                            <div className="flex-1 border-r-2 border-dashed border-muted mr-5 h-5" />
+                          </div>
+                        </div>
                       ))}
                     </div>
                   )}

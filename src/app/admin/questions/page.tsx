@@ -46,6 +46,7 @@ export default function QuestionsPage() {
     modelAnswer: '',
   });
   const [validAnswerInput, setValidAnswerInput] = useState('');
+  const [distractorInput, setDistractorInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
 
@@ -115,6 +116,7 @@ export default function QuestionsPage() {
       });
       setTagsInput((question.tags || []).join(', '));
       setValidAnswerInput('');
+      setDistractorInput('');
       setSelectedProductId(question.productId);
     } else {
       setEditingQuestion(null);
@@ -136,6 +138,7 @@ export default function QuestionsPage() {
       });
       setTagsInput('');
       setValidAnswerInput('');
+      setDistractorInput('');
       setSelectedProductId(products[0]?.id || '');
     }
     setDialogOpen(true);
@@ -228,10 +231,21 @@ export default function QuestionsPage() {
         .map((tag) => tag.trim())
         .filter((tag) => tag.length > 0);
 
+      // For fill_in_the_blank: build final options = [correct word, ...distractors]
+      let finalOptions = formData.options;
+      if (formData.type === 'fill_in_the_blank' && (formData.validAnswers || []).length > 0) {
+        const distractors = formData.options.filter(o => !o.isCorrect);
+        finalOptions = [
+          { text: formData.validAnswers![0], isCorrect: true, order: 0 },
+          ...distractors.map((d, i) => ({ ...d, order: i + 1 })),
+        ];
+      }
+
       const questionData = {
         organizationId: 'aviva-credito',
         productId: selectedProductId,
         ...formData,
+        options: finalOptions,
         tags,
         active: true,
       };
@@ -374,7 +388,7 @@ export default function QuestionsPage() {
                     </Select>
                     <p className="text-[11px] text-muted-foreground leading-tight">
                       {formData.type === 'true_false' && 'El alumno elige entre Verdadero o Falso.'}
-                      {formData.type === 'fill_in_the_blank' && 'El alumno escribe la respuesta. Usa ___ en el texto para indicar el espacio.'}
+                      {formData.type === 'fill_in_the_blank' && 'El alumno toca la respuesta del banco de palabras. Usa ___ en el texto para indicar el espacio en blanco.'}
                       {formData.type === 'open_text' && 'Respuesta libre. Calificación manual por el admin.'}
                       {formData.type === 'single_choice' && 'El alumno elige una sola opción correcta.'}
                       {formData.type === 'multiple_choice' && 'El alumno puede elegir varias opciones correctas.'}
@@ -464,43 +478,86 @@ export default function QuestionsPage() {
 
                 {/* ── Fill in the blank ───────────────────────────────────── */}
                 {formData.type === 'fill_in_the_blank' && (
-                  <div className="space-y-2">
-                    <Label>Respuestas válidas * <span className="text-muted-foreground font-normal">(sin distinción de mayúsculas)</span></Label>
-                    <div className="flex gap-2">
-                      <Input
-                        value={validAnswerInput}
-                        onChange={e => setValidAnswerInput(e.target.value)}
-                        placeholder="Ej: crédito de consumo"
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            const val = validAnswerInput.trim();
-                            if (val && !formData.validAnswers?.includes(val)) {
-                              setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
-                              setValidAnswerInput('');
+                  <div className="space-y-4">
+                    {/* Correct answer variations */}
+                    <div className="space-y-2">
+                      <Label>Respuesta correcta * <span className="text-muted-foreground font-normal">(sin distinción de mayúsculas)</span></Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={validAnswerInput}
+                          onChange={e => setValidAnswerInput(e.target.value)}
+                          placeholder="Ej: crédito de consumo"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const val = validAnswerInput.trim();
+                              if (val && !formData.validAnswers?.includes(val)) {
+                                setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                                setValidAnswerInput('');
+                              }
                             }
+                          }}
+                        />
+                        <Button type="button" variant="outline" onClick={() => {
+                          const val = validAnswerInput.trim();
+                          if (val && !formData.validAnswers?.includes(val)) {
+                            setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                            setValidAnswerInput('');
                           }
-                        }}
-                      />
-                      <Button type="button" variant="outline" onClick={() => {
-                        const val = validAnswerInput.trim();
-                        if (val && !formData.validAnswers?.includes(val)) {
-                          setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
-                          setValidAnswerInput('');
-                        }
-                      }}>Agregar</Button>
-                    </div>
-                    {(formData.validAnswers || []).length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {(formData.validAnswers || []).map(ans => (
-                          <Badge key={ans} variant="secondary" className="gap-1 cursor-pointer"
-                            onClick={() => setFormData(prev => ({ ...prev, validAnswers: (prev.validAnswers || []).filter(a => a !== ans) }))}>
-                            {ans} <X className="h-3 w-3" />
-                          </Badge>
-                        ))}
+                        }}>Agregar</Button>
                       </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">Agrega cada variación de respuesta válida. El alumno debe escribir alguna de estas.</p>
+                      {(formData.validAnswers || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {(formData.validAnswers || []).map(ans => (
+                            <Badge key={ans} variant="default" className="gap-1 cursor-pointer"
+                              onClick={() => setFormData(prev => ({ ...prev, validAnswers: (prev.validAnswers || []).filter(a => a !== ans) }))}>
+                              ✓ {ans} <X className="h-3 w-3" />
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">La primera variación se mostrará en el banco de palabras. Agrega más variaciones para aceptar distintas escrituras (ej: con/sin tilde).</p>
+                    </div>
+
+                    {/* Word bank distractors */}
+                    <div className="space-y-2">
+                      <Label>Palabras distractoras <span className="text-muted-foreground font-normal">(banco de palabras)</span></Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={distractorInput}
+                          onChange={e => setDistractorInput(e.target.value)}
+                          placeholder="Ej: crédito hipotecario"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const val = distractorInput.trim();
+                              if (val && !formData.options.some(o => o.text === val)) {
+                                setFormData(prev => ({ ...prev, options: [...prev.options.filter(o => !o.isCorrect), { text: val, isCorrect: false, order: prev.options.length }] }));
+                                setDistractorInput('');
+                              }
+                            }
+                          }}
+                        />
+                        <Button type="button" variant="outline" onClick={() => {
+                          const val = distractorInput.trim();
+                          if (val && !formData.options.some(o => o.text === val)) {
+                            setFormData(prev => ({ ...prev, options: [...prev.options.filter(o => !o.isCorrect), { text: val, isCorrect: false, order: prev.options.length }] }));
+                            setDistractorInput('');
+                          }
+                        }}>Agregar</Button>
+                      </div>
+                      {formData.options.filter(o => !o.isCorrect).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {formData.options.filter(o => !o.isCorrect).map((opt, i) => (
+                            <Badge key={i} variant="secondary" className="gap-1 cursor-pointer"
+                              onClick={() => setFormData(prev => ({ ...prev, options: prev.options.filter(o => o.text !== opt.text) }))}>
+                              {opt.text} <X className="h-3 w-3" />
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">Agrega palabras incorrectas que aparecerán junto a la correcta. El alumno debe seleccionar la respuesta correcta tocándola.</p>
+                    </div>
                   </div>
                 )}
 
