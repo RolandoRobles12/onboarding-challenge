@@ -41,8 +41,8 @@ import type {
   OnboardingField,
   CertificateSigner,
   CertificateConfig,
-  DEFAULT_CERTIFICATE_CONFIG,
 } from './types-scalable';
+import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
   Course,
   LearningPath,

@@ -88,11 +88,12 @@ export default function CertificadosPage() {
   // ── Load on mount ──────────────────────────────────────────────────────────
   useEffect(() => {
     loadSigners();
-    getCertificateConfig().then(c => {
-      const { organizationId: _o, updatedAt: _u, ...rest } = c;
-      setCertConfig(rest);
-      setLoadingConfig(false);
-    });
+    getCertificateConfig()
+      .then(c => {
+        const { organizationId: _o, updatedAt: _u, ...rest } = c;
+        setCertConfig(rest);
+      })
+      .finally(() => setLoadingConfig(false));
   }, []);
 
   // ── Signers helpers ────────────────────────────────────────────────────────
