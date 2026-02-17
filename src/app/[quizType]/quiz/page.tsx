@@ -26,6 +26,18 @@ import { Checkbox } from '@/components/ui/checkbox';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getQuizzes, getQuestionsByIds } from '@/lib/firestore-service';
+import type { AssessmentConfig } from '@/lib/types-scalable';
+import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
+
+/** Fisher-Yates shuffle — returns a new shuffled array */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // Estructura de runtime que el motor del quiz espera
 interface RuntimeQuestion {
@@ -56,6 +68,10 @@ function QuizComponent() {
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
   const [loadingQuiz, setLoadingQuiz] = useState(true);
+  const [assessmentCfg, setAssessmentCfg] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT_CONFIG);
+  // Countdown timer (seconds remaining, only when timeLimit > 0)
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const [timeExpired, setTimeExpired] = useState(false);
 
   const [gameState, setGameState] = useState({
     currentMissionIndex: 0,
@@ -105,26 +121,37 @@ function QuizComponent() {
         const allQuestions = await getQuestionsByIds(allIds);
         const qMap = Object.fromEntries(allQuestions.map((q) => [q.id, q]));
 
-        const runtimeMissions: RuntimeMission[] = q.missions
+        // Read assessment config (defaults if not set on the quiz doc)
+        const cfg: AssessmentConfig = { ...DEFAULT_ASSESSMENT_CONFIG, ...(q as any).assessmentConfig };
+        setAssessmentCfg(cfg);
+
+        const buildOptions = (rawOptions: { text: string; isCorrect: boolean; order: number }[]) => {
+          const sorted = rawOptions.sort((a, b) => a.order - b.order).map(o => ({ text: o.text, isCorrect: o.isCorrect }));
+          return cfg.randomizeOptions ? shuffle(sorted) : sorted;
+        };
+
+        let runtimeMissions: RuntimeMission[] = q.missions
           .sort((a, b) => a.order - b.order)
-          .map((mission) => ({
-            id: mission.id,
-            title: mission.title,
-            narrative: mission.narrative,
-            questions: mission.questionIds
+          .map((mission) => {
+            let questions = mission.questionIds
               .map((id) => qMap[id])
               .filter(Boolean)
               .map((q) => ({
                 text: q.text,
-                options: q.options
-                  .sort((a, b) => a.order - b.order)
-                  .map((o) => ({ text: o.text, isCorrect: o.isCorrect })),
+                options: buildOptions(q.options),
                 isTricky: q.isTricky || q.type === 'tricky',
                 isMultiSelect: q.type === 'multiple_choice',
-              })),
-          }));
+              }));
+            if (cfg.randomizeQuestions) questions = shuffle(questions);
+            return { id: mission.id, title: mission.title, narrative: mission.narrative, questions };
+          });
 
         setQuiz({ title: q.title, missions: runtimeMissions });
+
+        // Initialize countdown if time limit is set
+        if (cfg.timeLimit > 0) {
+          setTimeRemaining(cfg.timeLimit);
+        }
       } catch (error) {
         console.error('Error loading quiz:', error);
       } finally {
@@ -138,10 +165,23 @@ function QuizComponent() {
   useEffect(() => {
     if (!startTime || gameState.showMissionFailedScreen || gameState.showMissionIntro) return;
     const timer = setInterval(() => {
-      setElapsedTime(Math.round((Date.now() - startTime) / 1000));
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      setElapsedTime(elapsed);
+
+      // Countdown timer
+      if (assessmentCfg.timeLimit > 0) {
+        const remaining = assessmentCfg.timeLimit - elapsed;
+        if (remaining <= 0) {
+          setTimeRemaining(0);
+          setTimeExpired(true);
+          clearInterval(timer);
+        } else {
+          setTimeRemaining(remaining);
+        }
+      }
     }, 1000);
     return () => clearInterval(timer);
-  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro]);
+  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro, assessmentCfg.timeLimit]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -360,6 +400,20 @@ function QuizComponent() {
     }));
   };
 
+  // Time expired → auto-navigate to results
+  useEffect(() => {
+    if (!timeExpired || !quiz) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('score', gameState.score.toString());
+    params.set('totalQuestions', totalQuestions.toString());
+    params.set('bonusLives', gameState.bonusLives.toString());
+    params.set('quizTitle', quiz.title);
+    params.set('timeExpired', '1');
+    if (startTime) params.set('startTime', startTime.toString());
+    router.push(`/${quizType}/results?${params.toString()}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeExpired]);
+
   if (loadingQuiz) {
     return (
       <Card>
@@ -533,10 +587,24 @@ function QuizComponent() {
           <Button variant="outline" size="icon" onClick={toggleMusic} className="rounded-full shadow-md border" aria-label={isMusicPlaying ? "Pausar música" : "Reproducir música"}>
             {isMusicPlaying ? <VolumeX className="h-5 w-5" /> : <Music className="h-5 w-5" />}
           </Button>
-          <div className="flex items-center gap-2 bg-card p-2 px-3 rounded-full shadow-md border text-primary">
-            <Timer className="h-5 w-5" />
-            <span className="font-mono text-sm font-bold w-12 text-center">{formatTime(elapsedTime)}</span>
-          </div>
+          {assessmentCfg.timeLimit > 0 ? (
+            // Countdown timer
+            <div className={cn(
+              "flex items-center gap-2 p-2 px-3 rounded-full shadow-md border font-mono text-sm font-bold",
+              timeRemaining <= 60
+                ? "bg-destructive/10 border-destructive text-destructive animate-pulse"
+                : "bg-card border text-primary"
+            )}>
+              <Timer className="h-5 w-5" />
+              <span className="w-12 text-center">{formatTime(timeRemaining)}</span>
+            </div>
+          ) : (
+            // Elapsed timer
+            <div className="flex items-center gap-2 bg-card p-2 px-3 rounded-full shadow-md border text-primary">
+              <Timer className="h-5 w-5" />
+              <span className="font-mono text-sm font-bold w-12 text-center">{formatTime(elapsedTime)}</span>
+            </div>
+          )}
           <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
             <Avatar className="h-10 w-10 text-primary" />
             {gameState.bonusLives > 0 && (

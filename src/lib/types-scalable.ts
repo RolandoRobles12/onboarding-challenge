@@ -13,7 +13,13 @@ export type UserRole = 'super_admin' | 'admin' | 'trainer' | 'seller';
 
 export type QuizDifficulty = 'easy' | 'medium' | 'hard';
 
-export type QuestionType = 'single_choice' | 'multiple_choice' | 'tricky';
+export type QuestionType =
+  | 'single_choice'      // Una opción correcta (radio)
+  | 'multiple_choice'    // Varias opciones correctas (checkbox)
+  | 'true_false'         // Verdadero o Falso
+  | 'fill_in_the_blank'  // Completar el espacio en blanco
+  | 'open_text'          // Respuesta abierta (calificación manual)
+  | 'tricky';            // Pregunta trampa: bonus lives si se acierta
 
 export type BadgeType =
   | 'first_mission'
@@ -25,6 +31,32 @@ export type BadgeType =
   | 'master_level'
   | 'no_errors'
   | 'all_products';
+
+// Cuándo mostrar feedback al alumno
+export type FeedbackMode = 'always' | 'after_attempt' | 'never';
+
+/** Configuración del motor de evaluación por quiz */
+export interface AssessmentConfig {
+  timeLimit: number;            // Segundos. 0 = sin límite
+  passingScore: number;         // % mínimo para aprobar. 0 = no aplica
+  maxAttempts: number;          // 0 = intentos ilimitados
+  randomizeQuestions: boolean;  // Aleatoriza orden de preguntas en cada intento
+  randomizeOptions: boolean;    // Aleatoriza orden de opciones en cada pregunta
+  showFeedback: FeedbackMode;   // Cuándo mostrar respuesta correcta/explicación
+  allowRetry: boolean;          // Puede reintentar si reprueba
+  isStandalone: boolean;        // Examen independiente (no requiere pertenecer a una ruta)
+}
+
+export const DEFAULT_ASSESSMENT_CONFIG: AssessmentConfig = {
+  timeLimit: 0,
+  passingScore: 0,
+  maxAttempts: 0,
+  randomizeQuestions: false,
+  randomizeOptions: false,
+  showFeedback: 'after_attempt',
+  allowRetry: true,
+  isStandalone: false,
+};
 
 export type AchievementCriteriaType =
   | 'score_threshold'
@@ -97,6 +129,9 @@ export interface Quiz {
   published: boolean;
   version: number; // para versionado
 
+  // Configuración del motor de evaluación
+  assessmentConfig: AssessmentConfig;
+
   // Configuración de gamificación
   gamificationConfig: GamificationConfig;
 
@@ -157,7 +192,8 @@ export interface Question {
 
   // Configuración especial
   isTricky: boolean;
-  trickyHint?: string; // pista para preguntas tricky
+  trickyHint?: string;       // pista para preguntas tricky
+  validAnswers?: string[];   // para fill_in_the_blank: textos válidos (case-insensitive)
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -636,6 +672,7 @@ export interface QuestionFormData {
   category?: string;
   isTricky: boolean;
   trickyHint?: string;
+  validAnswers?: string[]; // para fill_in_the_blank: respuestas válidas alternativas
 }
 
 // ============================================================================

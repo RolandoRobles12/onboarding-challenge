@@ -16,10 +16,12 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ChevronDown, ChevronUp,
-  Search, Check, Loader2, BookOpen, Save, Eye
+  Search, Check, Loader2, BookOpen, Save, Eye, Timer, Target,
+  RefreshCw, Shuffle, MessageSquare, ShieldCheck
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Mission, QuizDifficulty, Question } from '@/lib/types-scalable';
+import type { Mission, QuizDifficulty, Question, AssessmentConfig, FeedbackMode } from '@/lib/types-scalable';
+import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
 
 interface MissionDraft {
   id: string;
@@ -208,6 +210,7 @@ export default function NewQuizPage() {
   const { products } = useProducts();
 
   const [saving, setSaving] = useState(false);
+  const [assessmentConfig, setAssessmentConfig] = useState<AssessmentConfig>({ ...DEFAULT_ASSESSMENT_CONFIG });
   const [formData, setFormData] = useState({
     productId: '',
     title: '',
@@ -318,6 +321,7 @@ export default function NewQuizPage() {
           order: 0,
           version: 1,
           createdBy: profile?.uid || '',
+          assessmentConfig,
           gamificationConfig: {
             enableLives: true,
             maxLives: 3,
@@ -325,7 +329,7 @@ export default function NewQuizPage() {
             pointsPerCorrectAnswer: 10,
             pointsPerTrickyQuestion: 20,
             penaltyPerError: 0,
-            timeBonus: true,
+            timeBonus: assessmentConfig.timeLimit > 0,
             enableBadges: true,
             badgeIds: ['first_mission', 'perfectionist', 'speedster', 'no_errors'],
           },
@@ -449,6 +453,141 @@ export default function NewQuizPage() {
                 </div>
               )}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Assessment Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-primary" /> Configuración de Evaluación
+          </CardTitle>
+          <CardDescription>Define las reglas del motor de evaluación para este desafío</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Timer */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5 text-sm">
+                <Timer className="h-4 w-4 text-orange-500" /> Tiempo límite (minutos)
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={180}
+                value={assessmentConfig.timeLimit > 0 ? Math.round(assessmentConfig.timeLimit / 60) : ''}
+                onChange={e => {
+                  const mins = parseInt(e.target.value) || 0;
+                  setAssessmentConfig(prev => ({ ...prev, timeLimit: mins * 60 }));
+                }}
+                placeholder="0 = sin límite"
+                className="h-9"
+              />
+              <p className="text-[11px] text-muted-foreground">0 = sin límite de tiempo</p>
+            </div>
+
+            {/* Passing score */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5 text-sm">
+                <Target className="h-4 w-4 text-emerald-500" /> Puntuación mínima (%)
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={assessmentConfig.passingScore || ''}
+                onChange={e => setAssessmentConfig(prev => ({ ...prev, passingScore: parseInt(e.target.value) || 0 }))}
+                placeholder="0 = no aplica"
+                className="h-9"
+              />
+              <p className="text-[11px] text-muted-foreground">% mínimo para aprobar. 0 = no aplica</p>
+            </div>
+
+            {/* Max attempts */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5 text-sm">
+                <RefreshCw className="h-4 w-4 text-blue-500" /> Intentos máximos
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={10}
+                value={assessmentConfig.maxAttempts || ''}
+                onChange={e => setAssessmentConfig(prev => ({ ...prev, maxAttempts: parseInt(e.target.value) || 0 }))}
+                placeholder="0 = ilimitados"
+                className="h-9"
+              />
+              <p className="text-[11px] text-muted-foreground">0 = intentos ilimitados</p>
+            </div>
+          </div>
+
+          {/* Feedback mode */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5 text-sm">
+              <MessageSquare className="h-4 w-4 text-purple-500" /> Mostrar feedback
+            </Label>
+            <div className="flex gap-2 flex-wrap">
+              {([
+                ['always', 'Inmediato (por pregunta)'],
+                ['after_attempt', 'Al terminar el intento'],
+                ['never', 'No mostrar'],
+              ] as [FeedbackMode, string][]).map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setAssessmentConfig(prev => ({ ...prev, showFeedback: val }))}
+                  className={`px-3 py-1.5 text-sm rounded-lg border-2 transition-all ${
+                    assessmentConfig.showFeedback === val
+                      ? 'border-primary bg-primary/10 text-primary font-medium'
+                      : 'border-muted hover:border-primary/40'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Toggles */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {[
+              {
+                key: 'randomizeQuestions' as const,
+                label: 'Aleatorizar orden de preguntas',
+                description: 'Cada intento tendrá las preguntas en orden diferente',
+                icon: Shuffle,
+              },
+              {
+                key: 'randomizeOptions' as const,
+                label: 'Aleatorizar opciones de respuesta',
+                description: 'Las opciones de cada pregunta se mezclarán aleatoriamente',
+                icon: Shuffle,
+              },
+              {
+                key: 'allowRetry' as const,
+                label: 'Permitir reintento al reprobar',
+                description: 'El vendedor puede volver a intentar si no alcanza el mínimo',
+                icon: RefreshCw,
+              },
+              {
+                key: 'isStandalone' as const,
+                label: 'Examen independiente',
+                description: 'Aparece en el catálogo sin necesitar pertenecer a una ruta',
+                icon: BookOpen,
+              },
+            ].map(({ key, label, description, icon: Icon }) => (
+              <div key={key} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20">
+                <Switch
+                  checked={assessmentConfig[key] as boolean}
+                  onCheckedChange={v => setAssessmentConfig(prev => ({ ...prev, [key]: v }))}
+                />
+                <div>
+                  <p className="text-sm font-medium">{label}</p>
+                  <p className="text-xs text-muted-foreground">{description}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
