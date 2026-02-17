@@ -495,6 +495,37 @@ export interface CertificateSigner {
   createdBy: string;
 }
 
+// ============================================================================
+// CONFIGURACIÓN DE PLANTILLA DE CERTIFICADO
+// ============================================================================
+
+export interface CertificateConfig {
+  organizationId: string;
+  // Textos editables
+  title: string;          // "CERTIFICADO DE PARTICIPACIÓN"
+  subtitle: string;       // "Desafío Aviva"
+  bodyPrefix: string;     // "Este certificado se otorga a"
+  bodySuffix: string;     // "Por haber completado exitosamente el módulo de"
+  // Visuales
+  showLogo: boolean;
+  showMascot: boolean;
+  // Colores (hex)
+  bgColorStart: string;   // inicio del gradiente
+  bgColorEnd: string;     // fin del gradiente
+  updatedAt: Timestamp;
+}
+
+export const DEFAULT_CERTIFICATE_CONFIG: Omit<CertificateConfig, 'organizationId' | 'updatedAt'> = {
+  title: 'CERTIFICADO DE PARTICIPACIÓN',
+  subtitle: 'Desafío Aviva',
+  bodyPrefix: 'Este certificado se otorga a',
+  bodySuffix: 'Por haber completado exitosamente el módulo de',
+  showLogo: true,
+  showMascot: true,
+  bgColorStart: '#0a6b3e',
+  bgColorEnd: '#1aaa64',
+};
+
 export interface Journey {
   id: string;
   organizationId: string;

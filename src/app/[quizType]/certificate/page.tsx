@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Certificate } from '@/components/Certificate';
 import type { CertificateSignerData } from '@/components/Certificate';
-import { getJourneyByProduct, getCertificateSigners } from '@/lib/firestore-service';
+import { getJourneyByProduct, getCertificateSigners, getCertificateConfig } from '@/lib/firestore-service';
+import type { CertificateConfig } from '@/lib/types-scalable';
 
 function CertificateContent() {
   const searchParams = useSearchParams();
@@ -19,6 +20,7 @@ function CertificateContent() {
   const totalQuestionsStr = searchParams.get('totalQuestions');
 
   const [signers, setSigners] = useState<CertificateSignerData[]>([]);
+  const [certConfig, setCertConfig] = useState<Partial<CertificateConfig>>({});
 
   useEffect(() => {
     if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
@@ -29,10 +31,15 @@ function CertificateContent() {
     // Load signers configured for this product's certificate step
     async function loadSigners() {
       try {
-        const [journey, allSigners] = await Promise.all([
+        const [journey, allSigners, config] = await Promise.all([
           getJourneyByProduct(quizType!),
           getCertificateSigners(),
+          getCertificateConfig(),
         ]);
+
+        // Apply certificate template config
+        const { organizationId: _o, updatedAt: _u, ...configRest } = config;
+        setCertConfig(configRest);
 
         if (journey) {
           const certStep = journey.steps.find(s => s.type === 'certificate');
@@ -76,6 +83,7 @@ function CertificateContent() {
       totalQuestions={totalQuestions}
       date={new Date().toLocaleDateString('es-MX', { year: 'numeric', month: 'long', day: 'numeric' })}
       signers={signers}
+      config={certConfig}
     />
   );
 }

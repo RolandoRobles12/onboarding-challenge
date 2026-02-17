@@ -40,6 +40,8 @@ import type {
   UserJourneyProgress,
   OnboardingField,
   CertificateSigner,
+  CertificateConfig,
+  DEFAULT_CERTIFICATE_CONFIG,
 } from './types-scalable';
 import type {
   Course,
@@ -68,6 +70,7 @@ const COLLECTIONS = {
   JOURNEY_PROGRESS: 'journey_progress',
   ONBOARDING_FIELDS: 'onboarding_fields',
   CERTIFICATE_SIGNERS: 'certificate_signers',
+  CERTIFICATE_CONFIG: 'certificate_config',
   // --- Módulo: Cursos (Course Module) ---
   COURSES: 'courses',
   ENROLLMENTS: 'enrollments',
@@ -1363,6 +1366,50 @@ export async function deleteCertificateSigner(signerId: string): Promise<void> {
     await updateCertificateSigner(signerId, { active: false });
   } catch (error) {
     console.error('Error deleting certificate signer:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// CONFIGURACIÓN DE PLANTILLA DE CERTIFICADO
+// ============================================================================
+
+export async function getCertificateConfig(orgId: string = DEFAULT_ORG_ID): Promise<CertificateConfig> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.CERTIFICATE_CONFIG, orgId);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return { organizationId: orgId, ...docSnap.data() } as CertificateConfig;
+    }
+    // Return defaults if not configured yet
+    return {
+      organizationId: orgId,
+      ...DEFAULT_CERTIFICATE_CONFIG,
+      updatedAt: Timestamp.now(),
+    };
+  } catch (error) {
+    console.error('Error getting certificate config:', error);
+    return {
+      organizationId: orgId,
+      ...DEFAULT_CERTIFICATE_CONFIG,
+      updatedAt: Timestamp.now(),
+    };
+  }
+}
+
+export async function saveCertificateConfig(
+  config: Omit<CertificateConfig, 'organizationId' | 'updatedAt'>,
+  orgId: string = DEFAULT_ORG_ID
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.CERTIFICATE_CONFIG, orgId);
+    await setDoc(docRef, {
+      ...config,
+      organizationId: orgId,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    console.error('Error saving certificate config:', error);
     throw error;
   }
 }
