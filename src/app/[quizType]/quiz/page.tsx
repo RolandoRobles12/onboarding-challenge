@@ -559,9 +559,14 @@ function QuizComponent() {
 
   // ── Fill-in-the-blank: tap-to-place word bank ──────────────────────────────
   const renderFillInBlank = () => {
-    const correctWord = currentQuestion.options.find(o => o.isCorrect)?.text ?? '';
-    // Shuffle options once per question render (stable via questionKey usage)
-    const words = [...currentQuestion.options].sort(() => Math.random() - 0.5);
+    // Build word bank: prefer options (new format with isCorrect flags),
+    // fall back to validAnswers for legacy questions that have no options stored.
+    const wordBank: { text: string; isCorrect: boolean }[] =
+      currentQuestion.options.length > 0
+        ? currentQuestion.options
+        : (currentQuestion.validAnswers || []).map((v, i) => ({ text: v, isCorrect: i === 0 }));
+    const correctWord = wordBank.find(o => o.isCorrect)?.text ?? (currentQuestion.validAnswers?.[0] ?? '');
+    const words = [...wordBank].sort(() => Math.random() - 0.5);
     const parts = currentQuestion.text.split(/_{2,}/);
     const isCorrect = fillAnswer === correctWord;
 
@@ -622,7 +627,7 @@ function QuizComponent() {
         {/* Verify button */}
         {!gameState.isAnswered && fillAnswer && (
           <Button
-            onClick={() => processAnswer(currentQuestion.options.filter(o => o.text === fillAnswer))}
+            onClick={() => processAnswer(wordBank.filter(o => o.text === fillAnswer))}
             className="w-full text-primary-foreground bg-primary hover:bg-primary/90"
             size="lg"
           >
