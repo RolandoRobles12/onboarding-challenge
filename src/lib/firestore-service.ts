@@ -41,8 +41,10 @@ import type {
   OnboardingField,
   CertificateSigner,
   CertificateConfig,
-  DEFAULT_CERTIFICATE_CONFIG,
+  Badge,
+  UserBadge,
 } from './types-scalable';
+import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
   Course,
   LearningPath,
@@ -71,6 +73,8 @@ const COLLECTIONS = {
   ONBOARDING_FIELDS: 'onboarding_fields',
   CERTIFICATE_SIGNERS: 'certificate_signers',
   CERTIFICATE_CONFIG: 'certificate_config',
+  BADGES: 'badges',
+  USER_BADGES: 'user_badges',
   // --- Módulo: Cursos (Course Module) ---
   COURSES: 'courses',
   ENROLLMENTS: 'enrollments',
@@ -1410,6 +1414,126 @@ export async function saveCertificateConfig(
     }, { merge: true });
   } catch (error) {
     console.error('Error saving certificate config:', error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// INSIGNIAS (BADGES)
+// ============================================================================
+
+export async function getAllBadges(orgId: string = DEFAULT_ORG_ID): Promise<Badge[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.BADGES),
+      where('organizationId', '==', orgId),
+      orderBy('createdAt', 'asc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as Badge);
+  } catch (error) {
+    console.error('Error getting badges:', error);
+    return [];
+  }
+}
+
+export async function createBadge(
+  badge: Omit<Badge, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<string> {
+  try {
+    const docRef = doc(getCollectionRef(COLLECTIONS.BADGES));
+    await setDoc(docRef, {
+      ...badge,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating badge:', error);
+    throw error;
+  }
+}
+
+export async function updateBadge(
+  badgeId: string,
+  updates: Partial<Omit<Badge, 'id' | 'createdAt'>>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.BADGES, badgeId);
+    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() });
+  } catch (error) {
+    console.error('Error updating badge:', error);
+    throw error;
+  }
+}
+
+export async function deleteBadge(badgeId: string): Promise<void> {
+  try {
+    await updateBadge(badgeId, { active: false });
+  } catch (error) {
+    console.error('Error deleting badge:', error);
+    throw error;
+  }
+}
+
+/** Otorga una insignia a un usuario (evita duplicados del mismo badge para el mismo user) */
+export async function awardBadge(
+  userId: string,
+  badge: Badge,
+  options: { awardedBy: string; reason?: string; journeyStepId?: string }
+): Promise<string> {
+  try {
+    // Check for duplicate
+    const existing = query(
+      getCollectionRef(COLLECTIONS.USER_BADGES),
+      where('userId', '==', userId),
+      where('badgeId', '==', badge.id)
+    );
+    const snap = await getDocs(existing);
+    if (!snap.empty) return snap.docs[0].id; // already awarded
+
+    const docRef = doc(getCollectionRef(COLLECTIONS.USER_BADGES));
+    await setDoc(docRef, {
+      userId,
+      badgeId: badge.id,
+      badgeName: badge.name,
+      badgeEmoji: badge.emoji,
+      badgeColor: badge.color,
+      badgeDescription: badge.description,
+      earnedAt: serverTimestamp(),
+      awardedBy: options.awardedBy,
+      reason: options.reason ?? null,
+      journeyStepId: options.journeyStepId ?? null,
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error awarding badge:', error);
+    throw error;
+  }
+}
+
+export async function getUserBadges(userId: string): Promise<UserBadge[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.USER_BADGES),
+      where('userId', '==', userId),
+      orderBy('earnedAt', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as UserBadge);
+  } catch (error) {
+    console.error('Error getting user badges:', error);
+    return [];
+  }
+}
+
+/** Revoca una insignia otorgada a un usuario */
+export async function revokeBadge(userBadgeId: string): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.USER_BADGES, userBadgeId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error revoking badge:', error);
     throw error;
   }
 }
