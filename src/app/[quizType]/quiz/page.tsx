@@ -26,6 +26,18 @@ import { Checkbox } from '@/components/ui/checkbox';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getQuizzes, getQuestionsByIds } from '@/lib/firestore-service';
+import type { AssessmentConfig } from '@/lib/types-scalable';
+import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
+
+/** Fisher-Yates shuffle — returns a new shuffled array */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 // Estructura de runtime que el motor del quiz espera
 interface RuntimeQuestion {
@@ -33,7 +45,20 @@ interface RuntimeQuestion {
   options: Option[];
   isTricky?: boolean;
   isMultiSelect?: boolean;
-  type?: string; // 'fill_in_the_blank' | 'open_text' | 'single_choice' | ...
+  isOpenText?: boolean;
+  isFillInBlank?: boolean;   // fill_in_the_blank: tap-to-place word bank
+  validAnswers?: string[];   // conceptos clave para auto-evaluación
+  modelAnswer?: string;      // respuesta modelo (se muestra como feedback)
+  type?: string;             // tipo original de la pregunta
+}
+
+/** Evalúa una respuesta abierta contra los conceptos clave. Retorna 0–1. */
+function evaluateOpenText(answer: string, keywords: string[]): { score: number; found: string[]; missing: string[] } {
+  if (keywords.length === 0) return { score: 1, found: [], missing: [] };
+  const normalized = answer.toLowerCase();
+  const found = keywords.filter(kw => normalized.includes(kw.toLowerCase()));
+  const missing = keywords.filter(kw => !normalized.includes(kw.toLowerCase()));
+  return { score: found.length / keywords.length, found, missing };
 }
 interface RuntimeMission {
   id: string;
@@ -57,6 +82,10 @@ function QuizComponent() {
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
   const [loadingQuiz, setLoadingQuiz] = useState(true);
+  const [assessmentCfg, setAssessmentCfg] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT_CONFIG);
+  // Countdown timer (seconds remaining, only when timeLimit > 0)
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const [timeExpired, setTimeExpired] = useState(false);
 
   const [gameState, setGameState] = useState({
     currentMissionIndex: 0,
@@ -80,10 +109,10 @@ function QuizComponent() {
   });
   const [showParticles, setShowParticles] = useState(false);
   const [particleType, setParticleType] = useState<'correct' | 'wrong'>('correct');
-  // Fill-in-the-blank state: word the user tapped from word bank
+  const [openTextAnswer, setOpenTextAnswer] = useState('');
+  const [openTextResult, setOpenTextResult] = useState<{ score: number; found: string[]; missing: string[] } | null>(null);
+  // Fill-in-the-blank: word the user tapped from the word bank
   const [fillAnswer, setFillAnswer] = useState<string | null>(null);
-  // Open text state
-  const [openAnswer, setOpenAnswer] = useState('');
 
   const quizType = searchParams.get('quizType') || '';
   const avatarKey = searchParams.get('avatar');
@@ -110,27 +139,42 @@ function QuizComponent() {
         const allQuestions = await getQuestionsByIds(allIds);
         const qMap = Object.fromEntries(allQuestions.map((q) => [q.id, q]));
 
-        const runtimeMissions: RuntimeMission[] = q.missions
+        // Read assessment config (defaults if not set on the quiz doc)
+        const cfg: AssessmentConfig = { ...DEFAULT_ASSESSMENT_CONFIG, ...(q as any).assessmentConfig };
+        setAssessmentCfg(cfg);
+
+        const buildOptions = (rawOptions: { text: string; isCorrect: boolean; order: number }[]) => {
+          const sorted = rawOptions.sort((a, b) => a.order - b.order).map(o => ({ text: o.text, isCorrect: o.isCorrect }));
+          return cfg.randomizeOptions ? shuffle(sorted) : sorted;
+        };
+
+        let runtimeMissions: RuntimeMission[] = q.missions
           .sort((a, b) => a.order - b.order)
-          .map((mission) => ({
-            id: mission.id,
-            title: mission.title,
-            narrative: mission.narrative,
-            questions: mission.questionIds
+          .map((mission) => {
+            let questions = mission.questionIds
               .map((id) => qMap[id])
               .filter(Boolean)
               .map((q) => ({
                 text: q.text,
+                options: q.type === 'open_text' ? [] : buildOptions(q.options),
                 type: q.type,
-                options: q.options
-                  .sort((a, b) => a.order - b.order)
-                  .map((o) => ({ text: o.text, isCorrect: o.isCorrect })),
                 isTricky: q.isTricky || q.type === 'tricky',
                 isMultiSelect: q.type === 'multiple_choice',
-              })),
-          }));
+                isOpenText: q.type === 'open_text',
+                isFillInBlank: q.type === 'fill_in_the_blank',
+                validAnswers: q.validAnswers || [],
+                modelAnswer: q.modelAnswer,
+              }));
+            if (cfg.randomizeQuestions) questions = shuffle(questions);
+            return { id: mission.id, title: mission.title, narrative: mission.narrative, questions };
+          });
 
         setQuiz({ title: q.title, missions: runtimeMissions });
+
+        // Initialize countdown if time limit is set
+        if (cfg.timeLimit > 0) {
+          setTimeRemaining(cfg.timeLimit);
+        }
       } catch (error) {
         console.error('Error loading quiz:', error);
       } finally {
@@ -144,10 +188,23 @@ function QuizComponent() {
   useEffect(() => {
     if (!startTime || gameState.showMissionFailedScreen || gameState.showMissionIntro) return;
     const timer = setInterval(() => {
-      setElapsedTime(Math.round((Date.now() - startTime) / 1000));
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      setElapsedTime(elapsed);
+
+      // Countdown timer
+      if (assessmentCfg.timeLimit > 0) {
+        const remaining = assessmentCfg.timeLimit - elapsed;
+        if (remaining <= 0) {
+          setTimeRemaining(0);
+          setTimeExpired(true);
+          clearInterval(timer);
+        } else {
+          setTimeRemaining(remaining);
+        }
+      }
     }, 1000);
     return () => clearInterval(timer);
-  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro]);
+  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro, assessmentCfg.timeLimit]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -307,8 +364,9 @@ function QuizComponent() {
       specialFeedback: null,
       lifeUsedMessage: lifeUsed ? "¡Has usado una vida extra para continuar!" : null,
     };
+    setOpenTextAnswer('');
+    setOpenTextResult(null);
     setFillAnswer(null);
-    setOpenAnswer('');
 
     if (gameState.currentQuestionIndex < (currentMission?.questions.length || 0) - 1) {
       setGameState(prev => ({
@@ -344,6 +402,34 @@ function QuizComponent() {
     }
   };
 
+  const handleOpenTextSubmit = () => {
+    if (!currentQuestion?.isOpenText || gameState.isAnswered) return;
+    const result = evaluateOpenText(openTextAnswer, currentQuestion.validAnswers || []);
+    setOpenTextResult(result);
+    // Correct if score ≥ 70%, or if no keywords were defined (score = 1)
+    const isCorrect = result.score >= 0.7;
+    setParticleType(isCorrect ? 'correct' : 'wrong');
+    setShowParticles(true);
+    setTimeout(() => setShowParticles(false), 1500);
+
+    let newMissionFailed = false;
+    let newMistakeMade = gameState.mistakeMadeInMission;
+    if (!isCorrect) {
+      if (gameState.mistakeMadeInMission) newMissionFailed = true;
+      else newMistakeMade = true;
+    }
+    setGameState(prev => ({
+      ...prev,
+      isAnswered: true,
+      score: isCorrect ? prev.score + 1 : prev.score,
+      missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
+      missionFailed: newMissionFailed,
+      mistakeMadeInMission: newMistakeMade,
+      lastAnswerWasCorrect: isCorrect,
+      streak: isCorrect ? prev.streak + 1 : 0,
+    }));
+  };
+
   const startMission = () => {
     if (gameState.currentMissionIndex === 0 && !startTime) {
       setStartTime(Date.now());
@@ -367,6 +453,20 @@ function QuizComponent() {
       specialFeedback: null,
     }));
   };
+
+  // Time expired → auto-navigate to results
+  useEffect(() => {
+    if (!timeExpired || !quiz) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('score', gameState.score.toString());
+    params.set('totalQuestions', totalQuestions.toString());
+    params.set('bonusLives', gameState.bonusLives.toString());
+    params.set('quizTitle', quiz.title);
+    params.set('timeExpired', '1');
+    if (startTime) params.set('startTime', startTime.toString());
+    router.push(`/${quizType}/results?${params.toString()}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeExpired]);
 
   if (loadingQuiz) {
     return (
@@ -457,16 +557,17 @@ function QuizComponent() {
 
   const questionKey = `${gameState.currentMissionIndex}-${gameState.currentQuestionIndex}`;
 
-  // ── Fill-in-the-blank: tap-to-place word bank ─────────────────────────────
+  // ── Fill-in-the-blank: tap-to-place word bank ──────────────────────────────
   const renderFillInBlank = () => {
     const correctWord = currentQuestion.options.find(o => o.isCorrect)?.text ?? '';
+    // Shuffle options once per question render (stable via questionKey usage)
     const words = [...currentQuestion.options].sort(() => Math.random() - 0.5);
     const parts = currentQuestion.text.split(/_{2,}/);
     const isCorrect = fillAnswer === correctWord;
 
     return (
       <div className="space-y-5">
-        {/* Question text with blank slot */}
+        {/* Question text with inline blank slot */}
         <div className="text-base font-medium leading-relaxed flex flex-wrap items-center gap-x-1.5 gap-y-2">
           {parts.map((part, i) => (
             <span key={i} className="contents">
@@ -529,80 +630,11 @@ function QuizComponent() {
           </Button>
         )}
 
-        {/* Post-answer reveal */}
+        {/* Post-answer: show correct word if wrong */}
         {gameState.isAnswered && !isCorrect && (
           <div className="text-sm text-muted-foreground bg-muted rounded-lg px-4 py-3">
             La respuesta correcta era: <strong className="text-foreground">{correctWord}</strong>
           </div>
-        )}
-      </div>
-    );
-  };
-
-  // ── Open text: textarea + valid keywords hint ──────────────────────────────
-  const renderOpenText = () => {
-    const keywords = currentQuestion.options.map(o => o.text);
-
-    const handleOpenTextSubmit = () => {
-      const lower = openAnswer.toLowerCase();
-      const matched = currentQuestion.options.filter(o =>
-        lower.includes(o.text.toLowerCase())
-      );
-      const correctMatched = matched.filter(o => o.isCorrect);
-      const isCorrect = correctMatched.length > 0;
-      processAnswer(isCorrect ? currentQuestion.options.filter(o => o.isCorrect).slice(0, 1) : []);
-    };
-
-    return (
-      <div className="space-y-4">
-        <textarea
-          className={cn(
-            'w-full rounded-xl border-2 p-4 text-sm resize-none h-28 transition-colors focus:outline-none',
-            gameState.isAnswered
-              ? gameState.lastAnswerWasCorrect
-                ? 'border-green-400 bg-green-50'
-                : 'border-destructive/40 bg-destructive/5'
-              : 'border-primary/30 focus:border-primary',
-          )}
-          placeholder="Escribe tu respuesta aquí..."
-          value={openAnswer}
-          onChange={e => setOpenAnswer(e.target.value)}
-          disabled={gameState.isAnswered}
-        />
-
-        {/* Valid keywords — always visible as a guide */}
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">
-            Respuestas válidas
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {keywords.map((kw, i) => (
-              <span
-                key={i}
-                className={cn(
-                  'text-xs px-2.5 py-1 rounded-lg font-medium border',
-                  gameState.isAnswered
-                    ? currentQuestion.options[i]?.isCorrect
-                      ? 'bg-green-100 border-green-300 text-green-700'
-                      : 'bg-muted border-muted text-muted-foreground'
-                    : 'bg-amber-100 border-amber-300 text-amber-800',
-                )}
-              >
-                {kw}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {!gameState.isAnswered && (
-          <Button
-            onClick={handleOpenTextSubmit}
-            disabled={!openAnswer.trim()}
-            className="w-full text-primary-foreground bg-primary hover:bg-primary/90"
-            size="lg"
-          >
-            <Check className="mr-2 h-4 w-4" /> Verificar respuesta
-          </Button>
         )}
       </div>
     );
@@ -692,10 +724,24 @@ function QuizComponent() {
           <Button variant="outline" size="icon" onClick={toggleMusic} className="rounded-full shadow-md border" aria-label={isMusicPlaying ? "Pausar música" : "Reproducir música"}>
             {isMusicPlaying ? <VolumeX className="h-5 w-5" /> : <Music className="h-5 w-5" />}
           </Button>
-          <div className="flex items-center gap-2 bg-card p-2 px-3 rounded-full shadow-md border text-primary">
-            <Timer className="h-5 w-5" />
-            <span className="font-mono text-sm font-bold w-12 text-center">{formatTime(elapsedTime)}</span>
-          </div>
+          {assessmentCfg.timeLimit > 0 ? (
+            // Countdown timer
+            <div className={cn(
+              "flex items-center gap-2 p-2 px-3 rounded-full shadow-md border font-mono text-sm font-bold",
+              timeRemaining <= 60
+                ? "bg-destructive/10 border-destructive text-destructive animate-pulse"
+                : "bg-card border text-primary"
+            )}>
+              <Timer className="h-5 w-5" />
+              <span className="w-12 text-center">{formatTime(timeRemaining)}</span>
+            </div>
+          ) : (
+            // Elapsed timer
+            <div className="flex items-center gap-2 bg-card p-2 px-3 rounded-full shadow-md border text-primary">
+              <Timer className="h-5 w-5" />
+              <span className="font-mono text-sm font-bold w-12 text-center">{formatTime(elapsedTime)}</span>
+            </div>
+          )}
           <div className="relative flex items-center gap-2 bg-card p-2 rounded-full shadow-md border">
             <Avatar className="h-10 w-10 text-primary" />
             {gameState.bonusLives > 0 && (
@@ -724,14 +770,66 @@ function QuizComponent() {
               <CardDescription>{currentMission.title}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {currentQuestion.type === 'fill_in_the_blank'
-                ? renderFillInBlank()
-                : currentQuestion.type === 'open_text'
-                ? renderOpenText()
-                : renderOptions()}
+              {currentQuestion.isFillInBlank ? (
+                renderFillInBlank()
+              ) : currentQuestion.isOpenText ? (
+                <div className="space-y-3">
+                  <textarea
+                    className="w-full rounded-lg border border-input bg-background p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                    rows={4}
+                    placeholder="Escribe tu respuesta aquí..."
+                    value={openTextAnswer}
+                    onChange={e => setOpenTextAnswer(e.target.value)}
+                    disabled={gameState.isAnswered}
+                  />
+                  {/* Respuestas válidas — always visible as a guide */}
+                  {(currentQuestion.validAnswers?.length ?? 0) > 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Respuestas válidas</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {currentQuestion.validAnswers!.map(kw => (
+                          <span
+                            key={kw}
+                            className={cn(
+                              'text-xs px-2 py-0.5 rounded-full border font-medium',
+                              gameState.isAnswered && openTextResult
+                                ? openTextResult.found.includes(kw)
+                                  ? 'bg-accent/20 text-accent border-accent/30'
+                                  : 'bg-destructive/10 text-destructive border-destructive/20'
+                                : 'bg-amber-100 text-amber-800 border-amber-300',
+                            )}
+                          >
+                            {gameState.isAnswered && openTextResult
+                              ? openTextResult.found.includes(kw) ? `✓ ${kw}` : `✗ ${kw}`
+                              : kw}
+                          </span>
+                        ))}
+                      </div>
+                      {gameState.isAnswered && currentQuestion.modelAnswer && (
+                        <div className="mt-2 rounded-lg bg-muted p-3 text-sm">
+                          <p className="font-medium text-xs text-muted-foreground mb-1">Respuesta modelo:</p>
+                          <p className="text-foreground leading-relaxed">{currentQuestion.modelAnswer}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                renderOptions()
+              )}
             </CardContent>
 
-            {currentQuestion.isMultiSelect && !gameState.isAnswered && currentQuestion.type !== 'fill_in_the_blank' && currentQuestion.type !== 'open_text' && (
+            {/* Verify buttons */}
+            {currentQuestion.isOpenText && !gameState.isAnswered && (
+              <CardFooter>
+                <Button onClick={handleOpenTextSubmit} disabled={!openTextAnswer.trim()} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
+                  <Check className="mr-2" />
+                  Verificar respuesta
+                </Button>
+              </CardFooter>
+            )}
+
+            {currentQuestion.isMultiSelect && !gameState.isAnswered && (
               <CardFooter>
                 <Button onClick={handleVerifyMultiSelectAnswer} disabled={gameState.selectedOptions.length === 0} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
                   <Check className="mr-2" />
@@ -746,7 +844,11 @@ function QuizComponent() {
                   "rounded-lg border-2",
                   gameState.lastAnswerWasCorrect ? "bg-accent/10 border-accent text-accent" : "bg-destructive/10 border-destructive text-destructive"
                 )}>
-                  <AlertTitle className="font-bold">{gameState.lastAnswerWasCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
+                  <AlertTitle className="font-bold">
+                    {gameState.lastAnswerWasCorrect
+                      ? (currentQuestion.isOpenText ? `¡Bien! (${Math.round((openTextResult?.score ?? 1) * 100)}%)` : '¡Correcto!')
+                      : (currentQuestion.isOpenText ? `Incompleto (${Math.round((openTextResult?.score ?? 0) * 100)}%)` : '¡Ups! Respuesta incorrecta.')}
+                  </AlertTitle>
                   <AlertDescription>
                     {gameState.specialFeedback ||
                       (gameState.lastAnswerWasCorrect
