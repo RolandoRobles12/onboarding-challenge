@@ -787,3 +787,44 @@ export interface TrainerDashboardData {
     completionRate: number;
   }[];
 }
+
+// ============================================================================
+// SCENARIO / SIMULACIÓN DE ESCENARIOS
+// ============================================================================
+
+/** Una opción de respuesta en un punto de decisión */
+export interface ScenarioChoice {
+  id: string;
+  text: string;
+  isOptimal: boolean;
+  consequence: string;
+  points: number;
+}
+
+/** Un nodo en el flujo del escenario */
+export interface ScenarioNode {
+  id: string;
+  type: 'narration' | 'dialogue' | 'decision';
+  speaker?: string;
+  avatarEmoji?: string;
+  text: string;
+  choices?: ScenarioChoice[];
+  nextNodeId?: string;
+  choiceNextNodeId?: string;
+}
+
+/** Escenario completo de simulación */
+export interface Scenario {
+  id: string;
+  organizationId: string;
+  productId: string;
+  title: string;
+  description: string;
+  setting: string;
+  settingEmoji: string;
+  nodes: ScenarioNode[];
+  firstNodeId: string;
+  totalPoints: number;
+  passingScore: number;
+  active: boolean;
+}

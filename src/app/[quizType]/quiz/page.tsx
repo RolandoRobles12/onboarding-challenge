@@ -46,8 +46,10 @@ interface RuntimeQuestion {
   isTricky?: boolean;
   isMultiSelect?: boolean;
   isOpenText?: boolean;
+  isFillInBlank?: boolean;   // fill_in_the_blank: tap-to-place word bank
   validAnswers?: string[];   // conceptos clave para auto-evaluación
   modelAnswer?: string;      // respuesta modelo (se muestra como feedback)
+  type?: string;             // tipo original de la pregunta
 }
 
 /** Evalúa una respuesta abierta contra los conceptos clave. Retorna 0–1. */
@@ -109,6 +111,8 @@ function QuizComponent() {
   const [particleType, setParticleType] = useState<'correct' | 'wrong'>('correct');
   const [openTextAnswer, setOpenTextAnswer] = useState('');
   const [openTextResult, setOpenTextResult] = useState<{ score: number; found: string[]; missing: string[] } | null>(null);
+  // Fill-in-the-blank: word the user tapped from the word bank
+  const [fillAnswer, setFillAnswer] = useState<string | null>(null);
 
   const quizType = searchParams.get('quizType') || '';
   const avatarKey = searchParams.get('avatar');
@@ -153,9 +157,11 @@ function QuizComponent() {
               .map((q) => ({
                 text: q.text,
                 options: q.type === 'open_text' ? [] : buildOptions(q.options),
+                type: q.type,
                 isTricky: q.isTricky || q.type === 'tricky',
                 isMultiSelect: q.type === 'multiple_choice',
                 isOpenText: q.type === 'open_text',
+                isFillInBlank: q.type === 'fill_in_the_blank',
                 validAnswers: q.validAnswers || [],
                 modelAnswer: q.modelAnswer,
               }));
@@ -360,6 +366,7 @@ function QuizComponent() {
     };
     setOpenTextAnswer('');
     setOpenTextResult(null);
+    setFillAnswer(null);
 
     if (gameState.currentQuestionIndex < (currentMission?.questions.length || 0) - 1) {
       setGameState(prev => ({
@@ -550,6 +557,89 @@ function QuizComponent() {
 
   const questionKey = `${gameState.currentMissionIndex}-${gameState.currentQuestionIndex}`;
 
+  // ── Fill-in-the-blank: tap-to-place word bank ──────────────────────────────
+  const renderFillInBlank = () => {
+    const correctWord = currentQuestion.options.find(o => o.isCorrect)?.text ?? '';
+    // Shuffle options once per question render (stable via questionKey usage)
+    const words = [...currentQuestion.options].sort(() => Math.random() - 0.5);
+    const parts = currentQuestion.text.split(/_{2,}/);
+    const isCorrect = fillAnswer === correctWord;
+
+    return (
+      <div className="space-y-5">
+        {/* Question text with inline blank slot */}
+        <div className="text-base font-medium leading-relaxed flex flex-wrap items-center gap-x-1.5 gap-y-2">
+          {parts.map((part, i) => (
+            <span key={i} className="contents">
+              <span>{part}</span>
+              {i < parts.length - 1 && (
+                <button
+                  className={cn(
+                    'min-w-[7rem] px-3 py-1.5 rounded-lg border-b-2 text-sm font-semibold transition-all',
+                    gameState.isAnswered
+                      ? isCorrect
+                        ? 'border-green-500 bg-green-50 text-green-700'
+                        : 'border-destructive bg-destructive/10 text-destructive'
+                      : fillAnswer
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-muted-foreground/40 text-muted-foreground/60',
+                  )}
+                  onClick={() => !gameState.isAnswered && setFillAnswer(null)}
+                >
+                  {fillAnswer ?? '— toca una palabra —'}
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+
+        {/* Word bank */}
+        {!gameState.isAnswered && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Arrastra o toca la respuesta correcta
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {words.map((w, i) => (
+                <button
+                  key={i}
+                  onClick={() => setFillAnswer(w.text)}
+                  disabled={fillAnswer === w.text}
+                  className={cn(
+                    'px-4 py-2 rounded-xl border-2 text-sm font-medium transition-all select-none',
+                    fillAnswer === w.text
+                      ? 'border-primary/20 bg-primary/5 text-primary/40 cursor-not-allowed'
+                      : 'border-primary/40 bg-card text-primary hover:bg-primary/10 active:scale-95',
+                  )}
+                >
+                  {w.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Verify button */}
+        {!gameState.isAnswered && fillAnswer && (
+          <Button
+            onClick={() => processAnswer(currentQuestion.options.filter(o => o.text === fillAnswer))}
+            className="w-full text-primary-foreground bg-primary hover:bg-primary/90"
+            size="lg"
+          >
+            <Check className="mr-2 h-4 w-4" /> Verificar respuesta
+          </Button>
+        )}
+
+        {/* Post-answer: show correct word if wrong */}
+        {gameState.isAnswered && !isCorrect && (
+          <div className="text-sm text-muted-foreground bg-muted rounded-lg px-4 py-3">
+            La respuesta correcta era: <strong className="text-foreground">{correctWord}</strong>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderOptions = () => {
     return currentQuestion.options.map((option, index) => {
       const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
@@ -680,7 +770,9 @@ function QuizComponent() {
               <CardDescription>{currentMission.title}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {currentQuestion.isOpenText ? (
+              {currentQuestion.isFillInBlank ? (
+                renderFillInBlank()
+              ) : currentQuestion.isOpenText ? (
                 <div className="space-y-3">
                   <textarea
                     className="w-full rounded-lg border border-input bg-background p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
@@ -690,19 +782,30 @@ function QuizComponent() {
                     onChange={e => setOpenTextAnswer(e.target.value)}
                     disabled={gameState.isAnswered}
                   />
-                  {/* Keyword feedback after answering */}
-                  {gameState.isAnswered && openTextResult && (currentQuestion.validAnswers?.length ?? 0) > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-muted-foreground">Conceptos clave mencionados:</p>
+                  {/* Respuestas válidas — always visible as a guide */}
+                  {(currentQuestion.validAnswers?.length ?? 0) > 0 && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Respuestas válidas</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {openTextResult.found.map(kw => (
-                          <span key={kw} className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30">✓ {kw}</span>
-                        ))}
-                        {openTextResult.missing.map(kw => (
-                          <span key={kw} className="text-xs px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20">✗ {kw}</span>
+                        {currentQuestion.validAnswers!.map(kw => (
+                          <span
+                            key={kw}
+                            className={cn(
+                              'text-xs px-2 py-0.5 rounded-full border font-medium',
+                              gameState.isAnswered && openTextResult
+                                ? openTextResult.found.includes(kw)
+                                  ? 'bg-accent/20 text-accent border-accent/30'
+                                  : 'bg-destructive/10 text-destructive border-destructive/20'
+                                : 'bg-amber-100 text-amber-800 border-amber-300',
+                            )}
+                          >
+                            {gameState.isAnswered && openTextResult
+                              ? openTextResult.found.includes(kw) ? `✓ ${kw}` : `✗ ${kw}`
+                              : kw}
+                          </span>
                         ))}
                       </div>
-                      {currentQuestion.modelAnswer && (
+                      {gameState.isAnswered && currentQuestion.modelAnswer && (
                         <div className="mt-2 rounded-lg bg-muted p-3 text-sm">
                           <p className="font-medium text-xs text-muted-foreground mb-1">Respuesta modelo:</p>
                           <p className="text-foreground leading-relaxed">{currentQuestion.modelAnswer}</p>
