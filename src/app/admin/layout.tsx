@@ -19,9 +19,11 @@ import {
   ClipboardList,
   BookOpen,
   Target,
-  GraduationCap,
   Award,
   Medal,
+  Swords,
+  BellRing,
+  UserCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -34,23 +36,29 @@ type NavSection = { section: string; items: NavItem[] };
 const navigation: (NavItem | NavSection)[] = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   {
-    section: 'Módulo: Desafíos',
+    section: 'Catálogo de Contenido',
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
-      { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
-      { name: 'Certificados', href: '/admin/certificados', icon: Award },
+      { name: 'Cursos', href: '/admin/courses', icon: BookOpen },
+      { name: 'Desafíos', href: '/admin/quizzes', icon: Swords },
       { name: 'Insignias', href: '/admin/insignias', icon: Medal },
-      { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
-      { name: 'Evaluaciones', href: '/admin/quizzes', icon: Target },
     ],
   },
   {
-    section: 'Módulo: Cursos',
+    section: 'Rutas de Capacitación',
     items: [
-      { name: 'Cursos', href: '/admin/courses', icon: BookOpen },
-      { name: 'Rutas de Aprendizaje', href: '/admin/learning-paths', icon: GraduationCap },
+      { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
+      { name: 'Certificados', href: '/admin/certificados', icon: Award },
+    ],
+  },
+  {
+    section: 'Configuración',
+    items: [
+      { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
+      { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
+      { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },
     ],
   },
   {
@@ -209,11 +217,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <div className="flex-1">
               <h2 className="text-lg font-semibold text-foreground">
                 {(() => {
+                  const extraTitles: Record<string, string> = {
+                    '/admin/enrollments': 'Inscripciones y Progreso',
+                    '/admin/notifications': 'Notificaciones',
+                    '/admin/learning-paths': 'Rutas del Jaguar Aviva',
+                  };
+                  if (extraTitles[pathname]) return extraTitles[pathname];
                   for (const entry of navigation) {
                     if ('section' in entry) {
                       const found = entry.items.find((i) => i.href === pathname);
                       if (found) return found.name;
-                    } else if (entry.href === pathname) {
+                    } else if (!('section' in entry) && entry.href === pathname) {
                       return entry.name;
                     }
                   }

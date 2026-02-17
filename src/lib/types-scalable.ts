@@ -464,7 +464,14 @@ export interface ProductFormData {
 // JOURNEY (RUTA DEL VENDEDOR POR PRODUCTO)
 // ============================================================================
 
-export type JourneyStepType = 'info_form' | 'quiz' | 'results' | 'certificate' | 'badge';
+export type JourneyStepType =
+  | 'info_form'   // Formulario de datos del vendedor
+  | 'course'      // Curso estructurado del LMS
+  | 'challenge'   // Desafío gamificado (quiz con vidas)
+  | 'quiz'        // Evaluación formal (alias de challenge para compatibilidad)
+  | 'results'     // Pantalla de resultados
+  | 'certificate' // Emisión de certificado
+  | 'badge';      // Otorgamiento de insignia
 
 export interface JourneyStep {
   id: string;
@@ -473,10 +480,12 @@ export interface JourneyStep {
   title: string;
   required: boolean;
   config: {
-    quizId?: string;    // para pasos de tipo 'quiz'
+    quizId?: string;      // para pasos de tipo 'quiz' / 'challenge'
+    courseId?: string;    // para pasos de tipo 'course'
     description?: string;
     signerIds?: string[]; // para pasos de tipo 'certificate'
-    badgeId?: string;   // para pasos de tipo 'badge'
+    badgeId?: string;     // para pasos de tipo 'badge'
+    minimumScore?: number; // % mínimo para avanzar al siguiente paso
   };
 }
 
