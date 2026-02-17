@@ -464,7 +464,7 @@ export interface ProductFormData {
 // JOURNEY (RUTA DEL VENDEDOR POR PRODUCTO)
 // ============================================================================
 
-export type JourneyStepType = 'info_form' | 'quiz' | 'results' | 'certificate';
+export type JourneyStepType = 'info_form' | 'quiz' | 'results' | 'certificate' | 'badge';
 
 export interface JourneyStep {
   id: string;
@@ -473,9 +473,10 @@ export interface JourneyStep {
   title: string;
   required: boolean;
   config: {
-    quizId?: string; // para pasos de tipo 'quiz'
+    quizId?: string;    // para pasos de tipo 'quiz'
     description?: string;
     signerIds?: string[]; // para pasos de tipo 'certificate'
+    badgeId?: string;   // para pasos de tipo 'badge'
   };
 }
 
@@ -493,6 +494,40 @@ export interface CertificateSigner {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdBy: string;
+}
+
+// ============================================================================
+// INSIGNIAS (BADGES)
+// ============================================================================
+
+export interface Badge {
+  id: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  emoji: string;        // ej. "🏆", "⭐", "🎯"
+  color: string;        // color hex del fondo del badge
+  category?: string;   // ej. "Ventas", "Capacitación", "Liderazgo"
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+/** Registro de que un usuario ganó un badge (con datos denormalizados para no hacer joins) */
+export interface UserBadge {
+  id: string;
+  userId: string;
+  badgeId: string;
+  // Datos denormalizados del badge en el momento de otorgarse
+  badgeName: string;
+  badgeEmoji: string;
+  badgeColor: string;
+  badgeDescription: string;
+  // Contexto
+  earnedAt: Timestamp;
+  awardedBy: string;    // uid del admin o 'system' si es automático
+  reason?: string;      // ej. "Completó el módulo Jaguar Aviva Crédito"
+  journeyStepId?: string;
 }
 
 // ============================================================================

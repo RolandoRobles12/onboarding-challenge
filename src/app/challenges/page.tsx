@@ -6,7 +6,7 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
-import { Award, LogOut, Trophy, Rocket, ShieldCheck, ChevronLeft } from 'lucide-react';
+import { Award, LogOut, Trophy, Rocket, ShieldCheck, ChevronLeft, Medal } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -182,6 +182,14 @@ export default function ChallengesPage() {
                         <ShieldCheck className="h-3.5 w-3.5" /> Gestionar
                       </Button>
                     </Link>
+                  )}
+                  {user && (
+                    <Button asChild variant="ghost" className="text-accent-foreground hover:bg-accent/20">
+                      <Link href="/perfil">
+                        <Medal className="mr-2 h-4 w-4" />
+                        <span className="hidden sm:inline">Mi Perfil</span>
+                      </Link>
+                    </Button>
                   )}
                   {user && (
                     <Button

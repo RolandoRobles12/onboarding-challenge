@@ -21,6 +21,7 @@ import {
   Target,
   GraduationCap,
   Award,
+  Medal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -38,6 +39,7 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Productos', href: '/admin/products', icon: Package },
       { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
       { name: 'Certificados', href: '/admin/certificados', icon: Award },
+      { name: 'Insignias', href: '/admin/insignias', icon: Medal },
       { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
