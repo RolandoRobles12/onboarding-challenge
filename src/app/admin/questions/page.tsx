@@ -12,8 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
-import { HelpCircle, Plus, Pencil, Trash2, Search, Filter, Check, X } from 'lucide-react';
-import type { QuestionFormData, QuizDifficulty, QuestionType } from '@/lib/types-scalable';
+import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine } from 'lucide-react';
+import type { QuestionFormData, QuizDifficulty, QuestionType, QuestionOption } from '@/lib/types-scalable';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 
@@ -42,9 +42,46 @@ export default function QuestionsPage() {
     category: '',
     isTricky: false,
     trickyHint: '',
+    validAnswers: [],
+    modelAnswer: '',
   });
+  const [validAnswerInput, setValidAnswerInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
+
+  // ── Helpers for question type switching ──────────────────────────────────
+  function getDefaultOptionsForType(type: QuestionType): Omit<QuestionOption, 'id'>[] {
+    if (type === 'true_false') {
+      return [
+        { text: 'Verdadero', isCorrect: false, order: 0 },
+        { text: 'Falso', isCorrect: false, order: 1 },
+      ];
+    }
+    if (type === 'open_text') return [];
+    return [
+      { text: '', isCorrect: false, order: 0 },
+      { text: '', isCorrect: false, order: 1 },
+    ];
+  }
+
+  function handleTypeChange(newType: QuestionType) {
+    setFormData(prev => ({
+      ...prev,
+      type: newType,
+      options: getDefaultOptionsForType(newType),
+      isTricky: newType === 'tricky' ? true : prev.isTricky,
+      validAnswers: newType === 'fill_in_the_blank' ? (prev.validAnswers || []) : [],
+    }));
+  }
+
+  const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
+    single_choice: 'Selección Simple',
+    multiple_choice: 'Selección Múltiple',
+    true_false: 'Verdadero / Falso',
+    fill_in_the_blank: 'Completar espacio',
+    open_text: 'Respuesta abierta',
+    tricky: 'Pregunta Tricky ⚡',
+  };
 
   const filteredQuestions = useMemo(() => {
     return questions.filter((question) => {
@@ -73,8 +110,11 @@ export default function QuestionsPage() {
         category: question.category || '',
         isTricky: question.isTricky,
         trickyHint: question.trickyHint || '',
+        validAnswers: question.validAnswers || [],
+        modelAnswer: question.modelAnswer || '',
       });
       setTagsInput((question.tags || []).join(', '));
+      setValidAnswerInput('');
       setSelectedProductId(question.productId);
     } else {
       setEditingQuestion(null);
@@ -91,8 +131,11 @@ export default function QuestionsPage() {
         category: '',
         isTricky: false,
         trickyHint: '',
+        validAnswers: [],
+        modelAnswer: '',
       });
       setTagsInput('');
+      setValidAnswerInput('');
       setSelectedProductId(products[0]?.id || '');
     }
     setDialogOpen(true);
@@ -153,33 +196,28 @@ export default function QuestionsPage() {
       return;
     }
 
-    // Validaciones
-    if (formData.options.length < 2) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Debe haber al menos 2 opciones.',
-      });
-      return;
-    }
-
-    const correctOptions = formData.options.filter(opt => opt.isCorrect);
-    if (correctOptions.length === 0) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Debe haber al menos una respuesta correcta.',
-      });
-      return;
-    }
-
-    if (formData.type === 'single_choice' && correctOptions.length > 1) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'En preguntas de selección simple solo puede haber una respuesta correcta.',
-      });
-      return;
+    // Validaciones según tipo
+    if (formData.type === 'open_text') {
+      // Sin opciones — no validar
+    } else if (formData.type === 'fill_in_the_blank') {
+      if (!formData.validAnswers || formData.validAnswers.length === 0) {
+        toast({ variant: 'destructive', title: 'Error', description: 'Agrega al menos una respuesta válida.' });
+        return;
+      }
+    } else {
+      if (formData.options.length < 2) {
+        toast({ variant: 'destructive', title: 'Error', description: 'Debe haber al menos 2 opciones.' });
+        return;
+      }
+      const correctOptions = formData.options.filter(opt => opt.isCorrect);
+      if (correctOptions.length === 0) {
+        toast({ variant: 'destructive', title: 'Error', description: 'Debe haber al menos una respuesta correcta.' });
+        return;
+      }
+      if ((formData.type === 'single_choice' || formData.type === 'true_false') && correctOptions.length > 1) {
+        toast({ variant: 'destructive', title: 'Error', description: 'Solo puede haber una respuesta correcta para este tipo.' });
+        return;
+      }
     }
 
     setSaving(true);
@@ -325,31 +363,29 @@ export default function QuestionsPage() {
                 {/* Tipo y dificultad */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="type">Tipo *</Label>
-                    <Select
-                      value={formData.type}
-                      onValueChange={(value) => setFormData({ ...formData, type: value as QuestionType })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                    <Label>Tipo *</Label>
+                    <Select value={formData.type} onValueChange={(v) => handleTypeChange(v as QuestionType)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="single_choice">Selección Simple</SelectItem>
-                        <SelectItem value="multiple_choice">Selección Múltiple</SelectItem>
-                        <SelectItem value="tricky">Pregunta Tricky</SelectItem>
+                        {(Object.entries(QUESTION_TYPE_LABELS) as [QuestionType, string][]).map(([val, label]) => (
+                          <SelectItem key={val} value={val}>{label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
+                    <p className="text-[11px] text-muted-foreground leading-tight">
+                      {formData.type === 'true_false' && 'El alumno elige entre Verdadero o Falso.'}
+                      {formData.type === 'fill_in_the_blank' && 'El alumno escribe la respuesta. Usa ___ en el texto para indicar el espacio.'}
+                      {formData.type === 'open_text' && 'Respuesta libre. Calificación manual por el admin.'}
+                      {formData.type === 'single_choice' && 'El alumno elige una sola opción correcta.'}
+                      {formData.type === 'multiple_choice' && 'El alumno puede elegir varias opciones correctas.'}
+                      {formData.type === 'tricky' && 'Otorga una vida extra si se responde correctamente.'}
+                    </p>
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="difficulty">Dificultad *</Label>
-                    <Select
-                      value={formData.difficulty}
-                      onValueChange={(value) => setFormData({ ...formData, difficulty: value as QuizDifficulty })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                    <Label>Dificultad *</Label>
+                    <Select value={formData.difficulty} onValueChange={(v) => setFormData({ ...formData, difficulty: v as QuizDifficulty })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="easy">Fácil</SelectItem>
                         <SelectItem value="medium">Medio</SelectItem>
@@ -359,67 +395,196 @@ export default function QuestionsPage() {
                   </div>
                 </div>
 
-                {/* Opciones */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Opciones de Respuesta *</Label>
-                    <Button type="button" variant="outline" size="sm" onClick={addOption}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      Agregar opción
-                    </Button>
-                  </div>
-
+                {/* ── Opciones (single, multiple, tricky) ────────────────── */}
+                {(formData.type === 'single_choice' || formData.type === 'multiple_choice' || formData.type === 'tricky') && (
                   <div className="space-y-2">
-                    {formData.options.map((option, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <div className="flex items-center">
+                    <div className="flex items-center justify-between">
+                      <Label>Opciones de Respuesta *</Label>
+                      <Button type="button" variant="outline" size="sm" onClick={addOption}>
+                        <Plus className="h-4 w-4 mr-1" /> Agregar opción
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {formData.options.map((option, index) => (
+                        <div key={index} className="flex items-center gap-2">
                           <Switch
                             checked={option.isCorrect}
                             onCheckedChange={(checked) => updateOption(index, 'isCorrect', checked)}
                           />
+                          <Input
+                            value={option.text}
+                            onChange={(e) => updateOption(index, 'text', e.target.value)}
+                            placeholder={`Opción ${index + 1}`}
+                            className="flex-1"
+                          />
+                          {formData.options.length > 2 && (
+                            <Button type="button" variant="ghost" size="icon" onClick={() => removeOption(index)}>
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          )}
                         </div>
-                        <Input
-                          value={option.text}
-                          onChange={(e) => updateOption(index, 'text', e.target.value)}
-                          placeholder={`Opción ${index + 1}`}
-                          required
-                          className="flex-1"
-                        />
-                        {formData.options.length > 2 && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => removeOption(index)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        )}
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Activa el switch para marcar las respuestas correctas</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Activa el switch para marcar las respuestas correctas
-                  </p>
-                </div>
+                )}
 
-                {/* Pregunta Tricky */}
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={formData.isTricky}
-                    onCheckedChange={(checked) => setFormData({ ...formData, isTricky: checked })}
-                  />
-                  <Label>Pregunta Tricky (otorga vida extra si se responde correctamente)</Label>
-                </div>
-
-                {formData.isTricky && (
+                {/* ── Verdadero / Falso ───────────────────────────────────── */}
+                {formData.type === 'true_false' && (
                   <div className="space-y-2">
-                    <Label htmlFor="trickyHint">Pista para pregunta tricky</Label>
+                    <Label>Respuesta correcta *</Label>
+                    <div className="flex gap-3">
+                      {(['Verdadero', 'Falso'] as const).map((val, idx) => {
+                        const isSelected = formData.options[idx]?.isCorrect;
+                        return (
+                          <button
+                            key={val}
+                            type="button"
+                            onClick={() => {
+                              const opts = [
+                                { text: 'Verdadero', isCorrect: val === 'Verdadero', order: 0 },
+                                { text: 'Falso', isCorrect: val === 'Falso', order: 1 },
+                              ];
+                              setFormData(prev => ({ ...prev, options: opts }));
+                            }}
+                            className={`flex-1 py-3 rounded-lg border-2 font-medium text-sm transition-all ${
+                              isSelected
+                                ? 'border-primary bg-primary/10 text-primary'
+                                : 'border-muted hover:border-primary/40'
+                            }`}
+                          >
+                            {val === 'Verdadero' ? '✓ Verdadero' : '✗ Falso'}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Selecciona cuál es la respuesta correcta</p>
+                  </div>
+                )}
+
+                {/* ── Fill in the blank ───────────────────────────────────── */}
+                {formData.type === 'fill_in_the_blank' && (
+                  <div className="space-y-2">
+                    <Label>Respuestas válidas * <span className="text-muted-foreground font-normal">(sin distinción de mayúsculas)</span></Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={validAnswerInput}
+                        onChange={e => setValidAnswerInput(e.target.value)}
+                        placeholder="Ej: crédito de consumo"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const val = validAnswerInput.trim();
+                            if (val && !formData.validAnswers?.includes(val)) {
+                              setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                              setValidAnswerInput('');
+                            }
+                          }
+                        }}
+                      />
+                      <Button type="button" variant="outline" onClick={() => {
+                        const val = validAnswerInput.trim();
+                        if (val && !formData.validAnswers?.includes(val)) {
+                          setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                          setValidAnswerInput('');
+                        }
+                      }}>Agregar</Button>
+                    </div>
+                    {(formData.validAnswers || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {(formData.validAnswers || []).map(ans => (
+                          <Badge key={ans} variant="secondary" className="gap-1 cursor-pointer"
+                            onClick={() => setFormData(prev => ({ ...prev, validAnswers: (prev.validAnswers || []).filter(a => a !== ans) }))}>
+                            {ans} <X className="h-3 w-3" />
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">Agrega cada variación de respuesta válida. El alumno debe escribir alguna de estas.</p>
+                  </div>
+                )}
+
+                {/* ── Open text ──────────────────────────────────────────── */}
+                {formData.type === 'open_text' && (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 flex items-start gap-3 text-sm">
+                      <PenLine className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                      <div className="text-blue-700">
+                        <p className="font-medium">Auto-evaluación por palabras clave</p>
+                        <p className="text-xs mt-0.5">Define los conceptos clave que debe mencionar el alumno. Se califica automáticamente: 100% si menciona todos, proporcional si menciona algunos.</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Conceptos clave obligatorios <span className="text-muted-foreground font-normal">(auto-evaluación)</span></Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={validAnswerInput}
+                          onChange={e => setValidAnswerInput(e.target.value)}
+                          placeholder="Ej: tasa de interés"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const val = validAnswerInput.trim();
+                              if (val && !formData.validAnswers?.includes(val)) {
+                                setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                                setValidAnswerInput('');
+                              }
+                            }
+                          }}
+                        />
+                        <Button type="button" variant="outline" onClick={() => {
+                          const val = validAnswerInput.trim();
+                          if (val && !formData.validAnswers?.includes(val)) {
+                            setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                            setValidAnswerInput('');
+                          }
+                        }}>Agregar</Button>
+                      </div>
+                      {(formData.validAnswers || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {(formData.validAnswers || []).map(kw => (
+                            <Badge key={kw} variant="secondary" className="gap-1 cursor-pointer"
+                              onClick={() => setFormData(prev => ({ ...prev, validAnswers: (prev.validAnswers || []).filter(k => k !== kw) }))}>
+                              {kw} <X className="h-3 w-3" />
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">
+                        Si no defines conceptos clave, cualquier respuesta se considerará válida.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Respuesta modelo <span className="text-muted-foreground font-normal">(referencia para el alumno)</span></Label>
+                      <Textarea
+                        value={formData.modelAnswer || ''}
+                        onChange={e => setFormData(prev => ({ ...prev, modelAnswer: e.target.value }))}
+                        placeholder="Escribe aquí la respuesta ideal o completa que un alumno debería dar..."
+                        rows={3}
+                      />
+                      <p className="text-[11px] text-muted-foreground">Se muestra al alumno como retroalimentación después de responder.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Tricky toggle (para single/multiple) ───────────────── */}
+                {(formData.type === 'single_choice' || formData.type === 'multiple_choice') && (
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={formData.isTricky}
+                      onCheckedChange={(checked) => setFormData({ ...formData, isTricky: checked })}
+                    />
+                    <Label className="font-normal">Pregunta Tricky ⚡ — otorga vida extra si se responde correctamente</Label>
+                  </div>
+                )}
+
+                {(formData.isTricky || formData.type === 'tricky') && (
+                  <div className="space-y-2">
+                    <Label>Pista (opcional)</Label>
                     <Input
-                      id="trickyHint"
                       value={formData.trickyHint}
                       onChange={(e) => setFormData({ ...formData, trickyHint: e.target.value })}
-                      placeholder="Pista opcional para ayudar al usuario"
+                      placeholder="Pista que aparecerá antes de responder"
                     />
                   </div>
                 )}
@@ -609,26 +774,40 @@ export default function QuestionsPage() {
                       </div>
                     </div>
 
-                    {/* Options */}
-                    <div className="space-y-1">
-                      {question.options.map((option, index) => (
-                        <div
-                          key={option.id}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
-                            option.isCorrect
-                              ? 'bg-green-500/10 text-green-700 dark:text-green-400'
-                              : 'bg-muted'
-                          }`}
-                        >
-                          {option.isCorrect ? (
-                            <Check className="h-4 w-4 flex-shrink-0" />
-                          ) : (
-                            <X className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                          )}
-                          <span>{option.text}</span>
-                        </div>
-                      ))}
-                    </div>
+                    {/* Options / Answers */}
+                    {question.type === 'open_text' ? (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-muted text-muted-foreground italic">
+                        <PenLine className="h-4 w-4 shrink-0" />
+                        Respuesta abierta — calificación manual
+                      </div>
+                    ) : question.type === 'fill_in_the_blank' && question.validAnswers ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className="text-xs text-muted-foreground self-center">Respuestas válidas:</span>
+                        {question.validAnswers.map((ans: string) => (
+                          <Badge key={ans} variant="secondary" className="text-xs">{ans}</Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {question.options.map((option: any) => (
+                          <div
+                            key={option.id}
+                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
+                              option.isCorrect
+                                ? 'bg-green-500/10 text-green-700 dark:text-green-400'
+                                : 'bg-muted'
+                            }`}
+                          >
+                            {option.isCorrect ? (
+                              <Check className="h-4 w-4 flex-shrink-0" />
+                            ) : (
+                              <X className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                            )}
+                            <span>{option.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Metadata */}
                     <div className="flex items-center gap-2 flex-wrap">
@@ -638,7 +817,10 @@ export default function QuestionsPage() {
                       <span className={`text-xs px-2 py-1 rounded-full text-white ${getDifficultyColor(question.difficulty)}`}>
                         {question.difficulty === 'easy' ? 'Fácil' : question.difficulty === 'medium' ? 'Medio' : 'Difícil'}
                       </span>
-                      {question.isTricky && (
+                      <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        {QUESTION_TYPE_LABELS[question.type as QuestionType] || question.type}
+                      </span>
+                      {(question.isTricky || question.type === 'tricky') && (
                         <span className="text-xs px-2 py-1 rounded-full bg-purple-500 text-white">
                           ⚡ Tricky
                         </span>
@@ -648,7 +830,7 @@ export default function QuestionsPage() {
                           {question.category}
                         </span>
                       )}
-                      {question.tags.map((tag) => (
+                      {question.tags.map((tag: string) => (
                         <span key={tag} className="text-xs px-2 py-1 rounded-full bg-muted">
                           #{tag}
                         </span>

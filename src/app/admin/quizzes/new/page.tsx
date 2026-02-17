@@ -16,10 +16,14 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import {
   Plus, Trash2, ArrowUp, ArrowDown, ChevronDown, ChevronUp,
-  Search, Check, Loader2, BookOpen, Save, Eye
+  Search, Check, Loader2, BookOpen, Save, Eye, Timer, Target,
+  RefreshCw, Shuffle, MessageSquare, ShieldCheck, PenLine, Sparkles
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Mission, QuizDifficulty, Question } from '@/lib/types-scalable';
+import type { Mission, QuizDifficulty, Question, AssessmentConfig, FeedbackMode, QuestionType } from '@/lib/types-scalable';
+import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
+import { createQuestion } from '@/lib/firestore-service';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
 interface MissionDraft {
   id: string;
@@ -45,18 +49,201 @@ function createEmptyMission(order: number): MissionDraft {
   };
 }
 
+// ─── Quick inline question creation ─────────────────────────────────────────
+
+interface QuickCreateDialogProps {
+  open: boolean;
+  onClose: () => void;
+  productId: string;
+  userId: string;
+  onCreated: (questionId: string, questionText: string) => void;
+}
+
+function QuickCreateDialog({ open, onClose, productId, userId, onCreated }: QuickCreateDialogProps) {
+  const [saving, setSaving] = useState(false);
+  const [text, setText] = useState('');
+  const [type, setType] = useState<QuestionType>('single_choice');
+  const [options, setOptions] = useState([
+    { text: '', isCorrect: false },
+    { text: '', isCorrect: false },
+    { text: '', isCorrect: false },
+    { text: '', isCorrect: false },
+  ]);
+  const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [explanation, setExplanation] = useState('');
+
+  const reset = () => {
+    setText(''); setType('single_choice'); setDifficulty('medium'); setExplanation('');
+    setOptions([
+      { text: '', isCorrect: false }, { text: '', isCorrect: false },
+      { text: '', isCorrect: false }, { text: '', isCorrect: false },
+    ]);
+  };
+
+  const handleTypeChange = (newType: QuestionType) => {
+    setType(newType);
+    if (newType === 'true_false') {
+      setOptions([{ text: 'Verdadero', isCorrect: false }, { text: 'Falso', isCorrect: false }]);
+    } else if (newType !== type) {
+      setOptions([{ text: '', isCorrect: false }, { text: '', isCorrect: false }, { text: '', isCorrect: false }, { text: '', isCorrect: false }]);
+    }
+  };
+
+  const setOptionCorrect = (idx: number, val: boolean) => {
+    setOptions(prev => prev.map((o, i) => {
+      if (type === 'single_choice' || type === 'true_false') {
+        return { ...o, isCorrect: i === idx ? val : false };
+      }
+      return i === idx ? { ...o, isCorrect: val } : o;
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!text.trim()) return;
+    const validOpts = options.filter(o => o.text.trim());
+    const correctOpts = validOpts.filter(o => o.isCorrect);
+    if (type !== 'open_text' && correctOpts.length === 0) return;
+    setSaving(true);
+    try {
+      const id = await createQuestion({
+        organizationId: 'aviva-credito',
+        productId,
+        text: text.trim(),
+        explanation: explanation.trim() || undefined,
+        type,
+        difficulty,
+        options: validOpts.map((o, i) => ({ text: o.text, isCorrect: o.isCorrect, order: i })),
+        tags: [],
+        active: true,
+        isTricky: type === 'tricky',
+      }, userId);
+      onCreated(id, text.trim());
+      reset();
+      onClose();
+    } catch { /* ignore */ } finally {
+      setSaving(false);
+    }
+  };
+
+  const TYPE_OPTS: { value: QuestionType; label: string }[] = [
+    { value: 'single_choice', label: 'Una respuesta' },
+    { value: 'multiple_choice', label: 'Múltiple' },
+    { value: 'true_false', label: 'V / F' },
+    { value: 'open_text', label: 'Abierta' },
+    { value: 'tricky', label: 'Tricky ⚡' },
+  ];
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose(); } }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" /> Crear pregunta rápida
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          {/* Type selector */}
+          <div className="flex gap-1.5 flex-wrap">
+            {TYPE_OPTS.map(t => (
+              <button key={t.value} type="button" onClick={() => handleTypeChange(t.value)}
+                className={`px-2.5 py-1 text-xs rounded-full border transition-all ${type === t.value ? 'border-primary bg-primary text-white' : 'border-muted-foreground/30 hover:border-primary/50'}`}>
+                {t.label}
+              </button>
+            ))}
+            <Select value={difficulty} onValueChange={v => setDifficulty(v as typeof difficulty)}>
+              <SelectTrigger className="h-6 text-xs w-24 ml-auto">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="easy">Fácil</SelectItem>
+                <SelectItem value="medium">Media</SelectItem>
+                <SelectItem value="hard">Difícil</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Question text */}
+          <Textarea
+            placeholder="Escribe la pregunta..."
+            value={text}
+            onChange={e => setText(e.target.value)}
+            rows={2}
+            className="text-sm"
+          />
+
+          {/* Options */}
+          {type !== 'open_text' && type !== 'true_false' && (
+            <div className="space-y-1.5">
+              <p className="text-xs text-muted-foreground font-medium">Opciones — activa la(s) correcta(s):</p>
+              {options.map((opt, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Switch checked={opt.isCorrect} onCheckedChange={v => setOptionCorrect(i, v)} />
+                  <Input
+                    value={opt.text}
+                    onChange={e => setOptions(prev => prev.map((o, j) => j === i ? { ...o, text: e.target.value } : o))}
+                    placeholder={`Opción ${i + 1}`}
+                    className="h-8 text-sm flex-1"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {type === 'true_false' && (
+            <div className="flex gap-2">
+              {['Verdadero', 'Falso'].map((val, i) => (
+                <button key={val} type="button" onClick={() => setOptionCorrect(i, true)}
+                  className={`flex-1 py-2.5 rounded-lg border-2 text-sm font-medium transition-all ${options[i]?.isCorrect ? 'border-primary bg-primary/10 text-primary' : 'border-muted hover:border-primary/30'}`}>
+                  {val === 'Verdadero' ? '✓ Verdadero' : '✗ Falso'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {type === 'open_text' && (
+            <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground flex items-start gap-2">
+              <PenLine className="h-4 w-4 shrink-0 mt-0.5" />
+              Respuesta abierta. Puedes editar los conceptos clave desde el Banco de Preguntas después.
+            </div>
+          )}
+
+          {/* Explanation */}
+          <Input
+            value={explanation}
+            onChange={e => setExplanation(e.target.value)}
+            placeholder="Explicación (opcional)"
+            className="h-8 text-sm"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => { reset(); onClose(); }}>Cancelar</Button>
+          <Button size="sm" onClick={handleSave} disabled={saving || !text.trim()}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+            Crear y agregar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function QuestionSelector({
   productId,
   selectedIds,
   onToggle,
   onSetAll,
+  userId,
+  onQuickCreate,
 }: {
   productId: string;
   selectedIds: string[];
   onToggle: (id: string) => void;
   onSetAll: (ids: string[]) => void;
+  userId: string;
+  onQuickCreate: (id: string) => void;
 }) {
-  const { questions } = useQuestions(productId || undefined);
+  const { questions, refresh } = useQuestions(productId || undefined);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [filterDiff, setFilterDiff] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -86,6 +273,31 @@ function QuestionSelector({
 
   return (
     <div className="border rounded-lg p-3 bg-muted/30">
+      {/* Quick create dialog */}
+      <QuickCreateDialog
+        open={quickCreateOpen}
+        onClose={() => setQuickCreateOpen(false)}
+        productId={productId}
+        userId={userId}
+        onCreated={(id, _text) => {
+          refresh();
+          onQuickCreate(id);
+        }}
+      />
+
+      {/* Top bar: search + create button */}
+      <div className="flex gap-2 mb-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1.5 text-xs shrink-0 border-primary/40 text-primary hover:bg-primary/10"
+          onClick={() => setQuickCreateOpen(true)}
+          disabled={!productId}
+        >
+          <Sparkles className="h-3.5 w-3.5" /> Crear pregunta
+        </Button>
+      </div>
       <div className="flex gap-2 mb-2">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -208,6 +420,7 @@ export default function NewQuizPage() {
   const { products } = useProducts();
 
   const [saving, setSaving] = useState(false);
+  const [assessmentConfig, setAssessmentConfig] = useState<AssessmentConfig>({ ...DEFAULT_ASSESSMENT_CONFIG });
   const [formData, setFormData] = useState({
     productId: '',
     title: '',
@@ -318,6 +531,7 @@ export default function NewQuizPage() {
           order: 0,
           version: 1,
           createdBy: profile?.uid || '',
+          assessmentConfig,
           gamificationConfig: {
             enableLives: true,
             maxLives: 3,
@@ -325,7 +539,7 @@ export default function NewQuizPage() {
             pointsPerCorrectAnswer: 10,
             pointsPerTrickyQuestion: 20,
             penaltyPerError: 0,
-            timeBonus: true,
+            timeBonus: assessmentConfig.timeLimit > 0,
             enableBadges: true,
             badgeIds: ['first_mission', 'perfectionist', 'speedster', 'no_errors'],
           },
@@ -449,6 +663,141 @@ export default function NewQuizPage() {
                 </div>
               )}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Assessment Config */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="h-5 w-5 text-primary" /> Configuración de Evaluación
+          </CardTitle>
+          <CardDescription>Define las reglas del motor de evaluación para este desafío</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Timer */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5 text-sm">
+                <Timer className="h-4 w-4 text-orange-500" /> Tiempo límite (minutos)
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={180}
+                value={assessmentConfig.timeLimit > 0 ? Math.round(assessmentConfig.timeLimit / 60) : ''}
+                onChange={e => {
+                  const mins = parseInt(e.target.value) || 0;
+                  setAssessmentConfig(prev => ({ ...prev, timeLimit: mins * 60 }));
+                }}
+                placeholder="0 = sin límite"
+                className="h-9"
+              />
+              <p className="text-[11px] text-muted-foreground">0 = sin límite de tiempo</p>
+            </div>
+
+            {/* Passing score */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5 text-sm">
+                <Target className="h-4 w-4 text-emerald-500" /> Puntuación mínima (%)
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={assessmentConfig.passingScore || ''}
+                onChange={e => setAssessmentConfig(prev => ({ ...prev, passingScore: parseInt(e.target.value) || 0 }))}
+                placeholder="0 = no aplica"
+                className="h-9"
+              />
+              <p className="text-[11px] text-muted-foreground">% mínimo para aprobar. 0 = no aplica</p>
+            </div>
+
+            {/* Max attempts */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5 text-sm">
+                <RefreshCw className="h-4 w-4 text-blue-500" /> Intentos máximos
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                max={10}
+                value={assessmentConfig.maxAttempts || ''}
+                onChange={e => setAssessmentConfig(prev => ({ ...prev, maxAttempts: parseInt(e.target.value) || 0 }))}
+                placeholder="0 = ilimitados"
+                className="h-9"
+              />
+              <p className="text-[11px] text-muted-foreground">0 = intentos ilimitados</p>
+            </div>
+          </div>
+
+          {/* Feedback mode */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1.5 text-sm">
+              <MessageSquare className="h-4 w-4 text-purple-500" /> Mostrar feedback
+            </Label>
+            <div className="flex gap-2 flex-wrap">
+              {([
+                ['always', 'Inmediato (por pregunta)'],
+                ['after_attempt', 'Al terminar el intento'],
+                ['never', 'No mostrar'],
+              ] as [FeedbackMode, string][]).map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setAssessmentConfig(prev => ({ ...prev, showFeedback: val }))}
+                  className={`px-3 py-1.5 text-sm rounded-lg border-2 transition-all ${
+                    assessmentConfig.showFeedback === val
+                      ? 'border-primary bg-primary/10 text-primary font-medium'
+                      : 'border-muted hover:border-primary/40'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Toggles */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {[
+              {
+                key: 'randomizeQuestions' as const,
+                label: 'Aleatorizar orden de preguntas',
+                description: 'Cada intento tendrá las preguntas en orden diferente',
+                icon: Shuffle,
+              },
+              {
+                key: 'randomizeOptions' as const,
+                label: 'Aleatorizar opciones de respuesta',
+                description: 'Las opciones de cada pregunta se mezclarán aleatoriamente',
+                icon: Shuffle,
+              },
+              {
+                key: 'allowRetry' as const,
+                label: 'Permitir reintento al reprobar',
+                description: 'El vendedor puede volver a intentar si no alcanza el mínimo',
+                icon: RefreshCw,
+              },
+              {
+                key: 'isStandalone' as const,
+                label: 'Examen independiente',
+                description: 'Aparece en el catálogo sin necesitar pertenecer a una ruta',
+                icon: BookOpen,
+              },
+            ].map(({ key, label, description, icon: Icon }) => (
+              <div key={key} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20">
+                <Switch
+                  checked={assessmentConfig[key] as boolean}
+                  onCheckedChange={v => setAssessmentConfig(prev => ({ ...prev, [key]: v }))}
+                />
+                <div>
+                  <p className="text-sm font-medium">{label}</p>
+                  <p className="text-xs text-muted-foreground">{description}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
@@ -578,6 +927,8 @@ export default function NewQuizPage() {
                     selectedIds={mission.questionIds}
                     onToggle={(qId) => toggleQuestion(mission.id, qId)}
                     onSetAll={(ids) => setMissionQuestions(mission.id, ids)}
+                    userId={profile?.uid || ''}
+                    onQuickCreate={(id) => toggleQuestion(mission.id, id)}
                   />
                 </div>
               </CardContent>
