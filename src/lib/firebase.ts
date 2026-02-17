@@ -2,6 +2,7 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, type Auth } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator, type Firestore } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator, type FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -15,6 +16,7 @@ const firebaseConfig = {
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let storage: FirebaseStorage | null = null;
 
 // Check if all required environment variables are present.
 // An empty string is not a valid value for most of these.
@@ -28,6 +30,7 @@ if (firebaseConfigIsValid) {
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     auth = getAuth(app);
     db = getFirestore(app);
+    storage = getStorage(app);
 
     // Conectar a los emuladores cuando el projectId es "demo-*" (desarrollo local)
     // Firebase convention: demo-* projects automatically use emulators
@@ -39,6 +42,7 @@ if (firebaseConfigIsValid) {
         w.__fbEmulatorsConnected = true;
         connectFirestoreEmulator(db, 'localhost', 8080);
         connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+        connectStorageEmulator(storage, 'localhost', 9199);
       }
     }
   } catch (error) {
@@ -54,4 +58,4 @@ if (firebaseConfigIsValid) {
     }
 }
 
-export { auth, db };
+export { auth, db, storage };

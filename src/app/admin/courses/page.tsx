@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   getCourses,
@@ -66,7 +66,13 @@ import {
   Clock,
   LayoutList,
   Search,
+  Upload,
+  X,
+  CheckCircle2,
+  Link,
 } from 'lucide-react';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { storage } from '@/lib/firebase';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -1028,7 +1034,7 @@ function CourseEditor({
           <DialogHeader>
             <DialogTitle>{lessonDialog.editing ? 'Editar lección' : 'Nueva lección'}</DialogTitle>
           </DialogHeader>
-          <LessonFormFields form={lessonForm} setForm={setLessonForm} />
+          <LessonFormFields form={lessonForm} setForm={setLessonForm} courseId={course.id} />
           <DialogFooter>
             <Button variant="outline" onClick={onCloseLessonDialog}>Cancelar</Button>
             <Button onClick={onSaveLesson} disabled={!lessonForm.title.trim()}>
@@ -1041,24 +1047,81 @@ function CourseEditor({
   );
 }
 
+// ─── Tipos con soporte de upload a Storage ───────────────────────────────────
+
+const UPLOAD_ACCEPT: Partial<Record<LessonType, string>> = {
+  video:    'video/mp4,video/webm,video/quicktime,video/*',
+  audio:    'audio/mpeg,audio/wav,audio/ogg,audio/mp4,audio/*',
+  document: '.pdf,.doc,.docx,.ppt,.pptx',
+  slides:   '.pdf,.ppt,.pptx,.key',
+  scorm:    '.zip',
+};
+
 // ─── Sub-componente: Formulario de lección ────────────────────────────────────
 
 function LessonFormFields({
   form,
   setForm,
+  courseId,
 }: {
   form: LessonForm;
   setForm: React.Dispatch<React.SetStateAction<LessonForm>>;
+  courseId: string;
 }) {
-  const contentUrlLabel: Record<LessonType, string> = {
-    video:    'URL del video',
-    slides:   'URL de la presentación',
-    document: 'URL del documento (PDF, DOC…)',
-    html:     '',
-    embedded: 'URL a embeber (iFrame src)',
-    audio:    'URL del audio',
-    scorm:    'URL del paquete SCORM',
-  };
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [inputMode, setInputMode] = useState<'upload' | 'url'>(
+    form.contentUrl ? 'url' : 'upload'
+  );
+
+  const acceptAttr = UPLOAD_ACCEPT[form.type];
+  const supportsUpload = !!acceptAttr;
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !storage) return;
+    setUploadError(null);
+    setUploadProgress(0);
+
+    const safeId = courseId || 'draft';
+    const timestamp = Date.now();
+    const storagePath = `courses/${safeId}/lessons/${form.type}/${timestamp}_${file.name}`;
+    const storageRef = ref(storage, storagePath);
+    const task = uploadBytesResumable(storageRef, file);
+
+    task.on(
+      'state_changed',
+      snapshot => {
+        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+        setUploadProgress(pct);
+      },
+      err => {
+        console.error('Upload error:', err);
+        setUploadError('Error al subir el archivo. Intenta de nuevo.');
+        setUploadProgress(null);
+      },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        setForm(p => ({ ...p, contentUrl: url }));
+        setUploadProgress(null);
+        setInputMode('url');
+      }
+    );
+  }
+
+  function clearFile() {
+    setForm(p => ({ ...p, contentUrl: '' }));
+    setUploadProgress(null);
+    setUploadError(null);
+    setInputMode('upload');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  const isUploading = uploadProgress !== null;
+  const fileNameFromUrl = form.contentUrl
+    ? decodeURIComponent(form.contentUrl.split('/').pop()?.split('?')[0] ?? '')
+    : '';
 
   return (
     <div className="space-y-4 py-2">
@@ -1074,7 +1137,15 @@ function LessonFormFields({
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
           <Label>Tipo de contenido</Label>
-          <Select value={form.type} onValueChange={v => setForm(p => ({ ...p, type: v as LessonType }))}>
+          <Select
+            value={form.type}
+            onValueChange={v => {
+              setForm(p => ({ ...p, type: v as LessonType, contentUrl: '', htmlContent: '' }));
+              setUploadProgress(null);
+              setUploadError(null);
+              setInputMode('upload');
+            }}
+          >
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               {LESSON_TYPES.map(t => (
@@ -1102,6 +1173,8 @@ function LessonFormFields({
           />
         </div>
       </div>
+
+      {/* ── Contenido según tipo ── */}
       {form.type === 'html' ? (
         <div className="space-y-1.5">
           <Label>Contenido HTML</Label>
@@ -1113,9 +1186,12 @@ function LessonFormFields({
             className="font-mono text-xs"
           />
         </div>
-      ) : (
+      ) : form.type === 'embedded' ? (
         <div className="space-y-1.5">
-          <Label>{contentUrlLabel[form.type]}</Label>
+          <Label className="flex items-center gap-1.5">
+            <Link className="h-3.5 w-3.5" />
+            URL del iFrame (src)
+          </Label>
           <Input
             value={form.contentUrl}
             onChange={e => setForm(p => ({ ...p, contentUrl: e.target.value }))}
@@ -1123,7 +1199,134 @@ function LessonFormFields({
             type="url"
           />
         </div>
-      )}
+      ) : supportsUpload ? (
+        <div className="space-y-2">
+          {/* Selector upload / url */}
+          <div className="flex items-center gap-3">
+            <Label className="text-sm font-medium">Contenido</Label>
+            <div className="flex rounded-md border text-xs overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setInputMode('upload')}
+                className={`px-3 py-1.5 flex items-center gap-1 transition-colors ${
+                  inputMode === 'upload'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                <Upload className="h-3 w-3" />
+                Subir archivo
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMode('url')}
+                className={`px-3 py-1.5 flex items-center gap-1 transition-colors ${
+                  inputMode === 'url'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                <Link className="h-3 w-3" />
+                URL externa
+              </button>
+            </div>
+          </div>
+
+          {inputMode === 'upload' ? (
+            <div>
+              {/* Zona de drop/click */}
+              {!form.contentUrl && !isUploading && (
+                <div
+                  className="border-2 border-dashed border-muted-foreground/25 rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground/50" />
+                  <p className="text-sm font-medium text-foreground">
+                    {form.type === 'video' && 'Haz clic para subir un video'}
+                    {form.type === 'audio' && 'Haz clic para subir un audio'}
+                    {form.type === 'document' && 'Haz clic para subir un documento'}
+                    {form.type === 'slides' && 'Haz clic para subir una presentación'}
+                    {form.type === 'scorm' && 'Haz clic para subir el paquete SCORM (.zip)'}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {form.type === 'video' && 'MP4, WebM, MOV'}
+                    {form.type === 'audio' && 'MP3, WAV, OGG, M4A'}
+                    {form.type === 'document' && 'PDF, DOC, DOCX, PPT, PPTX'}
+                    {form.type === 'slides' && 'PDF, PPT, PPTX, KEY'}
+                    {form.type === 'scorm' && 'ZIP (paquete SCORM 1.2 ó 2004)'}
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={acceptAttr}
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </div>
+              )}
+
+              {/* Progreso de upload */}
+              {isUploading && (
+                <div className="space-y-2 p-4 border rounded-lg bg-muted/20">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Subiendo archivo...</span>
+                    <span className="font-semibold text-primary">{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Archivo subido */}
+              {form.contentUrl && !isUploading && (
+                <div className="flex items-center gap-3 p-3 border rounded-lg bg-green-50 border-green-200">
+                  <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-green-800 truncate">
+                      {fileNameFromUrl || 'Archivo subido'}
+                    </p>
+                    <a
+                      href={form.contentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-green-600 underline truncate block"
+                    >
+                      Ver archivo
+                    </a>
+                  </div>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7 text-green-600 hover:text-destructive flex-shrink-0"
+                    onClick={clearFile}
+                    title="Quitar archivo"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+
+              {uploadError && (
+                <p className="text-xs text-destructive mt-1">{uploadError}</p>
+              )}
+            </div>
+          ) : (
+            /* Modo URL externa */
+            <Input
+              value={form.contentUrl}
+              onChange={e => setForm(p => ({ ...p, contentUrl: e.target.value }))}
+              placeholder="https://..."
+              type="url"
+            />
+          )}
+        </div>
+      ) : null}
+
       <div className="space-y-1.5">
         <Label>Descripción (opcional)</Label>
         <Textarea
