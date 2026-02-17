@@ -193,7 +193,8 @@ export interface Question {
   // Configuración especial
   isTricky: boolean;
   trickyHint?: string;       // pista para preguntas tricky
-  validAnswers?: string[];   // para fill_in_the_blank: textos válidos (case-insensitive)
+  validAnswers?: string[];   // para fill_in_the_blank y open_text: palabras/conceptos clave
+  modelAnswer?: string;      // para open_text: respuesta modelo (referencia para evaluación)
 
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -672,7 +673,8 @@ export interface QuestionFormData {
   category?: string;
   isTricky: boolean;
   trickyHint?: string;
-  validAnswers?: string[]; // para fill_in_the_blank: respuestas válidas alternativas
+  validAnswers?: string[]; // para fill_in_the_blank y open_text: palabras/conceptos clave
+  modelAnswer?: string;    // para open_text: respuesta modelo de referencia
 }
 
 // ============================================================================

@@ -45,6 +45,18 @@ interface RuntimeQuestion {
   options: Option[];
   isTricky?: boolean;
   isMultiSelect?: boolean;
+  isOpenText?: boolean;
+  validAnswers?: string[];   // conceptos clave para auto-evaluación
+  modelAnswer?: string;      // respuesta modelo (se muestra como feedback)
+}
+
+/** Evalúa una respuesta abierta contra los conceptos clave. Retorna 0–1. */
+function evaluateOpenText(answer: string, keywords: string[]): { score: number; found: string[]; missing: string[] } {
+  if (keywords.length === 0) return { score: 1, found: [], missing: [] };
+  const normalized = answer.toLowerCase();
+  const found = keywords.filter(kw => normalized.includes(kw.toLowerCase()));
+  const missing = keywords.filter(kw => !normalized.includes(kw.toLowerCase()));
+  return { score: found.length / keywords.length, found, missing };
 }
 interface RuntimeMission {
   id: string;
@@ -95,6 +107,8 @@ function QuizComponent() {
   });
   const [showParticles, setShowParticles] = useState(false);
   const [particleType, setParticleType] = useState<'correct' | 'wrong'>('correct');
+  const [openTextAnswer, setOpenTextAnswer] = useState('');
+  const [openTextResult, setOpenTextResult] = useState<{ score: number; found: string[]; missing: string[] } | null>(null);
 
   const quizType = searchParams.get('quizType') || '';
   const avatarKey = searchParams.get('avatar');
@@ -138,9 +152,12 @@ function QuizComponent() {
               .filter(Boolean)
               .map((q) => ({
                 text: q.text,
-                options: buildOptions(q.options),
+                options: q.type === 'open_text' ? [] : buildOptions(q.options),
                 isTricky: q.isTricky || q.type === 'tricky',
                 isMultiSelect: q.type === 'multiple_choice',
+                isOpenText: q.type === 'open_text',
+                validAnswers: q.validAnswers || [],
+                modelAnswer: q.modelAnswer,
               }));
             if (cfg.randomizeQuestions) questions = shuffle(questions);
             return { id: mission.id, title: mission.title, narrative: mission.narrative, questions };
@@ -341,6 +358,8 @@ function QuizComponent() {
       specialFeedback: null,
       lifeUsedMessage: lifeUsed ? "¡Has usado una vida extra para continuar!" : null,
     };
+    setOpenTextAnswer('');
+    setOpenTextResult(null);
 
     if (gameState.currentQuestionIndex < (currentMission?.questions.length || 0) - 1) {
       setGameState(prev => ({
@@ -374,6 +393,34 @@ function QuizComponent() {
         router.push(`/${quizType}/results?${params.toString()}`);
       }
     }
+  };
+
+  const handleOpenTextSubmit = () => {
+    if (!currentQuestion?.isOpenText || gameState.isAnswered) return;
+    const result = evaluateOpenText(openTextAnswer, currentQuestion.validAnswers || []);
+    setOpenTextResult(result);
+    // Correct if score ≥ 70%, or if no keywords were defined (score = 1)
+    const isCorrect = result.score >= 0.7;
+    setParticleType(isCorrect ? 'correct' : 'wrong');
+    setShowParticles(true);
+    setTimeout(() => setShowParticles(false), 1500);
+
+    let newMissionFailed = false;
+    let newMistakeMade = gameState.mistakeMadeInMission;
+    if (!isCorrect) {
+      if (gameState.mistakeMadeInMission) newMissionFailed = true;
+      else newMistakeMade = true;
+    }
+    setGameState(prev => ({
+      ...prev,
+      isAnswered: true,
+      score: isCorrect ? prev.score + 1 : prev.score,
+      missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
+      missionFailed: newMissionFailed,
+      mistakeMadeInMission: newMistakeMade,
+      lastAnswerWasCorrect: isCorrect,
+      streak: isCorrect ? prev.streak + 1 : 0,
+    }));
   };
 
   const startMission = () => {
@@ -633,8 +680,51 @@ function QuizComponent() {
               <CardDescription>{currentMission.title}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {renderOptions()}
+              {currentQuestion.isOpenText ? (
+                <div className="space-y-3">
+                  <textarea
+                    className="w-full rounded-lg border border-input bg-background p-3 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                    rows={4}
+                    placeholder="Escribe tu respuesta aquí..."
+                    value={openTextAnswer}
+                    onChange={e => setOpenTextAnswer(e.target.value)}
+                    disabled={gameState.isAnswered}
+                  />
+                  {/* Keyword feedback after answering */}
+                  {gameState.isAnswered && openTextResult && (currentQuestion.validAnswers?.length ?? 0) > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Conceptos clave mencionados:</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {openTextResult.found.map(kw => (
+                          <span key={kw} className="text-xs px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30">✓ {kw}</span>
+                        ))}
+                        {openTextResult.missing.map(kw => (
+                          <span key={kw} className="text-xs px-2 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/20">✗ {kw}</span>
+                        ))}
+                      </div>
+                      {currentQuestion.modelAnswer && (
+                        <div className="mt-2 rounded-lg bg-muted p-3 text-sm">
+                          <p className="font-medium text-xs text-muted-foreground mb-1">Respuesta modelo:</p>
+                          <p className="text-foreground leading-relaxed">{currentQuestion.modelAnswer}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                renderOptions()
+              )}
             </CardContent>
+
+            {/* Verify buttons */}
+            {currentQuestion.isOpenText && !gameState.isAnswered && (
+              <CardFooter>
+                <Button onClick={handleOpenTextSubmit} disabled={!openTextAnswer.trim()} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
+                  <Check className="mr-2" />
+                  Verificar respuesta
+                </Button>
+              </CardFooter>
+            )}
 
             {currentQuestion.isMultiSelect && !gameState.isAnswered && (
               <CardFooter>
@@ -651,7 +741,11 @@ function QuizComponent() {
                   "rounded-lg border-2",
                   gameState.lastAnswerWasCorrect ? "bg-accent/10 border-accent text-accent" : "bg-destructive/10 border-destructive text-destructive"
                 )}>
-                  <AlertTitle className="font-bold">{gameState.lastAnswerWasCorrect ? '¡Correcto!' : '¡Ups! Respuesta incorrecta.'}</AlertTitle>
+                  <AlertTitle className="font-bold">
+                    {gameState.lastAnswerWasCorrect
+                      ? (currentQuestion.isOpenText ? `¡Bien! (${Math.round((openTextResult?.score ?? 1) * 100)}%)` : '¡Correcto!')
+                      : (currentQuestion.isOpenText ? `Incompleto (${Math.round((openTextResult?.score ?? 0) * 100)}%)` : '¡Ups! Respuesta incorrecta.')}
+                  </AlertTitle>
                   <AlertDescription>
                     {gameState.specialFeedback ||
                       (gameState.lastAnswerWasCorrect

@@ -43,6 +43,7 @@ export default function QuestionsPage() {
     isTricky: false,
     trickyHint: '',
     validAnswers: [],
+    modelAnswer: '',
   });
   const [validAnswerInput, setValidAnswerInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
@@ -110,6 +111,7 @@ export default function QuestionsPage() {
         isTricky: question.isTricky,
         trickyHint: question.trickyHint || '',
         validAnswers: question.validAnswers || [],
+        modelAnswer: question.modelAnswer || '',
       });
       setTagsInput((question.tags || []).join(', '));
       setValidAnswerInput('');
@@ -130,6 +132,7 @@ export default function QuestionsPage() {
         isTricky: false,
         trickyHint: '',
         validAnswers: [],
+        modelAnswer: '',
       });
       setTagsInput('');
       setValidAnswerInput('');
@@ -503,11 +506,63 @@ export default function QuestionsPage() {
 
                 {/* ── Open text ──────────────────────────────────────────── */}
                 {formData.type === 'open_text' && (
-                  <div className="rounded-lg border border-dashed p-4 flex items-start gap-3 text-sm text-muted-foreground">
-                    <PenLine className="h-5 w-5 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="font-medium text-foreground">Respuesta abierta</p>
-                      <p>El alumno escribirá libremente. No hay opciones predefinidas. La calificación es manual por el administrador o trainer.</p>
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3 flex items-start gap-3 text-sm">
+                      <PenLine className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                      <div className="text-blue-700">
+                        <p className="font-medium">Auto-evaluación por palabras clave</p>
+                        <p className="text-xs mt-0.5">Define los conceptos clave que debe mencionar el alumno. Se califica automáticamente: 100% si menciona todos, proporcional si menciona algunos.</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Conceptos clave obligatorios <span className="text-muted-foreground font-normal">(auto-evaluación)</span></Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={validAnswerInput}
+                          onChange={e => setValidAnswerInput(e.target.value)}
+                          placeholder="Ej: tasa de interés"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              const val = validAnswerInput.trim();
+                              if (val && !formData.validAnswers?.includes(val)) {
+                                setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                                setValidAnswerInput('');
+                              }
+                            }
+                          }}
+                        />
+                        <Button type="button" variant="outline" onClick={() => {
+                          const val = validAnswerInput.trim();
+                          if (val && !formData.validAnswers?.includes(val)) {
+                            setFormData(prev => ({ ...prev, validAnswers: [...(prev.validAnswers || []), val] }));
+                            setValidAnswerInput('');
+                          }
+                        }}>Agregar</Button>
+                      </div>
+                      {(formData.validAnswers || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {(formData.validAnswers || []).map(kw => (
+                            <Badge key={kw} variant="secondary" className="gap-1 cursor-pointer"
+                              onClick={() => setFormData(prev => ({ ...prev, validAnswers: (prev.validAnswers || []).filter(k => k !== kw) }))}>
+                              {kw} <X className="h-3 w-3" />
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      <p className="text-[11px] text-muted-foreground">
+                        Si no defines conceptos clave, cualquier respuesta se considerará válida.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Respuesta modelo <span className="text-muted-foreground font-normal">(referencia para el alumno)</span></Label>
+                      <Textarea
+                        value={formData.modelAnswer || ''}
+                        onChange={e => setFormData(prev => ({ ...prev, modelAnswer: e.target.value }))}
+                        placeholder="Escribe aquí la respuesta ideal o completa que un alumno debería dar..."
+                        rows={3}
+                      />
+                      <p className="text-[11px] text-muted-foreground">Se muestra al alumno como retroalimentación después de responder.</p>
                     </div>
                   </div>
                 )}
