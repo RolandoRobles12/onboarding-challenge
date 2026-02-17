@@ -1122,6 +1122,56 @@ export async function updateEnrollmentProgress(
   }
 }
 
+/** Obtiene todas las inscripciones de un curso específico (vista admin) */
+export async function getCourseEnrollments(
+  courseId: string,
+  orgId: string = DEFAULT_ORG_ID
+): Promise<CourseEnrollment[]> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
+    const q = query(
+      colRef,
+      where('courseId', '==', courseId),
+      where('organizationId', '==', orgId),
+      orderBy('enrolledAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CourseEnrollment));
+  } catch (error) {
+    console.error('Error fetching course enrollments:', error);
+    return [];
+  }
+}
+
+/** Inscribe manualmente un usuario en un curso (desde el panel de admin) */
+export async function adminEnrollUserInCourse(
+  userId: string,
+  courseId: string,
+  assignedBy: string,
+  orgId: string = DEFAULT_ORG_ID
+): Promise<string> {
+  try {
+    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
+    const docRef = doc(colRef);
+    await setDoc(docRef, {
+      userId,
+      courseId,
+      organizationId: orgId,
+      status: 'enrolled',
+      completedLessonIds: [],
+      completedModuleIds: [],
+      assignedBy,
+      assignedAt: serverTimestamp(),
+      enrolledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error('Error enrolling user:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // LMS - MÓDULO RUTAS DE APRENDIZAJE (Learning Paths Module)
 // ============================================================================
