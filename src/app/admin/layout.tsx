@@ -16,9 +16,7 @@ import {
   Menu,
   X,
   Route,
-  ClipboardList,
   BookOpen,
-  Target,
   Award,
   Medal,
   Swords,
@@ -41,7 +39,6 @@ const navigation: (NavItem | NavSection)[] = [
     items: [
       { name: 'Cursos', href: '/admin/courses', icon: BookOpen },
       { name: 'Evaluaciones y Desafíos', href: '/admin/quizzes', icon: Swords },
-      { name: 'Insignias', href: '/admin/insignias', icon: Medal },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
     ],
@@ -52,13 +49,13 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
       { name: 'Formularios', href: '/admin/forms', icon: FileText },
       { name: 'Certificados', href: '/admin/certificados', icon: Award },
+      { name: 'Insignias', href: '/admin/insignias', icon: Medal },
     ],
   },
   {
     section: 'Configuración',
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
-      { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ClipboardList },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
       { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },
     ],
