@@ -8,7 +8,6 @@ import {
   getJourneyByProduct,
   saveJourney,
   deleteJourney,
-  getCertificateSigners,
   getCourses,
   getAllBadges,
   getJourneyForms,
@@ -27,7 +26,7 @@ import {
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
-  ChecklistItem, CertificateSigner, JourneyForm,
+  ChecklistItem, JourneyForm,
 } from '@/lib/types-scalable';
 import type { Quiz, Badge as BadgeType } from '@/lib/types-scalable';
 import type { Course } from '@/lib/types-lms';
@@ -110,7 +109,7 @@ const PURPOSE_EMOJI: Record<string, string> = {
 // ─── ActionCard ───────────────────────────────────────────────────────────────
 
 function ActionCard({
-  action, index, total, quizzes, courses, signers, badges, forms,
+  action, index, total, quizzes, courses, badges, forms,
   onUpdate, onRemove, onMoveUp, onMoveDown,
 }: {
   action: JourneyStep;
@@ -118,7 +117,6 @@ function ActionCard({
   total: number;
   quizzes: Quiz[];
   courses: Course[];
-  signers: CertificateSigner[];
   badges: BadgeType[];
   forms: JourneyForm[];
   onUpdate: (s: JourneyStep) => void;
@@ -360,23 +358,25 @@ function ActionCard({
         {(action.type === 'challenge' || action.type === 'quiz') && (
           <div className="space-y-1">
             <Label className="text-xs">
-              {action.type === 'challenge' ? 'Desafío asignado' : 'Quiz asignado'}
+              {action.type === 'challenge' ? 'Desafío asignado' : 'Evaluación asignada'}
             </Label>
             <Select
               value={action.config.quizId || ''}
               onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, quizId: v } })}
             >
               <SelectTrigger className="h-7 text-xs">
-                <SelectValue placeholder="Selecciona un desafío..." />
+                <SelectValue placeholder={action.type === 'challenge' ? 'Selecciona un desafío...' : 'Selecciona una evaluación...'} />
               </SelectTrigger>
               <SelectContent>
                 {quizzes.length === 0 ? (
-                  <SelectItem value="none" disabled>No hay desafíos para este producto</SelectItem>
+                  <SelectItem value="none" disabled>No hay evaluaciones para este producto</SelectItem>
                 ) : (
                   quizzes.map(q => (
                     <SelectItem key={q.id} value={q.id}>
                       <span className="flex items-center gap-2">
-                        <Swords className="h-3 w-3 text-orange-600" />
+                        {action.type === 'challenge'
+                          ? <Swords className="h-3 w-3 text-orange-600" />
+                          : <HelpCircle className="h-3 w-3 text-purple-600" />}
                         {q.title}
                       </span>
                     </SelectItem>
@@ -387,48 +387,13 @@ function ActionCard({
           </div>
         )}
 
-        {/* Certificate signers */}
+        {/* Certificate: informational note only — signers are configured in /admin/certificados */}
         {action.type === 'certificate' && (
-          <div className="space-y-2">
-            <Label className="text-xs">Firmantes del certificado (máx. 3)</Label>
-            {signers.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">
-                No hay firmantes activos. Créalos en{' '}
-                <a href="/admin/certificados" className="underline text-primary">Certificados</a>.
-              </p>
-            ) : (
-              <div className="space-y-1">
-                {signers.map(signer => {
-                  const selectedIds: string[] = action.config.signerIds ?? [];
-                  const checked = selectedIds.includes(signer.id);
-                  const atMax = selectedIds.length >= 3 && !checked;
-                  return (
-                    <label
-                      key={signer.id}
-                      className={`flex items-center gap-2 text-xs cursor-pointer rounded px-2 py-1 border transition-colors ${
-                        checked ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-muted/50'
-                      } ${atMax ? 'opacity-40 cursor-not-allowed' : ''}`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="h-3 w-3 accent-primary"
-                        checked={checked}
-                        disabled={atMax}
-                        onChange={() => {
-                          const next = checked
-                            ? selectedIds.filter(id => id !== signer.id)
-                            : [...selectedIds, signer.id];
-                          onUpdate({ ...action, config: { ...action.config, signerIds: next } });
-                        }}
-                      />
-                      <span className="font-medium">{signer.name}</span>
-                      <span className="text-muted-foreground">— {signer.position}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <p className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2 flex items-start gap-2">
+            <Award className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
+            Los firmantes del certificado se configuran en{' '}
+            <a href="/admin/certificados" className="underline text-primary font-medium">Certificados</a>.
+          </p>
         )}
 
         {/* Badge selector */}
@@ -459,31 +424,6 @@ function ActionCard({
                 )}
               </SelectContent>
             </Select>
-          </div>
-        )}
-
-        {/* Minimum score (for courses, challenges, quizzes) */}
-        {(action.type === 'course' || action.type === 'challenge' || action.type === 'quiz') && (
-          <div className="space-y-1">
-            <Label className="text-xs">Score mínimo para avanzar (%)</Label>
-            <Input
-              className="h-7 text-xs w-24"
-              type="number"
-              min={0}
-              max={100}
-              value={action.config.minimumScore ?? ''}
-              onChange={(e) =>
-                onUpdate({
-                  ...action,
-                  config: {
-                    ...action.config,
-                    minimumScore: e.target.value ? parseInt(e.target.value) : undefined,
-                  },
-                })
-              }
-              placeholder="70"
-            />
-            <p className="text-[10px] text-muted-foreground">Deja vacío para no requerir mínimo</p>
           </div>
         )}
 
@@ -523,7 +463,7 @@ const STAGE_COLORS = [
 ];
 
 function StageCard({
-  stage, stageIndex, totalStages, quizzes, courses, signers, badges, forms,
+  stage, stageIndex, totalStages, quizzes, courses, badges, forms,
   onUpdate, onRemove, onMoveUp, onMoveDown,
 }: {
   stage: JourneyStage;
@@ -531,7 +471,6 @@ function StageCard({
   totalStages: number;
   quizzes: Quiz[];
   courses: Course[];
-  signers: CertificateSigner[];
   badges: BadgeType[];
   forms: JourneyForm[];
   onUpdate: (s: JourneyStage) => void;
@@ -680,7 +619,6 @@ function StageCard({
                     total={stage.actions.length}
                     quizzes={quizzes}
                     courses={courses}
-                    signers={signers}
                     badges={badges}
                     forms={forms}
                     onUpdate={(a) => updateAction(actionIdx, a)}
@@ -728,7 +666,6 @@ export default function JourneyPage() {
   const [stages, setStages] = useState<JourneyStage[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
-  const [signers, setSigners] = useState<CertificateSigner[]>([]);
   const [badges, setBadges] = useState<BadgeType[]>([]);
   const [forms, setForms] = useState<JourneyForm[]>([]);
   const [journeyName, setJourneyName] = useState('');
@@ -737,7 +674,6 @@ export default function JourneyPage() {
 
   // Load global resources
   useEffect(() => {
-    getCertificateSigners().then(setSigners).catch(() => setSigners([]));
     getCourses().then(setCourses).catch(() => setCourses([]));
     getAllBadges().then(setBadges).catch(() => setBadges([]));
     getJourneyForms().then(setForms).catch(() => setForms([]));
@@ -1068,7 +1004,6 @@ export default function JourneyPage() {
                             totalStages={stages.length}
                             quizzes={quizzes}
                             courses={courses}
-                            signers={signers}
                             badges={badges}
                             forms={forms}
                             onUpdate={(s) => updateStage(stageIdx, s)}
