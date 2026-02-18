@@ -1424,11 +1424,11 @@ export async function createBadge(
 ): Promise<string> {
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.BADGES));
-    await setDoc(docRef, {
+    await setDoc(docRef, stripUndefined({
       ...badge,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
     return docRef.id;
   } catch (error) {
     console.error('Error creating badge:', error);
@@ -1442,7 +1442,7 @@ export async function updateBadge(
 ): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.BADGES, badgeId);
-    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() });
+    await updateDoc(docRef, stripUndefined({ ...updates, updatedAt: serverTimestamp() }) as DocumentData);
   } catch (error) {
     console.error('Error updating badge:', error);
     throw error;
