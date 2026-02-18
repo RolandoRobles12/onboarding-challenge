@@ -43,6 +43,8 @@ import type {
   CertificateConfig,
   Badge,
   UserBadge,
+  JourneyForm,
+  FormResponse,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
@@ -81,6 +83,9 @@ const COLLECTIONS = {
   LESSON_PROGRESS: 'lesson_progress',
   // --- Módulo: Rutas de Aprendizaje (Learning Paths Module) ---
   LEARNING_PATHS: 'learning_paths',
+  // --- Módulo: Formularios de Ruta ---
+  JOURNEY_FORMS: 'journey_forms',
+  FORM_RESPONSES: 'form_responses',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -1619,5 +1624,123 @@ export async function archiveCourse(courseId: string): Promise<void> {
   } catch (error) {
     console.error('Error archiving course:', error);
     throw error;
+  }
+}
+
+// ============================================================================
+// FORMULARIOS DE RUTA (Journey Forms)
+// ============================================================================
+
+/** Devuelve todos los formularios activos de una organización */
+export async function getJourneyForms(orgId: string = DEFAULT_ORG_ID): Promise<JourneyForm[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.JOURNEY_FORMS),
+      where('organizationId', '==', orgId),
+      orderBy('createdAt', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as JourneyForm);
+  } catch (error) {
+    console.error('Error getting journey forms:', error);
+    return [];
+  }
+}
+
+/** Devuelve un formulario por ID */
+export async function getJourneyForm(formId: string): Promise<JourneyForm | null> {
+  try {
+    const snap = await getDoc(getDocRef(COLLECTIONS.JOURNEY_FORMS, formId));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() } as JourneyForm;
+  } catch (error) {
+    console.error('Error getting journey form:', error);
+    return null;
+  }
+}
+
+/** Crea un nuevo formulario */
+export async function createJourneyForm(
+  data: Omit<JourneyForm, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>,
+  createdBy: string
+): Promise<string> {
+  try {
+    const docRef = doc(getCollectionRef(COLLECTIONS.JOURNEY_FORMS));
+    await setDoc(docRef, stripUndefined({
+      ...data,
+      createdBy,
+      active: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }));
+    return docRef.id;
+  } catch (error) {
+    console.error('Error creating journey form:', error);
+    throw error;
+  }
+}
+
+/** Actualiza campos de un formulario existente */
+export async function updateJourneyForm(
+  formId: string,
+  updates: Partial<Omit<JourneyForm, 'id' | 'createdAt'>>
+): Promise<void> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.JOURNEY_FORMS, formId);
+    await updateDoc(docRef, stripUndefined({
+      ...updates,
+      updatedAt: serverTimestamp(),
+    }) as WithFieldValue<DocumentData>);
+  } catch (error) {
+    console.error('Error updating journey form:', error);
+    throw error;
+  }
+}
+
+/** Elimina (desactiva) un formulario */
+export async function deleteJourneyForm(formId: string): Promise<void> {
+  try {
+    await updateJourneyForm(formId, { active: false });
+  } catch (error) {
+    console.error('Error deleting journey form:', error);
+    throw error;
+  }
+}
+
+/** Guarda la respuesta de un usuario a un formulario */
+export async function saveFormResponse(
+  data: Omit<FormResponse, 'id' | 'submittedAt'>
+): Promise<string> {
+  try {
+    const docRef = doc(getCollectionRef(COLLECTIONS.FORM_RESPONSES));
+    await setDoc(docRef, stripUndefined({
+      ...data,
+      submittedAt: serverTimestamp(),
+    }));
+    return docRef.id;
+  } catch (error) {
+    console.error('Error saving form response:', error);
+    throw error;
+  }
+}
+
+/** Devuelve respuestas de un formulario, opcionalmente filtradas por usuario */
+export async function getFormResponses(
+  formId: string,
+  respondentId?: string
+): Promise<FormResponse[]> {
+  try {
+    const constraints: QueryConstraint[] = [where('formId', '==', formId)];
+    if (respondentId) constraints.push(where('respondentId', '==', respondentId));
+    const q = query(
+      getCollectionRef(COLLECTIONS.FORM_RESPONSES),
+      ...constraints,
+      orderBy('submittedAt', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as FormResponse);
+  } catch (error) {
+    console.error('Error getting form responses:', error);
+    return [];
   }
 }

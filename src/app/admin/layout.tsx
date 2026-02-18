@@ -24,6 +24,7 @@ import {
   Swords,
   BellRing,
   UserCheck,
+  FileText,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -49,6 +50,7 @@ const navigation: (NavItem | NavSection)[] = [
     section: 'Rutas de Capacitación',
     items: [
       { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
+      { name: 'Formularios', href: '/admin/forms', icon: FileText },
       { name: 'Certificados', href: '/admin/certificados', icon: Award },
     ],
   },
