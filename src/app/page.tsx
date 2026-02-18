@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -77,46 +77,97 @@ const STAGE_COLORS = [
 
 // ─── Action row ───────────────────────────────────────────────────────────────
 
-function ActionRow({ action, status, productId, onMarkComplete }: {
+function ActionRow({ action, status, productId, journeyId, onMarkComplete }: {
   action: JourneyStep; status: 'completed' | 'active' | 'locked';
-  productId: string; onMarkComplete: (id: string) => void;
+  productId: string; journeyId: string; onMarkComplete: (id: string) => void;
 }) {
   const meta = STEP_META[action.type] ?? STEP_META.quiz;
   const Icon = meta.icon;
   const done = status === 'completed';
   const active = status === 'active';
 
+  // ── Checklist state ──────────────────────────────────────────────────────
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const markedRef = useRef(false);
+  const checklistItems = action.config?.checklistItems ?? [];
+  const requiredItems = checklistItems.filter(i => i.required);
+  const allRequiredChecked = requiredItems.length > 0 && requiredItems.every(i => checked.has(i.id));
+
+  useEffect(() => {
+    if (action.type === 'checklist' && active && allRequiredChecked && !markedRef.current) {
+      markedRef.current = true;
+      onMarkComplete(action.id);
+    }
+  }, [action.type, active, allRequiredChecked, action.id, onMarkComplete]);
+
   return (
     <div className={cn(
-      'flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all',
+      'flex flex-col rounded-xl px-3 py-2.5 transition-all gap-2',
       done && 'bg-green-50/60',
       active && 'bg-white border border-primary/20 shadow-sm',
       status === 'locked' && 'opacity-40',
     )}>
-      <div className={cn('h-8 w-8 rounded-lg flex items-center justify-center shrink-0',
-        done ? 'bg-green-100' : active ? 'bg-primary/10' : 'bg-muted')}>
-        {done ? <CheckCircle2 className="h-4 w-4 text-green-600" />
-          : status === 'locked' ? <Lock className="h-3.5 w-3.5 text-muted-foreground" />
-          : <Icon className={cn('h-4 w-4', meta.color)} />}
+      {/* Top row */}
+      <div className="flex items-center gap-3">
+        <div className={cn('h-8 w-8 rounded-lg flex items-center justify-center shrink-0',
+          done ? 'bg-green-100' : active ? 'bg-primary/10' : 'bg-muted')}>
+          {done ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+            : status === 'locked' ? <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+            : <Icon className={cn('h-4 w-4', meta.color)} />}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <p className={cn('text-sm font-medium leading-tight truncate', done && 'text-muted-foreground line-through decoration-green-400')}>{action.title}</p>
+          <p className="text-xs text-muted-foreground">{meta.label}</p>
+        </div>
+
+        {done && <span className="text-[10px] font-semibold text-green-600 bg-green-100 px-2 py-0.5 rounded-full shrink-0">✓</span>}
+
+        {/* info_form → navigate to form page, no manual button */}
+        {active && action.type === 'info_form' && action.config?.formId && (
+          <Button size="sm" className="h-7 text-xs shrink-0 gap-1" asChild>
+            <Link href={`/forms/${action.config.formId}?stepId=${action.id}&journeyId=${journeyId}&productId=${productId}`}>
+              <FileText className="h-3 w-3" /> Completar
+            </Link>
+          </Button>
+        )}
+
+        {/* checklist → no button; items appear below */}
+        {/* other types → standard Ir button */}
+        {active && action.type !== 'info_form' && action.type !== 'checklist' && (
+          <Button size="sm" className="h-7 text-xs shrink-0 gap-1" asChild>
+            <Link href={meta.href(productId, action.config)}>
+              <PlayCircle className="h-3 w-3" /> Ir
+            </Link>
+          </Button>
+        )}
       </div>
 
-      <div className="flex-1 min-w-0">
-        <p className={cn('text-sm font-medium leading-tight truncate', done && 'text-muted-foreground line-through decoration-green-400')}>{action.title}</p>
-        <p className="text-xs text-muted-foreground">{meta.label}</p>
-      </div>
-
-      {done && <span className="text-[10px] font-semibold text-green-600 bg-green-100 px-2 py-0.5 rounded-full shrink-0">✓</span>}
-      {active && action.type === 'info_form' && (
-        <Button size="sm" variant="outline" className="h-7 text-xs shrink-0 gap-1" onClick={() => onMarkComplete(action.id)}>
-          <CheckCircle2 className="h-3 w-3" /> Hecho
-        </Button>
-      )}
-      {active && action.type !== 'info_form' && (
-        <Button size="sm" className="h-7 text-xs shrink-0 gap-1" asChild>
-          <Link href={meta.href(productId, action.config)}>
-            <PlayCircle className="h-3 w-3" /> Ir
-          </Link>
-        </Button>
+      {/* Checklist items (inline, only when active) */}
+      {action.type === 'checklist' && active && checklistItems.length > 0 && (
+        <div className="pl-11 space-y-2">
+          {checklistItems.map(item => (
+            <label key={item.id} className="flex items-start gap-2 text-xs cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-3.5 w-3.5 accent-primary shrink-0"
+                checked={checked.has(item.id)}
+                onChange={() => setChecked(prev => {
+                  const n = new Set(prev);
+                  n.has(item.id) ? n.delete(item.id) : n.add(item.id);
+                  return n;
+                })}
+              />
+              <span className={cn('leading-tight', checked.has(item.id) && 'line-through text-muted-foreground')}>
+                {item.text}
+                {item.required && <span className="text-destructive ml-0.5">*</span>}
+              </span>
+            </label>
+          ))}
+          {requiredItems.length > 0 && (
+            <p className="text-[10px] text-muted-foreground">* Obligatorio para avanzar</p>
+          )}
+        </div>
       )}
     </div>
   );
@@ -124,9 +175,9 @@ function ActionRow({ action, status, productId, onMarkComplete }: {
 
 // ─── Stage card ───────────────────────────────────────────────────────────────
 
-function StageCard({ stage, index, status, completedIds, productId, onMarkComplete }: {
+function StageCard({ stage, index, status, completedIds, productId, journeyId, onMarkComplete }: {
   stage: JourneyStage; index: number; status: 'completed' | 'active' | 'locked';
-  completedIds: Set<string>; productId: string; onMarkComplete: (id: string) => void;
+  completedIds: Set<string>; productId: string; journeyId: string; onMarkComplete: (id: string) => void;
 }) {
   const [open, setOpen] = useState(status === 'active');
   const palette = STAGE_COLORS[index % STAGE_COLORS.length];
@@ -190,7 +241,7 @@ function StageCard({ stage, index, status, completedIds, productId, onMarkComple
             ? <p className="text-xs text-muted-foreground text-center py-3">Sin acciones configuradas</p>
             : stage.actions.map((action, i) => (
                 <ActionRow key={action.id} action={action} status={getActionStatus(action, i)}
-                  productId={productId} onMarkComplete={onMarkComplete} />
+                  productId={productId} journeyId={journeyId} onMarkComplete={onMarkComplete} />
               ))}
         </div>
       )}
@@ -435,6 +486,7 @@ function JourneyDashboard({ userId, profile }: {
               status={getStageStatus(i)}
               completedIds={completedIds}
               productId={productId}
+              journeyId={journey.id}
               onMarkComplete={handleMarkComplete}
             />
           ))}
