@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo, Suspense, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, useParams } from 'next/navigation';
 import type { Option } from '@/lib/types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FloatingParticles, StreakCounter, MissionCompleteBanner } from '@/components/GamificationEffects';
@@ -114,7 +114,8 @@ function QuizComponent() {
   // Fill-in-the-blank: word the user tapped from the word bank
   const [fillAnswer, setFillAnswer] = useState<string | null>(null);
 
-  const quizType = searchParams.get('quizType') || '';
+  const routeParams = useParams<{ quizType: string }>();
+  const quizType = routeParams.quizType || searchParams.get('quizType') || '';
   const avatarKey = searchParams.get('avatar');
   const Avatar = getAvatarComponent(avatarKey);
 
