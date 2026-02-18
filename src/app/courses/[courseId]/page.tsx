@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,7 @@ import {
   Video,
   Paperclip,
   CheckCheck,
+  Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -52,6 +53,58 @@ function LessonIcon({ type, className }: { type: Lesson['type']; className?: str
     case 'document': return <Paperclip className={cls} />;
     default:         return <FileText className={cls} />;
   }
+}
+
+// ─── Timer auto-complete (for iframes / documents) ───────────────────────────
+
+function TimerAutoComplete({
+  seconds,
+  isCompleted,
+  onComplete,
+}: {
+  seconds: number;
+  isCompleted: boolean;
+  onComplete: () => void;
+}) {
+  const [remaining, setRemaining] = useState(seconds);
+
+  useEffect(() => {
+    // Reset timer when seconds changes (new lesson loaded)
+    setRemaining(seconds);
+  }, [seconds]);
+
+  useEffect(() => {
+    if (isCompleted || remaining <= 0) return;
+    const id = setInterval(() => {
+      setRemaining(r => {
+        if (r <= 1) {
+          onComplete();
+          return 0;
+        }
+        return r - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [isCompleted, remaining, onComplete]);
+
+  if (isCompleted) return null;
+
+  const pct = Math.round(((seconds - remaining) / seconds) * 100);
+
+  return (
+    <div className="mt-4 rounded-xl border bg-muted/30 px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5" />
+          Completando lección…
+        </span>
+        <span className="font-mono font-semibold">
+          {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}
+        </span>
+      </div>
+      <Progress value={pct} className="h-1.5" />
+    </div>
+  );
 }
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
@@ -71,10 +124,8 @@ function Sidebar({
 }) {
   const allLessons = course.modules.flatMap(m => m.lessons);
 
-  const isLessonUnlocked = (lesson: Lesson, moduleIdx: number, lessonIdx: number) => {
+  const isLessonUnlocked = (moduleIdx: number, lessonIdx: number) => {
     if (navigation === 'free') return true;
-    // In sequential mode: first lesson of first module is always unlocked
-    // Each subsequent lesson requires the previous one to be completed
     const flatIdx = course.modules
       .slice(0, moduleIdx)
       .reduce((sum, m) => sum + m.lessons.length, 0) + lessonIdx;
@@ -103,7 +154,6 @@ function Sidebar({
           const modDone = mod.lessons.every(l => completedLessonIds.has(l.id));
           return (
             <div key={mod.id} className="mb-1">
-              {/* Module header */}
               <div className="flex items-center gap-2 px-4 py-2">
                 <div className={cn(
                   'h-5 w-5 rounded-full flex items-center justify-center shrink-0',
@@ -116,11 +166,10 @@ function Sidebar({
                 <p className="text-xs font-semibold truncate">{mod.title}</p>
               </div>
 
-              {/* Lessons */}
               {mod.lessons.map((lesson, lessonIdx) => {
                 const done = completedLessonIds.has(lesson.id);
                 const active = lesson.id === selectedLessonId;
-                const unlocked = isLessonUnlocked(lesson, modIdx, lessonIdx);
+                const unlocked = isLessonUnlocked(modIdx, lessonIdx);
 
                 return (
                   <button
@@ -161,8 +210,31 @@ function Sidebar({
 
 // ─── Lesson content renderer ──────────────────────────────────────────────────
 
-function LessonViewer({ lesson }: { lesson: Lesson }) {
+function LessonViewer({
+  lesson,
+  isCompleted,
+  onComplete,
+}: {
+  lesson: Lesson;
+  isCompleted: boolean;
+  onComplete: () => void;
+}) {
   const { content } = lesson;
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  // HTML: auto-complete when the user scrolls to the bottom (sentinel visible)
+  useEffect(() => {
+    if (lesson.type !== 'html' || isCompleted || !sentinelRef.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) onComplete(); },
+      { threshold: 0.8 },
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [lesson.type, lesson.id, isCompleted, onComplete]);
+
+  // Timer duration in seconds for iframe-based content
+  const timerSeconds = (lesson.estimatedDuration ?? 1) * 60;
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -174,6 +246,11 @@ function LessonViewer({ lesson }: { lesson: Lesson }) {
           {lesson.estimatedDuration && (
             <span className="text-xs text-muted-foreground">· {lesson.estimatedDuration} min</span>
           )}
+          {isCompleted && (
+            <span className="flex items-center gap-1 text-xs text-green-600 font-medium ml-2">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Completada
+            </span>
+          )}
         </div>
         <h2 className="text-xl font-bold">{lesson.title}</h2>
         {lesson.description && (
@@ -183,57 +260,95 @@ function LessonViewer({ lesson }: { lesson: Lesson }) {
 
       {/* Content */}
       <div className="px-6 py-5 space-y-4">
+
+        {/* VIDEO — auto-complete on ended */}
         {lesson.type === 'video' && content.videoUrl && (
           <div className="rounded-xl overflow-hidden bg-black aspect-video w-full">
             <video
+              key={lesson.id}
               className="w-full h-full"
               controls
               src={content.videoUrl}
+              onEnded={() => { if (!isCompleted) onComplete(); }}
             />
           </div>
         )}
 
+        {/* AUDIO — auto-complete on ended */}
         {lesson.type === 'audio' && content.audioUrl && (
           <div className="rounded-xl border p-6 bg-muted/30 flex flex-col items-center gap-4">
             <Headphones className="h-12 w-12 text-muted-foreground" />
-            <audio controls className="w-full" src={content.audioUrl} />
+            <audio
+              key={lesson.id}
+              controls
+              className="w-full"
+              src={content.audioUrl}
+              onEnded={() => { if (!isCompleted) onComplete(); }}
+            />
           </div>
         )}
 
+        {/* HTML — auto-complete when sentinel scrolled into view */}
         {lesson.type === 'html' && content.htmlContent && (
-          <div
-            className="prose prose-sm max-w-none"
-            dangerouslySetInnerHTML={{ __html: content.htmlContent }}
-          />
+          <>
+            <div
+              className="prose prose-sm max-w-none"
+              dangerouslySetInnerHTML={{ __html: content.htmlContent }}
+            />
+            {/* Sentinel: lesson completes when user scrolls here */}
+            <div ref={sentinelRef} className="h-1" />
+          </>
         )}
 
+        {/* EMBEDDED — auto-complete via timer */}
         {lesson.type === 'embedded' && content.embedUrl && (
-          <div className="rounded-xl overflow-hidden border" style={{ height: content.embedHeight || 480 }}>
-            <iframe
-              src={content.embedUrl}
-              className="w-full h-full"
-              allowFullScreen
-              title={lesson.title}
+          <>
+            <div className="rounded-xl overflow-hidden border" style={{ height: content.embedHeight || 480 }}>
+              <iframe
+                key={lesson.id}
+                src={content.embedUrl}
+                className="w-full h-full"
+                allowFullScreen
+                title={lesson.title}
+              />
+            </div>
+            <TimerAutoComplete
+              key={lesson.id}
+              seconds={timerSeconds}
+              isCompleted={isCompleted}
+              onComplete={onComplete}
             />
-          </div>
+          </>
         )}
 
+        {/* SLIDES — auto-complete via timer */}
         {lesson.type === 'slides' && content.slidesUrl && (
-          <div className="rounded-xl overflow-hidden border" style={{ height: 480 }}>
-            <iframe
-              src={content.slidesUrl}
-              className="w-full h-full"
-              allowFullScreen
-              title={lesson.title}
+          <>
+            <div className="rounded-xl overflow-hidden border" style={{ height: 480 }}>
+              <iframe
+                key={lesson.id}
+                src={content.slidesUrl}
+                className="w-full h-full"
+                allowFullScreen
+                title={lesson.title}
+              />
+            </div>
+            <TimerAutoComplete
+              key={lesson.id}
+              seconds={timerSeconds}
+              isCompleted={isCompleted}
+              onComplete={onComplete}
             />
-          </div>
+          </>
         )}
 
+        {/* DOCUMENT — auto-complete via timer */}
         {lesson.type === 'document' && content.documentUrl && (
-          <div className="space-y-3">
+          <>
             {content.documentType === 'pdf' && (
               <div className="rounded-xl overflow-hidden border" style={{ height: 560 }}>
                 <iframe
+                  key={lesson.id}
                   src={content.documentUrl}
                   className="w-full h-full"
                   title={lesson.title}
@@ -249,17 +364,33 @@ function LessonViewer({ lesson }: { lesson: Lesson }) {
               <Paperclip className="h-4 w-4" />
               Abrir / descargar documento
             </a>
-          </div>
+            <TimerAutoComplete
+              key={lesson.id}
+              seconds={timerSeconds}
+              isCompleted={isCompleted}
+              onComplete={onComplete}
+            />
+          </>
         )}
 
+        {/* SCORM — auto-complete via timer */}
         {lesson.type === 'scorm' && content.scormPackageUrl && (
-          <div className="rounded-xl overflow-hidden border" style={{ height: 560 }}>
-            <iframe
-              src={content.scormPackageUrl}
-              className="w-full h-full"
-              title={lesson.title}
+          <>
+            <div className="rounded-xl overflow-hidden border" style={{ height: 560 }}>
+              <iframe
+                key={lesson.id}
+                src={content.scormPackageUrl}
+                className="w-full h-full"
+                title={lesson.title}
+              />
+            </div>
+            <TimerAutoComplete
+              key={lesson.id}
+              seconds={timerSeconds}
+              isCompleted={isCompleted}
+              onComplete={onComplete}
             />
-          </div>
+          </>
         )}
 
         {/* Attachments */}
@@ -277,7 +408,11 @@ function LessonViewer({ lesson }: { lesson: Lesson }) {
                 >
                   <Paperclip className="h-3.5 w-3.5 shrink-0" />
                   {att.name}
-                  {att.sizeKb && <span className="text-xs text-muted-foreground">({Math.round(att.sizeKb / 1024 * 10) / 10} MB)</span>}
+                  {att.sizeKb && (
+                    <span className="text-xs text-muted-foreground">
+                      ({Math.round(att.sizeKb / 1024 * 10) / 10} MB)
+                    </span>
+                  )}
                 </a>
               ))}
             </div>
@@ -304,7 +439,6 @@ export default function CourseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [markingDone, setMarkingDone] = useState(false);
 
   // Load course + enrollment
   const load = useCallback(async () => {
@@ -317,10 +451,8 @@ export default function CourseDetailPage() {
       if (!data) { setNotFound(true); return; }
       setCourse(data);
 
-      // Find or create enrollment
       let enr = enrollments.find(e => e.courseId === courseId) ?? null;
       if (!enr) {
-        // Auto-enroll
         const enrolledAt = new Date() as unknown as import('firebase/firestore').Timestamp;
         const id = await enrollUserInCourse({
           userId: profile.uid,
@@ -349,7 +481,6 @@ export default function CourseDetailPage() {
       setCompletedLessonIds(new Set(enr.completedLessonIds));
       setCompletedModuleIds(new Set(enr.completedModuleIds));
 
-      // Select first unlocked lesson
       const allLessons = data.modules.flatMap(m => m.lessons);
       const firstIncomplete = allLessons.find(l => !enr!.completedLessonIds.includes(l.id));
       setSelectedLesson(firstIncomplete ?? allLessons[0] ?? null);
@@ -362,7 +493,6 @@ export default function CourseDetailPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // All lessons flat list for prev/next navigation
   const allLessons = course?.modules.flatMap(m => m.lessons) ?? [];
   const currentIdx = selectedLesson ? allLessons.findIndex(l => l.id === selectedLesson.id) : -1;
   const prevLesson = currentIdx > 0 ? allLessons[currentIdx - 1] : null;
@@ -373,36 +503,31 @@ export default function CourseDetailPage() {
     ? Math.round((completedLessonIds.size / allLessons.length) * 100)
     : 0;
 
-  // Mark current lesson complete
-  const handleMarkComplete = async () => {
+  // Called automatically by LessonViewer when the content triggers completion
+  const handleAutoComplete = useCallback(async () => {
     if (!enrollment || !selectedLesson || !course) return;
-    setMarkingDone(true);
-    try {
-      const newLessonIds = [...completedLessonIds, selectedLesson.id];
-      // Check if the module is now complete
-      const mod = course.modules.find(m => m.lessons.some(l => l.id === selectedLesson.id));
-      const newModuleIds = [...completedModuleIds];
-      if (mod && mod.lessons.every(l => newLessonIds.includes(l.id))) {
-        newModuleIds.push(mod.id);
-      }
-      const allComplete = newLessonIds.length === allLessons.length;
+    if (completedLessonIds.has(selectedLesson.id)) return; // already done
 
-      await updateEnrollmentProgress(enrollment.id, {
-        completedLessonIds: newLessonIds,
-        completedModuleIds: newModuleIds,
-        status: allComplete ? 'completed' : 'in_progress',
-        ...(allComplete ? { completedAt: new Date() as unknown as import('firebase/firestore').Timestamp } : {}),
-      });
-
-      setCompletedLessonIds(new Set(newLessonIds));
-      setCompletedModuleIds(new Set(newModuleIds));
-
-      // Advance to next lesson automatically
-      if (nextLesson) setSelectedLesson(nextLesson);
-    } finally {
-      setMarkingDone(false);
+    const newLessonIds = [...completedLessonIds, selectedLesson.id];
+    const mod = course.modules.find(m => m.lessons.some(l => l.id === selectedLesson.id));
+    const newModuleIds = [...completedModuleIds];
+    if (mod && mod.lessons.every(l => newLessonIds.includes(l.id))) {
+      newModuleIds.push(mod.id);
     }
-  };
+    const allComplete = newLessonIds.length === allLessons.length;
+
+    // Update state immediately for snappy UI
+    setCompletedLessonIds(new Set(newLessonIds));
+    setCompletedModuleIds(new Set(newModuleIds));
+
+    // Persist to Firestore (fire and forget — no loading state exposed to user)
+    updateEnrollmentProgress(enrollment.id, {
+      completedLessonIds: newLessonIds,
+      completedModuleIds: newModuleIds,
+      status: allComplete ? 'completed' : 'in_progress',
+      ...(allComplete ? { completedAt: new Date() as unknown as import('firebase/firestore').Timestamp } : {}),
+    }).catch(console.error);
+  }, [enrollment, selectedLesson, course, completedLessonIds, completedModuleIds, allLessons.length]);
 
   return (
     <ProtectedRoute>
@@ -411,7 +536,6 @@ export default function CourseDetailPage() {
           {/* Top bar */}
           <header className="bg-accent text-accent-foreground border-b shrink-0 z-20">
             <div className="flex items-center gap-3 px-4 h-14">
-              {/* Sidebar toggle (mobile) */}
               <button
                 className="text-accent-foreground/70 hover:text-accent-foreground lg:hidden"
                 onClick={() => setSidebarOpen(o => !o)}
@@ -433,16 +557,14 @@ export default function CourseDetailPage() {
               </div>
 
               <div className="ml-auto flex items-center gap-3">
-                {/* Progress chip */}
                 {!loading && course && (
                   <div className="hidden sm:flex items-center gap-2">
                     <Progress value={pct} className="w-24 h-1.5" />
                     <span className="text-xs text-accent-foreground/70">{pct}%</span>
                   </div>
                 )}
-
                 {isAdmin && (
-                  <Link href={`/admin/courses`}>
+                  <Link href="/admin/courses">
                     <Button variant="outline" size="sm"
                       className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 hidden sm:flex">
                       Gestionar
@@ -484,9 +606,8 @@ export default function CourseDetailPage() {
 
               {/* Sidebar */}
               <aside className={cn(
-                'shrink-0 border-r bg-card flex flex-col transition-all duration-200 overflow-hidden',
+                'shrink-0 border-r bg-card flex flex-col overflow-hidden',
                 'w-72',
-                // On mobile, overlay
                 sidebarOpen ? 'flex' : 'hidden',
                 'lg:flex',
               )}>
@@ -503,7 +624,7 @@ export default function CourseDetailPage() {
                   navigation={course.navigation}
                   onSelect={(lesson) => {
                     setSelectedLesson(lesson);
-                    setSidebarOpen(false); // close on mobile after select
+                    setSidebarOpen(false);
                   }}
                 />
               </aside>
@@ -512,12 +633,17 @@ export default function CourseDetailPage() {
               <div className="flex-1 flex flex-col overflow-hidden">
                 {selectedLesson ? (
                   <>
-                    {/* Lesson content */}
                     <div className="flex-1 overflow-y-auto">
-                      <LessonViewer lesson={selectedLesson} />
+                      {/* key resets all internal state (timers, observers) when lesson changes */}
+                      <LessonViewer
+                        key={selectedLesson.id}
+                        lesson={selectedLesson}
+                        isCompleted={isDone}
+                        onComplete={handleAutoComplete}
+                      />
                     </div>
 
-                    {/* Bottom navigation bar */}
+                    {/* Bottom nav — no manual complete button */}
                     <div className="shrink-0 border-t bg-card px-4 py-3 flex items-center gap-3">
                       <Button
                         variant="outline"
@@ -531,44 +657,49 @@ export default function CourseDetailPage() {
                       </Button>
 
                       <div className="flex-1 text-center">
-                        <span className="text-xs text-muted-foreground">
-                          {currentIdx + 1} / {allLessons.length}
-                        </span>
+                        {isDone ? (
+                          <span className="flex items-center justify-center gap-1 text-xs text-green-600 font-medium">
+                            <CheckCheck className="h-3.5 w-3.5" /> Lección completada
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            {currentIdx + 1} / {allLessons.length}
+                          </span>
+                        )}
                       </div>
 
-                      {isDone ? (
-                        <div className="flex items-center gap-2">
-                          <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
-                            <CheckCheck className="h-4 w-4" /> Completada
-                          </span>
-                          {nextLesson && (
-                            <Button size="sm" onClick={() => setSelectedLesson(nextLesson)} className="gap-1">
-                              Siguiente <ChevronRight className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      ) : (
+                      {/* "Siguiente" locked until lesson is done */}
+                      {nextLesson ? (
                         <Button
                           size="sm"
-                          onClick={handleMarkComplete}
-                          disabled={markingDone}
+                          disabled={!isDone}
+                          onClick={() => isDone && setSelectedLesson(nextLesson)}
                           className="gap-1"
+                          title={!isDone ? 'Completa esta lección para continuar' : undefined}
                         >
-                          <CheckCircle2 className="h-4 w-4" />
-                          {markingDone ? 'Guardando…' : 'Marcar como completada'}
+                          {!isDone && <Lock className="h-3.5 w-3.5" />}
+                          Siguiente
+                          {isDone && <ChevronRight className="h-4 w-4" />}
+                        </Button>
+                      ) : isDone ? (
+                        <Button size="sm" variant="outline" asChild className="gap-1">
+                          <Link href="/"><CheckCircle2 className="h-4 w-4" /> Finalizar</Link>
+                        </Button>
+                      ) : (
+                        <Button size="sm" disabled className="gap-1">
+                          <Lock className="h-3.5 w-3.5" /> Finalizar
                         </Button>
                       )}
                     </div>
                   </>
                 ) : (
-                  // Course complete or no lessons
                   <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6">
                     {pct === 100 ? (
                       <>
                         <div className="text-5xl">🎖️</div>
                         <h2 className="text-2xl font-bold">¡Curso completado!</h2>
                         <p className="text-muted-foreground max-w-sm">
-                          Has terminado todos los módulos de <strong>{course.title}</strong>. ¡Excelente trabajo!
+                          Has terminado todos los módulos de <strong>{course.title}</strong>.
                         </p>
                         <Badge className="bg-green-100 text-green-800 border-green-200 text-sm px-3 py-1">
                           <CheckCircle2 className="h-4 w-4 mr-1" /> {completedLessonIds.size} lecciones completadas
