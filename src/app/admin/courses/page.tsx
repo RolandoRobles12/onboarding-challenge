@@ -72,6 +72,7 @@ import {
   X,
   CheckCircle2,
   Link,
+  HelpCircle,
 } from 'lucide-react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';

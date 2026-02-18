@@ -511,12 +511,12 @@ export type JourneyStepType =
   | 'badge'       // Otorgamiento de insignia
   | 'checklist';  // Lista de verificación antes de avanzar
 
-/** Subtipo de formulario para pasos info_form */
+/** @deprecated Use JourneyForm with formId instead */
 export type JourneyFormType =
-  | 'seller_data'        // Datos básicos del vendedor (kiosko, fecha de ingreso, etc.)
-  | 'experience_rating'  // El vendedor evalúa su propia experiencia de aprendizaje
-  | 'trainer_rating'     // El vendedor evalúa a su capacitador
-  | 'seller_evaluation'; // El evaluador/capacitador evalúa al vendedor
+  | 'seller_data'
+  | 'experience_rating'
+  | 'trainer_rating'
+  | 'seller_evaluation';
 
 export interface ChecklistItem {
   id: string;
@@ -537,9 +537,98 @@ export interface JourneyStep {
     signerIds?: string[];     // para pasos de tipo 'certificate'
     badgeId?: string;         // para pasos de tipo 'badge'
     minimumScore?: number;    // % mínimo para avanzar al siguiente paso
-    formType?: JourneyFormType;         // para pasos de tipo 'info_form'
+    formId?: string;                    // para pasos de tipo 'info_form': ID del JourneyForm
+    /** @deprecated use formId */
+    formType?: JourneyFormType;
     checklistItems?: ChecklistItem[];   // para pasos de tipo 'checklist'
   };
+}
+
+// ============================================================================
+// FORMULARIOS DE RUTA (JOURNEY FORMS) - Sistema completo de formularios
+// ============================================================================
+
+/** Tipo de campo en un formulario */
+export type FormFieldType =
+  | 'text'            // Texto corto
+  | 'textarea'        // Texto largo
+  | 'number'          // Número
+  | 'date'            // Fecha
+  | 'single_choice'   // Selección única (radio)
+  | 'multiple_choice' // Selección múltiple (checkbox)
+  | 'rating_stars'    // Calificación con estrellas (1-5)
+  | 'rating_nps'      // Escala NPS (0-10)
+  | 'rating_scale'    // Escala numérica personalizada
+  | 'section_header'; // Separador/encabezado de sección (no captura datos)
+
+/** Propósito del formulario */
+export type FormPurpose =
+  | 'seller_data'        // Datos básicos del vendedor
+  | 'experience_rating'  // Vendedor evalúa su experiencia de aprendizaje
+  | 'trainer_rating'     // Vendedor evalúa a su capacitador
+  | 'seller_evaluation'  // Capacitador/gerente evalúa al vendedor
+  | 'general';           // Formulario de propósito general
+
+/** Quién responde el formulario */
+export type FormRespondent =
+  | 'seller'   // El vendedor lo llena sobre sí mismo
+  | 'trainer'  // El capacitador lo llena (puede ser sobre el vendedor)
+  | 'manager'; // El gerente/evaluador externo lo llena
+
+/** Campo individual de un formulario */
+export interface FormField {
+  id: string;
+  type: FormFieldType;
+  label: string;
+  placeholder?: string;
+  helpText?: string;       // Texto de ayuda debajo del campo
+  required: boolean;
+  order: number;
+
+  // Para single_choice y multiple_choice
+  options?: { id: string; label: string }[];
+
+  // Para rating_scale personalizado
+  minValue?: number;       // Valor mínimo (ej: 1)
+  maxValue?: number;       // Valor máximo (ej: 10)
+  minLabel?: string;       // Etiqueta del extremo bajo (ej: "Muy insatisfecho")
+  maxLabel?: string;       // Etiqueta del extremo alto (ej: "Muy satisfecho")
+
+  // Para section_header
+  description?: string;    // Descripción debajo del encabezado
+}
+
+/** Formulario completo como entidad de primer nivel */
+export interface JourneyForm {
+  id: string;
+  organizationId: string;
+  title: string;
+  description?: string;
+  purpose: FormPurpose;
+  respondent: FormRespondent;
+  fields: FormField[];
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
+}
+
+/** Respuesta de un usuario a un formulario */
+export interface FormResponse {
+  id: string;
+  formId: string;
+  journeyId?: string;
+  stepId?: string;
+  respondentId: string;    // userId de quien llenó
+  subjectId?: string;      // userId del vendedor evaluado (si respondent != seller)
+  organizationId: string;
+  answers: FormAnswer[];
+  submittedAt: Timestamp;
+}
+
+export interface FormAnswer {
+  fieldId: string;
+  value: string | string[] | number; // texto, opciones seleccionadas, o puntuación
 }
 
 /** Etapa dentro de una ruta. Contiene una o más acciones ordenadas. */

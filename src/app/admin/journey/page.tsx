@@ -11,6 +11,7 @@ import {
   getCertificateSigners,
   getCourses,
   getAllBadges,
+  getJourneyForms,
 } from '@/lib/firestore-service';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,7 +27,7 @@ import {
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
-  JourneyFormType, ChecklistItem, CertificateSigner,
+  ChecklistItem, CertificateSigner, JourneyForm,
 } from '@/lib/types-scalable';
 import type { Quiz, Badge as BadgeType } from '@/lib/types-scalable';
 import type { Course } from '@/lib/types-lms';
@@ -98,33 +99,18 @@ const STEP_TYPE_CONFIG: Record<JourneyStepType, {
   },
 };
 
-const FORM_TYPE_CONFIG: Record<JourneyFormType, { label: string; description: string; emoji: string }> = {
-  seller_data: {
-    label: 'Datos del vendedor',
-    description: 'Recopila información básica (nombre, kiosko, fecha de ingreso)',
-    emoji: '📝',
-  },
-  experience_rating: {
-    label: 'El vendedor evalúa su experiencia',
-    description: 'El vendedor califica la calidad de su capacitación y aprendizaje',
-    emoji: '⭐',
-  },
-  trainer_rating: {
-    label: 'El vendedor evalúa a su capacitador',
-    description: 'El vendedor califica el desempeño de su trainer o supervisor',
-    emoji: '👨‍🏫',
-  },
-  seller_evaluation: {
-    label: 'El capacitador evalúa al vendedor',
-    description: 'El evaluador o gerente califica el desempeño del vendedor',
-    emoji: '🎯',
-  },
+const PURPOSE_EMOJI: Record<string, string> = {
+  seller_data: '📋',
+  experience_rating: '⭐',
+  trainer_rating: '👨‍🏫',
+  seller_evaluation: '📊',
+  general: '📝',
 };
 
 // ─── ActionCard ───────────────────────────────────────────────────────────────
 
 function ActionCard({
-  action, index, total, quizzes, courses, signers, badges,
+  action, index, total, quizzes, courses, signers, badges, forms,
   onUpdate, onRemove, onMoveUp, onMoveDown,
 }: {
   action: JourneyStep;
@@ -134,6 +120,7 @@ function ActionCard({
   courses: Course[];
   signers: CertificateSigner[];
   badges: BadgeType[];
+  forms: JourneyForm[];
   onUpdate: (s: JourneyStep) => void;
   onRemove: () => void;
   onMoveUp: () => void;
@@ -216,31 +203,53 @@ function ActionCard({
           </div>
         </div>
 
-        {/* info_form: formType selector */}
+        {/* info_form: formId picker */}
         {action.type === 'info_form' && (
           <div className="space-y-1">
-            <Label className="text-xs">Tipo de formulario</Label>
+            <Label className="text-xs">Formulario asignado</Label>
             <Select
-              value={action.config.formType || 'seller_data'}
-              onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, formType: v as JourneyFormType } })}
+              value={action.config.formId || '__none__'}
+              onValueChange={(v) => onUpdate({
+                ...action,
+                config: { ...action.config, formId: v === '__none__' ? undefined : v },
+              })}
             >
               <SelectTrigger className="h-7 text-xs">
-                <SelectValue />
+                <SelectValue placeholder="Selecciona un formulario..." />
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(FORM_TYPE_CONFIG).map(([type, c]) => (
-                  <SelectItem key={type} value={type}>
-                    <span className="flex items-center gap-2">
-                      <span>{c.emoji}</span>
-                      <span>{c.label}</span>
-                    </span>
+                <SelectItem value="__none__">
+                  <span className="text-muted-foreground italic">Sin formulario asignado</span>
+                </SelectItem>
+                {forms.filter(f => f.active).length === 0 ? (
+                  <SelectItem value="__empty__" disabled>
+                    No hay formularios creados aún
                   </SelectItem>
-                ))}
+                ) : (
+                  forms.filter(f => f.active).map(f => (
+                    <SelectItem key={f.id} value={f.id}>
+                      <span className="flex items-center gap-2">
+                        <span>{PURPOSE_EMOJI[f.purpose] ?? '📝'}</span>
+                        <span>{f.title}</span>
+                      </span>
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
-            {action.config.formType && FORM_TYPE_CONFIG[action.config.formType] && (
+            {action.config.formId ? (
+              (() => {
+                const selectedForm = forms.find(f => f.id === action.config.formId);
+                return selectedForm ? (
+                  <p className="text-[10px] text-muted-foreground">
+                    {selectedForm.description || `${selectedForm.fields.filter(f => f.type !== 'section_header').length} campos • Responde: ${selectedForm.respondent}`}
+                  </p>
+                ) : null;
+              })()
+            ) : (
               <p className="text-[10px] text-muted-foreground">
-                {FORM_TYPE_CONFIG[action.config.formType].description}
+                Crea formularios en{' '}
+                <a href="/admin/forms" className="underline text-primary">Formularios</a>.
               </p>
             )}
           </div>
@@ -514,7 +523,7 @@ const STAGE_COLORS = [
 ];
 
 function StageCard({
-  stage, stageIndex, totalStages, quizzes, courses, signers, badges,
+  stage, stageIndex, totalStages, quizzes, courses, signers, badges, forms,
   onUpdate, onRemove, onMoveUp, onMoveDown,
 }: {
   stage: JourneyStage;
@@ -524,6 +533,7 @@ function StageCard({
   courses: Course[];
   signers: CertificateSigner[];
   badges: BadgeType[];
+  forms: JourneyForm[];
   onUpdate: (s: JourneyStage) => void;
   onRemove: () => void;
   onMoveUp: () => void;
@@ -672,6 +682,7 @@ function StageCard({
                     courses={courses}
                     signers={signers}
                     badges={badges}
+                    forms={forms}
                     onUpdate={(a) => updateAction(actionIdx, a)}
                     onRemove={() => removeAction(actionIdx)}
                     onMoveUp={() => moveAction(actionIdx, 'up')}
@@ -719,6 +730,7 @@ export default function JourneyPage() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [signers, setSigners] = useState<CertificateSigner[]>([]);
   const [badges, setBadges] = useState<BadgeType[]>([]);
+  const [forms, setForms] = useState<JourneyForm[]>([]);
   const [journeyName, setJourneyName] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -728,6 +740,7 @@ export default function JourneyPage() {
     getCertificateSigners().then(setSigners).catch(() => setSigners([]));
     getCourses().then(setCourses).catch(() => setCourses([]));
     getAllBadges().then(setBadges).catch(() => setBadges([]));
+    getJourneyForms().then(setForms).catch(() => setForms([]));
   }, []);
 
   // Load product-specific data
@@ -777,7 +790,7 @@ export default function JourneyPage() {
             {
               id: crypto.randomUUID(), order: 0, title: 'Bienvenida', required: true,
               actions: [
-                { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del vendedor', required: true, config: { formType: 'seller_data' as JourneyFormType } },
+                { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del vendedor', required: true, config: {} },
               ],
             },
             {
@@ -1057,6 +1070,7 @@ export default function JourneyPage() {
                             courses={courses}
                             signers={signers}
                             badges={badges}
+                            forms={forms}
                             onUpdate={(s) => updateStage(stageIdx, s)}
                             onRemove={() => removeStage(stageIdx)}
                             onMoveUp={() => moveStage(stageIdx, 'up')}
