@@ -129,6 +129,7 @@ interface LessonForm {
   contentUrl: string;
   htmlContent: string;
   description: string;
+  assessmentQuizId: string; // quiz al finalizar esta lección (ID o '' para ninguno)
 }
 
 const DEFAULT_COURSE_FORM: CourseForm = {
@@ -146,6 +147,7 @@ const DEFAULT_LESSON_FORM: LessonForm = {
   contentUrl: '',
   htmlContent: '',
   description: '',
+  assessmentQuizId: '',
 };
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -405,6 +407,7 @@ export default function AdminCoursesPage() {
         lesson.content.audioUrl ?? lesson.content.scormPackageUrl ?? '',
       htmlContent: lesson.content.htmlContent ?? '',
       description: lesson.description ?? '',
+      assessmentQuizId: lesson.assessmentQuizId ?? '',
     } : DEFAULT_LESSON_FORM);
   }
 
@@ -423,6 +426,7 @@ export default function AdminCoursesPage() {
         estimatedDuration: Number(lessonForm.estimatedDuration) || undefined,
         description: lessonForm.description.trim() || undefined,
         content,
+        assessmentQuizId: lessonForm.assessmentQuizId || undefined,
         updatedAt: now,
       };
       setModules(prev => prev.map(m => m.id === moduleId
@@ -440,6 +444,7 @@ export default function AdminCoursesPage() {
         estimatedDuration: Number(lessonForm.estimatedDuration) || undefined,
         description: lessonForm.description.trim() || undefined,
         content,
+        assessmentQuizId: lessonForm.assessmentQuizId || undefined,
         isRequired: true,
         isFreePreview: false,
         createdAt: now,
@@ -1009,6 +1014,12 @@ function CourseEditor({
                                       {lesson.estimatedDuration} min
                                     </span>
                                   )}
+                                  {lesson.assessmentQuizId && (
+                                    <span className="flex items-center gap-0.5 text-purple-600">
+                                      <HelpCircle className="h-3 w-3" />
+                                      Con evaluación
+                                    </span>
+                                  )}
                                 </p>
                               </div>
                               <div className="flex items-center gap-1">
@@ -1085,7 +1096,7 @@ function CourseEditor({
           <DialogHeader>
             <DialogTitle>{lessonDialog.editing ? 'Editar lección' : 'Nueva lección'}</DialogTitle>
           </DialogHeader>
-          <LessonFormFields form={lessonForm} setForm={setLessonForm} courseId={course.id} />
+          <LessonFormFields form={lessonForm} setForm={setLessonForm} courseId={course.id} availableQuizzes={availableQuizzes} />
           <DialogFooter>
             <Button variant="outline" onClick={onCloseLessonDialog}>Cancelar</Button>
             <Button onClick={onSaveLesson} disabled={!lessonForm.title.trim()}>
@@ -1114,10 +1125,12 @@ function LessonFormFields({
   form,
   setForm,
   courseId,
+  availableQuizzes = [],
 }: {
   form: LessonForm;
   setForm: React.Dispatch<React.SetStateAction<LessonForm>>;
   courseId: string;
+  availableQuizzes?: Quiz[];
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -1386,6 +1399,40 @@ function LessonFormFields({
           placeholder="Breve descripción de esta lección"
           rows={2}
         />
+      </div>
+
+      {/* Quiz/evaluación al finalizar la lección */}
+      <div className="space-y-1.5 pt-1 border-t">
+        <Label className="flex items-center gap-1.5 text-sm">
+          <HelpCircle className="h-3.5 w-3.5 text-purple-600" />
+          Evaluación al finalizar la lección (opcional)
+        </Label>
+        <Select
+          value={form.assessmentQuizId || '__none__'}
+          onValueChange={v => setForm(p => ({ ...p, assessmentQuizId: v === '__none__' ? '' : v }))}
+        >
+          <SelectTrigger className="h-8 text-sm">
+            <SelectValue placeholder="Sin evaluación" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">Sin evaluación</SelectItem>
+            {availableQuizzes.length === 0 ? (
+              <SelectItem value="__empty__" disabled>No hay evaluaciones disponibles</SelectItem>
+            ) : (
+              availableQuizzes.map(q => (
+                <SelectItem key={q.id} value={q.id}>
+                  <span className="flex items-center gap-2">
+                    <HelpCircle className="h-3 w-3 text-purple-600" />
+                    {q.title}
+                  </span>
+                </SelectItem>
+              ))
+            )}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-muted-foreground">
+          El vendedor completará esta evaluación justo después de ver esta lección.
+        </p>
       </div>
     </div>
   );

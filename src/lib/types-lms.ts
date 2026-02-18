@@ -116,8 +116,8 @@ export interface Lesson {
 
   estimatedDuration?: number;   // Minutos
 
-  // Evaluación al finalizar la lección
-  assessmentId?: string;
+  /** Quiz/evaluación que se muestra al finalizar esta lección (opcional). */
+  assessmentQuizId?: string;
 
   // Configuración
   isRequired: boolean;
