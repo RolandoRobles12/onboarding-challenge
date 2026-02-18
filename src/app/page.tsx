@@ -16,6 +16,7 @@ import {
   markJourneyStepComplete,
   getUserBadges,
   getUserAttempts,
+  getUserEnrollments,
 } from '@/lib/firestore-service';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import type { Journey, JourneyStep, JourneyStage, Product, QuizAttempt } from '@/lib/types-scalable';
@@ -336,11 +337,32 @@ function JourneyDashboard({ userId, profile }: {
         const prog = await getUserJourneyProgress(userId, foundJourney.id).catch(() => null);
         (prog?.completedStepIds ?? []).forEach((id: string) => ids.add(id));
       }
-      // Auto-mark info_form if onboarding done
+
       const allActions: JourneyStep[] = foundJourney
         ? (foundJourney.stages?.length ? foundJourney.stages.flatMap(s => s.actions ?? []) : foundJourney.steps ?? [])
         : [];
+
+      // Auto-mark info_form if onboarding done
       allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
+
+      // Auto-mark course steps whose enrollment is completed
+      const courseActions = allActions.filter(a => a.type === 'course' && a.config?.courseId);
+      if (foundJourney && courseActions.length > 0) {
+        const enrollments = await getUserEnrollments(userId).catch(() => []);
+        const markPromises: Promise<void>[] = [];
+        courseActions.forEach(a => {
+          if (ids.has(a.id)) return; // already marked
+          const enr = enrollments.find(e => e.courseId === a.config!.courseId);
+          if (enr?.status === 'completed') {
+            ids.add(a.id);
+            markPromises.push(
+              markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+            );
+          }
+        });
+        await Promise.all(markPromises);
+      }
+
       setCompletedIds(ids);
       setXp(calcXP(attempts as QuizAttempt[], bLen, ids.size));
     } catch { setLoadError(true); }
@@ -348,6 +370,13 @@ function JourneyDashboard({ userId, profile }: {
   }, [productId, userId, profile.onboardingCompleted]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Re-fetch when the user returns to this tab (e.g. after completing a course)
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [load]);
 
   const handleMarkComplete = async (stepId: string) => {
     if (!journey) return;
