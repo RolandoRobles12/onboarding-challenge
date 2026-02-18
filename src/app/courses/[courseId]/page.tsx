@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,7 @@ import {
   AlertCircle,
   Video,
   Paperclip,
+  Download,
   CheckCheck,
   Clock,
 } from 'lucide-react';
@@ -342,36 +343,48 @@ function LessonViewer({
           </>
         )}
 
-        {/* DOCUMENT — auto-complete via timer */}
-        {lesson.type === 'document' && content.documentUrl && (
-          <>
-            {content.documentType === 'pdf' && (
+        {/* DOCUMENT — inline viewer + download */}
+        {lesson.type === 'document' && content.documentUrl && (() => {
+          const rawUrl = content.documentUrl;
+          // Detect extension from the path segment before query params
+          const pathExt = rawUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
+          const docType = content.documentType ?? pathExt;
+          const isPdf = docType === 'pdf';
+          // Office formats use Google Docs Viewer for inline preview
+          const officeExts = ['doc', 'docx', 'ppt', 'pptx'];
+          const isOffice = officeExts.includes(pathExt) || officeExts.includes(docType);
+          const viewerSrc = isPdf
+            ? rawUrl
+            : `https://docs.google.com/viewer?url=${encodeURIComponent(rawUrl)}&embedded=true`;
+          return (
+            <>
               <div className="rounded-xl overflow-hidden border" style={{ height: 560 }}>
                 <iframe
                   key={lesson.id}
-                  src={content.documentUrl}
+                  src={viewerSrc}
                   className="w-full h-full"
                   title={lesson.title}
+                  allow="fullscreen"
                 />
               </div>
-            )}
-            <a
-              href={content.documentUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 text-sm text-primary underline"
-            >
-              <Paperclip className="h-4 w-4" />
-              Abrir / descargar documento
-            </a>
-            <TimerAutoComplete
-              key={lesson.id}
-              seconds={timerSeconds}
-              isCompleted={isCompleted}
-              onComplete={onComplete}
-            />
-          </>
-        )}
+              <a
+                href={rawUrl}
+                download
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-sm text-primary underline"
+              >
+                <Download className="h-4 w-4" />
+                Descargar documento
+              </a>
+              <TimerAutoComplete
+                key={lesson.id}
+                seconds={timerSeconds}
+                isCompleted={isCompleted}
+                onComplete={onComplete}
+              />
+            </>
+          );
+        })()}
 
         {/* SCORM — auto-complete via timer */}
         {lesson.type === 'scorm' && content.scormPackageUrl && (
@@ -439,6 +452,9 @@ export default function CourseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const router = useRouter();
+  // Tracks the in-flight Firestore write so Finalizar can await it
+  const savePromiseRef = useRef<Promise<void>>(Promise.resolve());
 
   // Load course + enrollment
   const load = useCallback(async () => {
@@ -520,8 +536,8 @@ export default function CourseDetailPage() {
     setCompletedLessonIds(new Set(newLessonIds));
     setCompletedModuleIds(new Set(newModuleIds));
 
-    // Persist to Firestore (fire and forget — no loading state exposed to user)
-    updateEnrollmentProgress(enrollment.id, {
+    // Persist to Firestore — store promise so Finalizar can await before navigating
+    savePromiseRef.current = updateEnrollmentProgress(enrollment.id, {
       completedLessonIds: newLessonIds,
       completedModuleIds: newModuleIds,
       status: allComplete ? 'completed' : 'in_progress',
@@ -682,8 +698,16 @@ export default function CourseDetailPage() {
                           {isDone && <ChevronRight className="h-4 w-4" />}
                         </Button>
                       ) : isDone ? (
-                        <Button size="sm" variant="outline" asChild className="gap-1">
-                          <Link href="/"><CheckCircle2 className="h-4 w-4" /> Finalizar</Link>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1"
+                          onClick={async () => {
+                            await savePromiseRef.current;
+                            router.push('/');
+                          }}
+                        >
+                          <CheckCircle2 className="h-4 w-4" /> Finalizar
                         </Button>
                       ) : (
                         <Button size="sm" disabled className="gap-1">
