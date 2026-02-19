@@ -980,5 +980,25 @@ export interface VideoView {
   lastWatchedAt: Timestamp;
   watchedSeconds: number;     // Max second reached in the video
   percentWatched: number;     // 0–100
-  completed: boolean;         // watchedSeconds / duration >= 0.8
+  completed: boolean;         // watchedSeconds / duration >= 1.0 (100%)
+}
+
+/** Reacción de un usuario a un video (uno por usuario) */
+export interface VideoReaction {
+  id: string;          // "{userId}_{videoId}"
+  videoId: string;
+  userId: string;
+  trainerName: string;
+  emoji: string;       // '❤️' | '👏' | '🔥' | '💡'
+  reactedAt: Timestamp;
+}
+
+/** Comentario en un video */
+export interface VideoComment {
+  id: string;
+  videoId: string;
+  userId: string;
+  trainerName: string;
+  text: string;
+  createdAt: Timestamp;
 }

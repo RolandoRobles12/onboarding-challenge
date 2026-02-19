@@ -47,6 +47,8 @@ import type {
   FormResponse,
   Video,
   VideoView,
+  VideoReaction,
+  VideoComment,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
@@ -93,6 +95,8 @@ const COLLECTIONS = {
   // --- Video Feed ---
   VIDEOS: 'videos',
   VIDEO_VIEWS: 'video_views',
+  VIDEO_REACTIONS: 'video_reactions',
+  VIDEO_COMMENTS: 'video_comments',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -1987,4 +1991,76 @@ export async function upsertVideoView(
   } catch (error) {
     console.error('Error upserting video view:', error);
   }
+}
+
+// ============================================================================
+// VIDEO REACTIONS
+// ============================================================================
+
+/** Devuelve todas las reacciones de un video. */
+export async function getVideoReactions(videoId: string): Promise<VideoReaction[]> {
+  try {
+    const q = query(getCollectionRef(COLLECTIONS.VIDEO_REACTIONS), where('videoId', '==', videoId));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as VideoReaction);
+  } catch (error) {
+    console.error('Error getting video reactions:', error);
+    return [];
+  }
+}
+
+/**
+ * Establece o elimina la reacción de un usuario en un video.
+ * emoji=null elimina la reacción.
+ * Si el usuario ya tiene la misma reacción, la elimina (toggle).
+ */
+export async function setVideoReaction(
+  userId: string,
+  videoId: string,
+  emoji: string | null,
+  trainerName: string
+): Promise<void> {
+  const docId = `${userId}_${videoId}`;
+  const docRef = getDocRef(COLLECTIONS.VIDEO_REACTIONS, docId);
+  if (!emoji) {
+    await deleteDoc(docRef);
+  } else {
+    await setDoc(docRef, stripUndefined({
+      id: docId, videoId, userId, trainerName, emoji, reactedAt: serverTimestamp(),
+    }));
+  }
+}
+
+// ============================================================================
+// VIDEO COMMENTS
+// ============================================================================
+
+/** Devuelve los comentarios de un video, ordenados de más antiguo a más nuevo. */
+export async function getVideoComments(videoId: string): Promise<VideoComment[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.VIDEO_COMMENTS),
+      where('videoId', '==', videoId),
+      orderBy('createdAt', 'asc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as VideoComment);
+  } catch (error) {
+    console.error('Error getting video comments:', error);
+    return [];
+  }
+}
+
+/** Agrega un comentario a un video. */
+export async function addVideoComment(
+  data: Omit<VideoComment, 'id' | 'createdAt'>
+): Promise<string> {
+  const docRef = doc(getCollectionRef(COLLECTIONS.VIDEO_COMMENTS));
+  await setDoc(docRef, { ...data, createdAt: serverTimestamp() });
+  return docRef.id;
+}
+
+/** Elimina un comentario. */
+export async function deleteVideoComment(commentId: string): Promise<void> {
+  await deleteDoc(getDocRef(COLLECTIONS.VIDEO_COMMENTS, commentId));
 }
