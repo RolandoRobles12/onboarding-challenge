@@ -593,6 +593,32 @@ export async function getUserAttempts(userId: string, quizId?: string): Promise<
   }
 }
 
+/** Returns top-10 leaderboard entries from Firestore attempts for a product (optionally filtered by quizId). */
+export async function getQuizLeaderboard(
+  productId: string,
+  quizId?: string
+): Promise<QuizAttempt[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.ATTEMPTS),
+      where('productId', '==', productId)
+    );
+    const snapshot = await getDocs(q);
+    let docs = snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() } as QuizAttempt))
+      .filter(d => d.status === 'completed');
+    if (quizId) docs = docs.filter(d => d.quizId === quizId);
+    return docs
+      .sort((a, b) =>
+        b.percentage !== a.percentage ? b.percentage - a.percentage : a.timeTaken - b.timeTaken
+      )
+      .slice(0, 10);
+  } catch (error) {
+    console.error('Error getting quiz leaderboard:', error);
+    return [];
+  }
+}
+
 // ============================================================================
 // LEADERBOARD
 // ============================================================================

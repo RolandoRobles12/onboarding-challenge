@@ -79,6 +79,9 @@ function QuizComponent() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
+  // Per-question result tracking (stored in ref to avoid re-renders)
+  const questionResultsRef = useRef<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string }[]>([]);
+
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
   const [quizId, setQuizId] = useState('');
@@ -289,6 +292,17 @@ function QuizComponent() {
       }
     }
 
+    // Record per-question result
+    const correctAnswerText = currentQuestion?.options.find(o => o.isCorrect)?.text
+      ?? currentQuestion?.validAnswers?.[0] ?? '';
+    const userAnswerText = selected.map(o => o.text).join(', ');
+    questionResultsRef.current.push({
+      text: currentQuestion?.text ?? '',
+      isCorrect: !!isCorrect,
+      userAnswer: userAnswerText,
+      correctAnswer: correctAnswerText,
+    });
+
     setParticleType(isCorrect ? 'correct' : 'wrong');
     setShowParticles(true);
     setTimeout(() => setShowParticles(false), 1500);
@@ -403,6 +417,14 @@ function QuizComponent() {
         if (quizId) {
           params.set('quizId', quizId);
         }
+        params.set('showFeedback', assessmentCfg.showFeedback);
+        // Persist per-question results for the results page
+        try {
+          sessionStorage.setItem(
+            `quiz_results_${quizType}`,
+            JSON.stringify(questionResultsRef.current)
+          );
+        } catch { /* ignore quota errors */ }
         router.push(`/${quizType}/results?${params.toString()}`);
       }
     }
@@ -414,6 +436,15 @@ function QuizComponent() {
     setOpenTextResult(result);
     // Correct if score ≥ 70%, or if no keywords were defined (score = 1)
     const isCorrect = result.score >= 0.7;
+
+    // Record open-text result
+    questionResultsRef.current.push({
+      text: currentQuestion?.text ?? '',
+      isCorrect,
+      userAnswer: openTextAnswer,
+      correctAnswer: currentQuestion?.validAnswers?.join(', ') ?? '',
+    });
+
     setParticleType(isCorrect ? 'correct' : 'wrong');
     setShowParticles(true);
     setTimeout(() => setShowParticles(false), 1500);

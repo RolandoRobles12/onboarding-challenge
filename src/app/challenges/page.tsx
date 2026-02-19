@@ -8,15 +8,38 @@ import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
 import { Award, LogOut, Trophy, Rocket, ShieldCheck, ChevronLeft, Medal } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getAvatarComponent } from '@/lib/avatars';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useProducts } from '@/hooks/use-firestore';
 import { cn } from '@/lib/utils';
+import { getQuizLeaderboard, getQuizzes } from '@/lib/firestore-service';
+import type { QuizAttempt, Quiz } from '@/lib/types-scalable';
 
-function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
+interface LeaderboardRow {
+  userId: string;
+  name: string;
+  kiosk: string;
+  score: number;
+  maxScore: number;
+  percentage: number;
+  timeTaken: number;
+}
+
+function toRows(attempts: QuizAttempt[]): LeaderboardRow[] {
+  return attempts.map(a => ({
+    userId: a.userId,
+    name: a.trainerName || 'Participante',
+    kiosk: a.assignedKiosko || '—',
+    score: a.score,
+    maxScore: a.maxScore,
+    percentage: a.percentage,
+    timeTaken: a.timeTaken,
+  }));
+}
+
+function LeaderboardTable({ data }: { data: LeaderboardRow[] }) {
   if (data.length === 0) {
     return (
       <p className="p-4 text-center text-muted-foreground">
@@ -35,12 +58,12 @@ function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {data.map((entry, index) => {
-          const Avatar = getAvatarComponent(entry.avatar);
-          const minutes = Math.floor(entry.time / 60);
-          const seconds = entry.time % 60;
+        {data.map((row, index) => {
+          const Avatar = getAvatarComponent(undefined);
+          const minutes = Math.floor(row.timeTaken / 60);
+          const seconds = row.timeTaken % 60;
           return (
-            <TableRow key={entry.id} className={cn(index === 0 && 'bg-yellow-50')}>
+            <TableRow key={`${row.userId}-${index}`} className={cn(index === 0 && 'bg-yellow-50')}>
               <TableCell className="font-medium">
                 <div className="flex justify-center items-center">
                   {index === 0 ? (
@@ -54,18 +77,19 @@ function LeaderboardTable({ data }: { data: LeaderboardEntry[] }) {
                 <div className="flex items-center gap-3">
                   <Avatar className="h-8 w-8 text-muted-foreground" />
                   <div>
-                    <div className="font-medium">{entry.fullName}</div>
-                    <div className="text-xs text-muted-foreground">{entry.assignedKiosk}</div>
+                    <div className="font-medium">{row.name}</div>
+                    <div className="text-xs text-muted-foreground">{row.kiosk}</div>
                   </div>
                 </div>
               </TableCell>
               <TableCell className="text-right font-mono">
-                <span className="font-semibold">{entry.score}</span>
-                <span className="text-muted-foreground">/{entry.totalQuestions}</span>
+                <span className="font-semibold">{row.score}</span>
+                <span className="text-muted-foreground">/{row.maxScore}</span>
+                <span className="text-xs text-muted-foreground ml-1">({Math.round(row.percentage)}%)</span>
               </TableCell>
-              <TableCell className="text-right font-mono text-sm">{`${minutes}m ${seconds
-                .toString()
-                .padStart(2, '0')}s`}</TableCell>
+              <TableCell className="text-right font-mono text-sm">
+                {`${minutes}m ${seconds.toString().padStart(2, '0')}s`}
+              </TableCell>
             </TableRow>
           );
         })}
@@ -126,30 +150,70 @@ function ProductCard({ product }: { product: ProductDisplay }) {
   );
 }
 
-export default function ChallengesPage() {
-  const { user, profile, logout } = useAuth();
-  const { products, loading: loadingProducts } = useProducts();
-  const [leaderboards, setLeaderboards] = useState<Record<string, LeaderboardEntry[]>>({});
+/** Per-product leaderboard: shows one tab per quiz + a general "Todos" tab */
+function ProductLeaderboard({ productId, productName }: { productId: string; productName: string }) {
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [rows, setRows] = useState<Record<string, LeaderboardRow[]>>({});
+  const [generalRows, setGeneralRows] = useState<LeaderboardRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (loadingProducts || products.length === 0) return;
-    async function fetchLeaderboards() {
+    async function load() {
       try {
-        const entries = await Promise.all(products.map((p) => getLeaderboard(p.id)));
-        const map: Record<string, LeaderboardEntry[]> = {};
-        products.forEach((p, i) => {
-          map[p.id] = entries[i];
-        });
-        setLeaderboards(map);
-      } catch (error) {
-        console.error('Failed to fetch leaderboards', error);
+        const [qs, general] = await Promise.all([
+          getQuizzes(productId, true).catch(() => [] as Quiz[]),
+          getQuizLeaderboard(productId).then(toRows).catch(() => [] as LeaderboardRow[]),
+        ]);
+        setQuizzes(qs);
+        setGeneralRows(general);
+
+        if (qs.length > 0) {
+          const perQuiz = await Promise.all(
+            qs.map(q => getQuizLeaderboard(productId, q.id).then(toRows).catch(() => [] as LeaderboardRow[]))
+          );
+          const map: Record<string, LeaderboardRow[]> = {};
+          qs.forEach((q, i) => { map[q.id] = perQuiz[i]; });
+          setRows(map);
+        }
+      } catch (e) {
+        console.error(e);
       } finally {
         setLoading(false);
       }
     }
-    fetchLeaderboards();
-  }, [products, loadingProducts]);
+    load();
+  }, [productId]);
+
+  if (loading) return <LeaderboardSkeleton />;
+
+  // Only one quiz → no need for tabs within product, just show table
+  if (quizzes.length <= 1) {
+    return <LeaderboardTable data={generalRows} />;
+  }
+
+  return (
+    <Tabs defaultValue="general" className="w-full">
+      <TabsList className={`grid w-full grid-cols-${Math.min(quizzes.length + 1, 4)}`}>
+        <TabsTrigger value="general">General</TabsTrigger>
+        {quizzes.map(q => (
+          <TabsTrigger key={q.id} value={q.id}>{q.title}</TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value="general">
+        <LeaderboardTable data={generalRows} />
+      </TabsContent>
+      {quizzes.map(q => (
+        <TabsContent key={q.id} value={q.id}>
+          <LeaderboardTable data={rows[q.id] ?? []} />
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
+
+export default function ChallengesPage() {
+  const { user, profile, logout } = useAuth();
+  const { products, loading: loadingProducts } = useProducts();
 
   const displayProducts: ProductDisplay[] = products.map((p) => ({
     id: p.id,
@@ -254,49 +318,24 @@ export default function ChallengesPage() {
               )}
             </div>
 
-            {/* Leaderboard */}
-            <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
-              <Card className="bg-card shadow-lg rounded-xl border-primary/20">
-                <CardHeader>
-                  <CardTitle className="text-2xl font-headline text-accent flex items-center gap-2">
-                    <Trophy className="text-yellow-500" /> Salón de la Fama
-                  </CardTitle>
-                  <CardDescription>
-                    Los 5 mejores exploradores por puntaje y tiempo. ¡Supera sus récords!
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {loadingProducts ? (
-                    <LeaderboardSkeleton />
-                  ) : displayProducts.length === 0 ? (
-                    <p className="p-4 text-center text-muted-foreground">
-                      No hay productos configurados aún.
-                    </p>
-                  ) : (
-                    <Tabs defaultValue={displayProducts[0]?.id} className="w-full">
-                      <TabsList
-                        className={`grid w-full grid-cols-${Math.min(displayProducts.length, 4)}`}
-                      >
-                        {displayProducts.map((p) => (
-                          <TabsTrigger key={p.id} value={p.id}>
-                            {p.name}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-                      {displayProducts.map((p) => (
-                        <TabsContent key={p.id} value={p.id}>
-                          {loading ? (
-                            <LeaderboardSkeleton />
-                          ) : (
-                            <LeaderboardTable data={leaderboards[p.id] ?? []} />
-                          )}
-                        </TabsContent>
-                      ))}
-                    </Tabs>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            {/* Leaderboard — one card per product with per-quiz tabs */}
+            {!loadingProducts && displayProducts.map(p => (
+              <div key={p.id} className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
+                <Card className="bg-card shadow-lg rounded-xl border-primary/20">
+                  <CardHeader>
+                    <CardTitle className="text-2xl font-headline text-accent flex items-center gap-2">
+                      <Trophy className="text-yellow-500" /> Salón de la Fama — {p.name}
+                    </CardTitle>
+                    <CardDescription>
+                      Top 10 por puntaje y tiempo. ¡Supera los récords!
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ProductLeaderboard productId={p.id} productName={p.name} />
+                  </CardContent>
+                </Card>
+              </div>
+            ))}
           </main>
 
           <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8 md:mt-12">
