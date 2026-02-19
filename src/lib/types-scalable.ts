@@ -981,6 +981,7 @@ export interface VideoView {
   watchedSeconds: number;     // Max second reached in the video
   percentWatched: number;     // 0–100
   completed: boolean;         // watchedSeconds / duration >= 1.0 (100%)
+  viewCount: number;          // How many times the user has played/replayed the video
 }
 
 /** Reacción de un usuario a un video (uno por usuario) */

@@ -1961,7 +1961,7 @@ export async function upsertVideoView(
     const percentWatched = update.duration > 0
       ? Math.min(100, Math.round((update.watchedSeconds / update.duration) * 100))
       : 0;
-    const completed = update.duration > 0 && update.watchedSeconds / update.duration >= 0.8;
+    const completed = update.duration > 0 && update.watchedSeconds / update.duration >= 1.0;
 
     if (!snap.exists()) {
       await setDoc(docRef, stripUndefined({
@@ -1976,16 +1976,27 @@ export async function upsertVideoView(
         watchedSeconds: update.watchedSeconds,
         percentWatched,
         completed,
+        viewCount: 1,
       }));
     } else {
       const prev = snap.data() as VideoView;
-      // Only advance forward (don't let progress regress)
-      if (update.watchedSeconds <= (prev.watchedSeconds ?? 0) && prev.completed) return;
+      // Detect a new replay session: user restarted from scratch (watchedSeconds dropped back below 10s)
+      const isNewSession = (prev.watchedSeconds ?? 0) > 10 && update.watchedSeconds < 10;
+      const newViewCount = isNewSession ? (prev.viewCount ?? 1) + 1 : (prev.viewCount ?? 1);
+
+      // For a new session always update; otherwise only advance forward
+      if (!isNewSession && update.watchedSeconds <= (prev.watchedSeconds ?? 0) && prev.completed) return;
+
       await updateDoc(docRef, stripUndefined({
         lastWatchedAt: serverTimestamp(),
-        watchedSeconds: Math.max(prev.watchedSeconds ?? 0, update.watchedSeconds),
-        percentWatched: Math.max(prev.percentWatched ?? 0, percentWatched),
+        watchedSeconds: isNewSession
+          ? update.watchedSeconds
+          : Math.max(prev.watchedSeconds ?? 0, update.watchedSeconds),
+        percentWatched: isNewSession
+          ? percentWatched
+          : Math.max(prev.percentWatched ?? 0, percentWatched),
         completed: prev.completed || completed,
+        viewCount: newViewCount,
       }) as WithFieldValue<DocumentData>);
     }
   } catch (error) {
