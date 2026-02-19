@@ -81,6 +81,7 @@ function QuizComponent() {
 
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
+  const [quizId, setQuizId] = useState('');
   const [loadingQuiz, setLoadingQuiz] = useState(true);
   const [assessmentCfg, setAssessmentCfg] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT_CONFIG);
   // Countdown timer (seconds remaining, only when timeLimit > 0)
@@ -134,6 +135,7 @@ function QuizComponent() {
           return;
         }
         const q = firestoreQuizzes[0];
+        setQuizId(q.id);
 
         // Cargar todas las preguntas de todas las misiones
         const allIds = q.missions.flatMap((m) => m.questionIds);
@@ -398,6 +400,9 @@ function QuizComponent() {
         if (startTime) {
           params.set('startTime', startTime.toString());
         }
+        if (quizId) {
+          params.set('quizId', quizId);
+        }
         router.push(`/${quizType}/results?${params.toString()}`);
       }
     }
@@ -465,6 +470,7 @@ function QuizComponent() {
     params.set('quizTitle', quiz.title);
     params.set('timeExpired', '1');
     if (startTime) params.set('startTime', startTime.toString());
+    if (quizId) params.set('quizId', quizId);
     router.push(`/${quizType}/results?${params.toString()}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeExpired]);
