@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Swords, User } from 'lucide-react';
+import { Home, Swords, User, Clapperboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
@@ -11,6 +11,7 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
 
   const tabs = [
     { href: '/', label: 'Inicio', icon: Home },
+    { href: '/videos', label: 'Videos', icon: Clapperboard },
     { href: '/challenges', label: 'Práctica', icon: Swords },
     { href: '/perfil', label: 'Mi Perfil', icon: User },
   ];

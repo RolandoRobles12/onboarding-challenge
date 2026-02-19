@@ -45,6 +45,8 @@ import type {
   UserBadge,
   JourneyForm,
   FormResponse,
+  Video,
+  VideoView,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
@@ -88,6 +90,9 @@ const COLLECTIONS = {
   FORM_RESPONSES: 'form_responses',
   // --- Configuración global ---
   CONFIG: 'config',
+  // --- Video Feed ---
+  VIDEOS: 'videos',
+  VIDEO_VIEWS: 'video_views',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -1846,4 +1851,140 @@ export function getLevelFromConfig(xp: number, levels: LevelConfig[]) {
     : 100;
   const xpToNext = next ? Math.max(0, next.minXP - xp) : 0;
   return { ...current, xp, pctToNext, xpToNext, nextLevel: next ?? null };
+}
+
+// ============================================================================
+// VIDEO FEED
+// ============================================================================
+
+/** Devuelve los videos activos, filtrados opcionalmente por producto. */
+export async function getVideos(productId?: string): Promise<Video[]> {
+  try {
+    const constraints: QueryConstraint[] = [where('active', '==', true), orderBy('order', 'asc')];
+    if (productId) {
+      // Show videos for this product OR videos with no productId filter
+      // We fetch all active and filter client-side (Firestore doesn't support OR on different fields)
+    }
+    const q = query(getCollectionRef(COLLECTIONS.VIDEOS), ...constraints);
+    const snap = await getDocs(q);
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Video);
+    // Filter: show videos with no productId filter, or matching the user's product
+    return productId ? all.filter(v => !v.productId || v.productId === productId) : all;
+  } catch (error) {
+    console.error('Error getting videos:', error);
+    return [];
+  }
+}
+
+/** Devuelve TODOS los videos (admin), activos e inactivos. */
+export async function getAllVideos(): Promise<Video[]> {
+  try {
+    const q = query(getCollectionRef(COLLECTIONS.VIDEOS), orderBy('order', 'asc'));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as Video);
+  } catch (error) {
+    console.error('Error getting all videos:', error);
+    return [];
+  }
+}
+
+/** Crea un nuevo video. */
+export async function createVideo(data: Omit<Video, 'id'>): Promise<string> {
+  const docRef = doc(getCollectionRef(COLLECTIONS.VIDEOS));
+  await setDoc(docRef, stripUndefined({ ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  return docRef.id;
+}
+
+/** Actualiza un video existente. */
+export async function updateVideo(videoId: string, updates: Partial<Omit<Video, 'id'>>): Promise<void> {
+  const docRef = getDocRef(COLLECTIONS.VIDEOS, videoId);
+  await updateDoc(docRef, stripUndefined({ ...updates, updatedAt: serverTimestamp() }) as WithFieldValue<DocumentData>);
+}
+
+/** Elimina un video. */
+export async function deleteVideo(videoId: string): Promise<void> {
+  await deleteDoc(getDocRef(COLLECTIONS.VIDEOS, videoId));
+}
+
+/** Devuelve el registro de visualización de un usuario para todos sus videos. */
+export async function getUserVideoViews(userId: string): Promise<VideoView[]> {
+  try {
+    const q = query(getCollectionRef(COLLECTIONS.VIDEO_VIEWS), where('userId', '==', userId));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as VideoView);
+  } catch (error) {
+    console.error('Error getting user video views:', error);
+    return [];
+  }
+}
+
+/** Devuelve todas las visualizaciones de un video (para admin analytics). */
+export async function getVideoViews(videoId: string): Promise<VideoView[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.VIDEO_VIEWS),
+      where('videoId', '==', videoId),
+      orderBy('lastWatchedAt', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as VideoView);
+  } catch (error) {
+    console.error('Error getting video views:', error);
+    return [];
+  }
+}
+
+/**
+ * Crea o actualiza el registro de visualización de un usuario.
+ * Solo actualiza si el nuevo watchedSeconds es mayor (nunca retrocede).
+ */
+export async function upsertVideoView(
+  userId: string,
+  videoId: string,
+  update: {
+    watchedSeconds: number;
+    duration: number;
+    trainerName: string;
+    assignedKiosko?: string;
+    productId?: string;
+  }
+): Promise<void> {
+  try {
+    const docId = `${userId}_${videoId}`;
+    const docRef = getDocRef(COLLECTIONS.VIDEO_VIEWS, docId);
+    const snap = await getDoc(docRef);
+
+    const percentWatched = update.duration > 0
+      ? Math.min(100, Math.round((update.watchedSeconds / update.duration) * 100))
+      : 0;
+    const completed = update.duration > 0 && update.watchedSeconds / update.duration >= 0.8;
+
+    if (!snap.exists()) {
+      await setDoc(docRef, stripUndefined({
+        id: docId,
+        videoId,
+        userId,
+        trainerName: update.trainerName,
+        assignedKiosko: update.assignedKiosko,
+        productId: update.productId,
+        firstWatchedAt: serverTimestamp(),
+        lastWatchedAt: serverTimestamp(),
+        watchedSeconds: update.watchedSeconds,
+        percentWatched,
+        completed,
+      }));
+    } else {
+      const prev = snap.data() as VideoView;
+      // Only advance forward (don't let progress regress)
+      if (update.watchedSeconds <= (prev.watchedSeconds ?? 0) && prev.completed) return;
+      await updateDoc(docRef, stripUndefined({
+        lastWatchedAt: serverTimestamp(),
+        watchedSeconds: Math.max(prev.watchedSeconds ?? 0, update.watchedSeconds),
+        percentWatched: Math.max(prev.percentWatched ?? 0, percentWatched),
+        completed: prev.completed || completed,
+      }) as WithFieldValue<DocumentData>);
+    }
+  } catch (error) {
+    console.error('Error upserting video view:', error);
+  }
 }

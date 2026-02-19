@@ -946,3 +946,39 @@ export interface Scenario {
   passingScore: number;
   active: boolean;
 }
+
+// ============================================================================
+// VIDEO FEED
+// ============================================================================
+
+/** Video publicado para el feed TikTok-style */
+export interface Video {
+  id: string;
+  title: string;
+  description?: string;
+  videoUrl: string;           // Firebase Storage URL
+  thumbnailUrl?: string;      // Poster image URL (optional)
+  duration: number;           // Seconds (0 = unknown)
+  productId?: string;         // If set, only shown to users with this product
+  tags?: string[];
+  active: boolean;
+  order: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
+}
+
+/** Registro de visualización de un video por un usuario */
+export interface VideoView {
+  id: string;                 // "{userId}_{videoId}"
+  videoId: string;
+  userId: string;
+  trainerName: string;
+  assignedKiosko?: string;
+  productId?: string;
+  firstWatchedAt: Timestamp;
+  lastWatchedAt: Timestamp;
+  watchedSeconds: number;     // Max second reached in the video
+  percentWatched: number;     // 0–100
+  completed: boolean;         // watchedSeconds / duration >= 0.8
+}
