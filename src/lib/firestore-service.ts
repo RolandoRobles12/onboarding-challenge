@@ -86,6 +86,8 @@ const COLLECTIONS = {
   // --- Módulo: Formularios de Ruta ---
   JOURNEY_FORMS: 'journey_forms',
   FORM_RESPONSES: 'form_responses',
+  // --- Configuración global ---
+  CONFIG: 'config',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -1769,4 +1771,61 @@ export async function getFormResponses(
     console.error('Error getting form responses:', error);
     return [];
   }
+}
+
+// ============================================================================
+// CONFIGURACIÓN DE NIVELES XP
+// ============================================================================
+
+export interface LevelConfig {
+  level: number;
+  title: string;
+  emoji: string;
+  minXP: number;
+}
+
+const LEVELS_DOC_ID = 'levels';
+
+/** Devuelve la configuración de niveles desde Firestore. Si no existe, retorna los defaults. */
+export async function getLevelsConfig(): Promise<LevelConfig[]> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.CONFIG, LEVELS_DOC_ID);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (Array.isArray(data.levels) && data.levels.length > 0) {
+        return data.levels as LevelConfig[];
+      }
+    }
+  } catch (error) {
+    console.error('Error getting levels config:', error);
+  }
+  // Default levels
+  return [
+    { level: 1, title: 'Explorador',    emoji: '🌱', minXP: 0 },
+    { level: 2, title: 'Aprendiz',      emoji: '📚', minXP: 250 },
+    { level: 3, title: 'Promotor',      emoji: '⚡', minXP: 600 },
+    { level: 4, title: 'Asesor Senior', emoji: '🎯', minXP: 1200 },
+    { level: 5, title: 'Maestro Aviva', emoji: '🏆', minXP: 2400 },
+  ];
+}
+
+/** Guarda la configuración de niveles en Firestore. */
+export async function saveLevelsConfig(levels: LevelConfig[]): Promise<void> {
+  const docRef = getDocRef(COLLECTIONS.CONFIG, LEVELS_DOC_ID);
+  await setDoc(docRef, { levels, updatedAt: serverTimestamp() });
+}
+
+/** Dado un total de XP y la lista de niveles, devuelve el nivel actual y el progreso hacia el siguiente. */
+export function getLevelFromConfig(xp: number, levels: LevelConfig[]) {
+  const sorted = [...levels].sort((a, b) => b.minXP - a.minXP);
+  const current = sorted.find(l => xp >= l.minXP) ?? sorted[sorted.length - 1];
+  const sortedAsc = [...levels].sort((a, b) => a.minXP - b.minXP);
+  const currentIdx = sortedAsc.findIndex(l => l.level === current.level);
+  const next = sortedAsc[currentIdx + 1];
+  const pctToNext = next
+    ? Math.min(100, Math.round(((xp - current.minXP) / (next.minXP - current.minXP)) * 100))
+    : 100;
+  const xpToNext = next ? Math.max(0, next.minXP - xp) : 0;
+  return { ...current, xp, pctToNext, xpToNext, nextLevel: next ?? null };
 }

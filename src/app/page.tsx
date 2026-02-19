@@ -17,6 +17,9 @@ import {
   getUserBadges,
   getUserAttempts,
   getUserEnrollments,
+  getLevelsConfig,
+  getLevelFromConfig,
+  type LevelConfig,
 } from '@/lib/firestore-service';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import type { Journey, JourneyStep, JourneyStage, Product, QuizAttempt } from '@/lib/types-scalable';
@@ -314,6 +317,7 @@ function JourneyDashboard({ userId, profile }: {
   const [loadError, setLoadError] = useState(false);
   const [xp, setXp] = useState(0);
   const [badgeCount, setBadgeCount] = useState(0);
+  const [levelConfig, setLevelConfig] = useState<LevelConfig[]>([]);
 
   const productId = profile.producto || '';
   const firstName = profile.nombre?.split(' ')[0] || 'Agente';
@@ -321,12 +325,14 @@ function JourneyDashboard({ userId, profile }: {
   const load = useCallback(async () => {
     if (!productId) { setLoading(false); return; }
     try {
-      const [foundProduct, foundJourney, badges, attempts] = await Promise.all([
+      const [foundProduct, foundJourney, badges, attempts, lvlCfg] = await Promise.all([
         getProduct(productId),
         getJourneyByProduct(productId),
         getUserBadges(userId).catch(() => []),
         getUserAttempts(userId).catch(() => []),
+        getLevelsConfig().catch(() => [] as LevelConfig[]),
       ]);
+      if (lvlCfg.length > 0) setLevelConfig(lvlCfg);
       setProduct(foundProduct);
       setJourney(foundJourney);
       const bLen = (badges as unknown[]).length;
@@ -473,6 +479,7 @@ function JourneyDashboard({ userId, profile }: {
 
   const color = product?.color ?? '#7C3AED';
   const narrative = getNarrativePhase(pct, product?.name ?? '', firstName);
+  const currentLevel = levelConfig.length > 0 ? getLevelFromConfig(xp, levelConfig) : null;
 
 
   return (
@@ -512,6 +519,15 @@ function JourneyDashboard({ userId, profile }: {
             <Zap className="h-3.5 w-3.5 text-yellow-300" />
             <span className="text-xs font-semibold">{xp} XP</span>
           </div>
+          {currentLevel && (
+            <>
+              <div className="h-4 w-px bg-white/20" />
+              <div className="flex items-center gap-1 text-white/80">
+                <span className="text-sm leading-none">{currentLevel.emoji}</span>
+                <span className="text-xs font-medium">{currentLevel.title}</span>
+              </div>
+            </>
+          )}
           <div className="h-4 w-px bg-white/20" />
           <div className="flex items-center gap-1.5 text-white/80">
             <Medal className="h-3.5 w-3.5 text-amber-300" />
