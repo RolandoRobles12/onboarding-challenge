@@ -1,24 +1,24 @@
 'use client';
 import Link from 'next/link';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
-import { Award, LogOut, Trophy, Rocket, ShieldCheck, ChevronLeft, Medal } from 'lucide-react';
+import { LogOut, Trophy, Award, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { getAvatarComponent } from '@/lib/avatars';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useProducts } from '@/hooks/use-firestore';
+import { Button } from '@/components/ui/button';
+import { BottomNav } from '@/components/BottomNav';
 import { cn } from '@/lib/utils';
 import { getQuizLeaderboard, getQuizzes } from '@/lib/firestore-service';
+import { useProducts } from '@/hooks/use-firestore';
 import type { QuizAttempt, Quiz } from '@/lib/types-scalable';
 
-interface LeaderboardRow {
-  userId: string;
+interface Row {
+  rank: number;
   name: string;
   kiosk: string;
   score: number;
@@ -27,11 +27,11 @@ interface LeaderboardRow {
   timeTaken: number;
 }
 
-function toRows(attempts: QuizAttempt[]): LeaderboardRow[] {
-  return attempts.map(a => ({
-    userId: a.userId,
+function toRows(attempts: QuizAttempt[]): Row[] {
+  return attempts.map((a, i) => ({
+    rank: i + 1,
     name: a.trainerName || 'Participante',
-    kiosk: a.assignedKiosko || '—',
+    kiosk: a.assignedKiosko || '',
     score: a.score,
     maxScore: a.maxScore,
     percentage: a.percentage,
@@ -39,11 +39,15 @@ function toRows(attempts: QuizAttempt[]): LeaderboardRow[] {
   }));
 }
 
-function LeaderboardTable({ data }: { data: LeaderboardRow[] }) {
+function fmtTime(s: number) {
+  return `${Math.floor(s / 60)}m ${(s % 60).toString().padStart(2, '0')}s`;
+}
+
+function BoardTable({ data }: { data: Row[] }) {
   if (data.length === 0) {
     return (
-      <p className="p-4 text-center text-muted-foreground">
-        Aún no hay participantes. ¡Sé el primero!
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Aún no hay resultados. ¡Sé el primero!
       </p>
     );
   }
@@ -51,132 +55,70 @@ function LeaderboardTable({ data }: { data: LeaderboardRow[] }) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="w-[50px]">Pos.</TableHead>
-          <TableHead>Explorador</TableHead>
+          <TableHead className="w-8 text-center">#</TableHead>
+          <TableHead>Nombre</TableHead>
           <TableHead className="text-right">Puntaje</TableHead>
           <TableHead className="text-right">Tiempo</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {data.map((row, index) => {
-          const Avatar = getAvatarComponent(undefined);
-          const minutes = Math.floor(row.timeTaken / 60);
-          const seconds = row.timeTaken % 60;
-          return (
-            <TableRow key={`${row.userId}-${index}`} className={cn(index === 0 && 'bg-yellow-50')}>
-              <TableCell className="font-medium">
-                <div className="flex justify-center items-center">
-                  {index === 0 ? (
-                    <Award className="h-5 w-5 text-yellow-500" />
-                  ) : (
-                    index + 1
-                  )}
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-8 w-8 text-muted-foreground" />
-                  <div>
-                    <div className="font-medium">{row.name}</div>
-                    <div className="text-xs text-muted-foreground">{row.kiosk}</div>
-                  </div>
-                </div>
-              </TableCell>
-              <TableCell className="text-right font-mono">
-                <span className="font-semibold">{row.score}</span>
-                <span className="text-muted-foreground">/{row.maxScore}</span>
-                <span className="text-xs text-muted-foreground ml-1">({Math.round(row.percentage)}%)</span>
-              </TableCell>
-              <TableCell className="text-right font-mono text-sm">
-                {`${minutes}m ${seconds.toString().padStart(2, '0')}s`}
-              </TableCell>
-            </TableRow>
-          );
-        })}
+        {data.map((r) => (
+          <TableRow key={r.rank} className={cn(r.rank === 1 && 'bg-yellow-50')}>
+            <TableCell className="text-center font-bold">
+              {r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : r.rank}
+            </TableCell>
+            <TableCell>
+              <p className="font-medium text-sm leading-tight">{r.name}</p>
+              {r.kiosk && <p className="text-xs text-muted-foreground">{r.kiosk}</p>}
+            </TableCell>
+            <TableCell className="text-right font-mono text-sm">
+              <span className="font-semibold">{r.score}</span>
+              <span className="text-muted-foreground text-xs">/{r.maxScore}</span>
+            </TableCell>
+            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+              {fmtTime(r.timeTaken)}
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );
 }
 
-function LeaderboardSkeleton() {
+function BoardSkeleton() {
   return (
-    <div className="space-y-2">
-      {[...Array(5)].map((_, i) => (
-        <div key={i} className="flex items-center space-x-4 p-2">
-          <Skeleton className="h-8 w-8 rounded-full" />
-          <div className="space-y-2 flex-grow">
-            <Skeleton className="h-4 w-3/4" />
-          </div>
-          <Skeleton className="h-4 w-1/4" />
-        </div>
+    <div className="space-y-2 p-2">
+      {[...Array(4)].map((_, i) => (
+        <Skeleton key={i} className="h-10 w-full rounded-lg" />
       ))}
     </div>
   );
 }
 
-type ProductDisplay = { id: string; name: string; description: string; color: string };
-
-function ProductCard({ product }: { product: ProductDisplay }) {
-  return (
-    <Card className="bg-card hover:shadow-xl transition-all duration-300 rounded-xl border-2 border-transparent hover:border-primary/30 group overflow-hidden">
-      <div className="h-2 w-full" style={{ backgroundColor: product.color }} />
-      <CardHeader>
-        <div className="flex items-center gap-3 mb-1">
-          <div
-            className="h-10 w-10 rounded-xl flex items-center justify-center text-white font-bold text-lg shadow-md"
-            style={{ backgroundColor: product.color }}
-          >
-            {product.name.charAt(0).toUpperCase()}
-          </div>
-          <CardTitle className="text-xl font-headline text-accent leading-tight">
-            {product.name}
-          </CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p className="mb-6 text-card-foreground/80 text-sm leading-relaxed">{product.description}</p>
-        <Button
-          asChild
-          size="lg"
-          className="w-full rounded-lg text-white font-semibold shadow-md transition-transform group-hover:scale-[1.02]"
-          style={{ backgroundColor: product.color }}
-        >
-          <Link href={`/${product.id}`}>
-            Iniciar Misión <Rocket className="ml-2 h-4 w-4" />
-          </Link>
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-/** Per-product leaderboard: shows one tab per quiz + a general "Todos" tab */
-function ProductLeaderboard({ productId, productName }: { productId: string; productName: string }) {
+function ProductBoard({ productId }: { productId: string }) {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
-  const [rows, setRows] = useState<Record<string, LeaderboardRow[]>>({});
-  const [generalRows, setGeneralRows] = useState<LeaderboardRow[]>([]);
+  const [generalRows, setGeneralRows] = useState<Row[]>([]);
+  const [perQuiz, setPerQuiz] = useState<Record<string, Row[]>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [qs, general] = await Promise.all([
+        const [qs, gen] = await Promise.all([
           getQuizzes(productId, true).catch(() => [] as Quiz[]),
-          getQuizLeaderboard(productId).then(toRows).catch(() => [] as LeaderboardRow[]),
+          getQuizLeaderboard(productId).then(toRows).catch(() => [] as Row[]),
         ]);
         setQuizzes(qs);
-        setGeneralRows(general);
+        setGeneralRows(gen);
 
-        if (qs.length > 0) {
-          const perQuiz = await Promise.all(
-            qs.map(q => getQuizLeaderboard(productId, q.id).then(toRows).catch(() => [] as LeaderboardRow[]))
+        if (qs.length > 1) {
+          const results = await Promise.all(
+            qs.map(q => getQuizLeaderboard(productId, q.id).then(toRows).catch(() => [] as Row[]))
           );
-          const map: Record<string, LeaderboardRow[]> = {};
-          qs.forEach((q, i) => { map[q.id] = perQuiz[i]; });
-          setRows(map);
+          const map: Record<string, Row[]> = {};
+          qs.forEach((q, i) => { map[q.id] = results[i]; });
+          setPerQuiz(map);
         }
-      } catch (e) {
-        console.error(e);
       } finally {
         setLoading(false);
       }
@@ -184,28 +126,23 @@ function ProductLeaderboard({ productId, productName }: { productId: string; pro
     load();
   }, [productId]);
 
-  if (loading) return <LeaderboardSkeleton />;
+  if (loading) return <BoardSkeleton />;
 
-  // Only one quiz → no need for tabs within product, just show table
   if (quizzes.length <= 1) {
-    return <LeaderboardTable data={generalRows} />;
+    return <BoardTable data={generalRows} />;
   }
 
   return (
-    <Tabs defaultValue="general" className="w-full">
-      <TabsList className={`grid w-full grid-cols-${Math.min(quizzes.length + 1, 4)}`}>
-        <TabsTrigger value="general">General</TabsTrigger>
+    <Tabs defaultValue="general">
+      <TabsList className="w-full mb-2">
+        <TabsTrigger value="general" className="flex-1">General</TabsTrigger>
         {quizzes.map(q => (
-          <TabsTrigger key={q.id} value={q.id}>{q.title}</TabsTrigger>
+          <TabsTrigger key={q.id} value={q.id} className="flex-1 text-xs truncate">{q.title}</TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="general">
-        <LeaderboardTable data={generalRows} />
-      </TabsContent>
+      <TabsContent value="general"><BoardTable data={generalRows} /></TabsContent>
       {quizzes.map(q => (
-        <TabsContent key={q.id} value={q.id}>
-          <LeaderboardTable data={rows[q.id] ?? []} />
-        </TabsContent>
+        <TabsContent key={q.id} value={q.id}><BoardTable data={perQuiz[q.id] ?? []} /></TabsContent>
       ))}
     </Tabs>
   );
@@ -214,135 +151,91 @@ function ProductLeaderboard({ productId, productName }: { productId: string; pro
 export default function ChallengesPage() {
   const { user, profile, logout } = useAuth();
   const { products, loading: loadingProducts } = useProducts();
-
-  const displayProducts: ProductDisplay[] = products.map((p) => ({
-    id: p.id,
-    name: p.name,
-    description: p.description,
-    color: p.color,
-  }));
-
-  const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
+  const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
 
   return (
     <ProtectedRoute>
       <SellerOnboardingGate>
         <div className="flex flex-col min-h-screen bg-background">
-          {/* Header */}
-          <header className="bg-accent text-accent-foreground py-4 sm:py-6 px-4">
-            <div className="max-w-7xl mx-auto">
-              <div className="flex items-center justify-between mb-3">
-                <Link href="/" aria-label="Volver al LMS">
-                  <AvivaLogo className="h-10 sm:h-12 w-auto" />
-                </Link>
-                <div className="flex items-center gap-2">
-                  {isAdmin && (
-                    <Link href="/admin/quizzes">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 hidden sm:flex gap-1"
-                      >
-                        <ShieldCheck className="h-3.5 w-3.5" /> Gestionar
-                      </Button>
-                    </Link>
-                  )}
-                  {user && (
-                    <Button asChild variant="ghost" className="text-accent-foreground hover:bg-accent/20">
-                      <Link href="/perfil">
-                        <Medal className="mr-2 h-4 w-4" />
-                        <span className="hidden sm:inline">Mi Perfil</span>
-                      </Link>
-                    </Button>
-                  )}
-                  {user && (
-                    <Button
-                      variant="ghost"
-                      onClick={logout}
-                      className="text-accent-foreground hover:bg-accent/20"
-                    >
-                      <LogOut className="mr-2 h-4 w-4" />
-                      <span className="hidden sm:inline">Salir</span>
-                    </Button>
-                  )}
-                </div>
-              </div>
 
-              <div className="flex items-center gap-3">
-                <Link
-                  href="/"
-                  className="flex items-center gap-1 text-accent-foreground/70 hover:text-accent-foreground text-sm transition-colors"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  LMS
-                </Link>
-                <span className="text-accent-foreground/40">/</span>
-                <span className="text-accent-foreground font-semibold text-sm">Desafíos</span>
+          {/* Header — same as home */}
+          <header className="bg-accent text-accent-foreground border-b sticky top-0 z-20">
+            <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
+              <Link href="/"><AvivaLogo className="h-8 w-auto" /></Link>
+              <div className="flex items-center gap-1">
+                {isAdmin && (
+                  <Link href="/admin/quizzes">
+                    <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 gap-1">
+                      <ShieldCheck className="h-3.5 w-3.5" /> Admin
+                    </Button>
+                  </Link>
+                )}
+                {user && (
+                  <Button variant="ghost" size="sm" onClick={logout} className="text-accent-foreground hover:bg-white/10 gap-1">
+                    <LogOut className="h-4 w-4" />
+                    <span className="hidden sm:inline">Salir</span>
+                  </Button>
+                )}
               </div>
-
-              <h1 className="text-3xl sm:text-5xl font-bold font-headline mt-2">Desafío Aviva</h1>
-              <p className="mt-2 text-base sm:text-lg text-accent-foreground/80">
-                {user
-                  ? `Bienvenido de nuevo, ${user.displayName?.split(' ')[0] || 'Explorador'}`
-                  : 'Tu aventura de conocimiento ha comenzado.'}
-              </p>
             </div>
           </header>
 
-          <main className="flex-grow flex flex-col items-center p-4 md:p-8 space-y-8 md:space-y-12">
-            {/* Products */}
-            <div className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
-              <h2 className="text-xl font-bold mb-4 text-center text-foreground/80">
-                Elige tu misión
-              </h2>
+          {/* Content — same max-w-md as home */}
+          <main className="flex-grow">
+            <div className="max-w-md mx-auto px-4 py-5 pb-24 space-y-4">
+
+              <div className="flex items-center gap-2 mb-1">
+                <Trophy className="h-5 w-5 text-yellow-500" />
+                <h1 className="text-lg font-bold">Salón de la Fama</h1>
+              </div>
+
               {loadingProducts ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <Skeleton className="h-48" />
-                  <Skeleton className="h-48" />
-                </div>
+                <BoardSkeleton />
+              ) : products.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-10">
+                  No hay productos configurados.
+                </p>
               ) : (
-                <div
-                  className={cn(
-                    'grid gap-6',
-                    displayProducts.length === 1
-                      ? 'grid-cols-1 max-w-sm mx-auto'
-                      : displayProducts.length <= 2
-                      ? 'grid-cols-1 md:grid-cols-2'
-                      : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                  )}
-                >
-                  {displayProducts.map((product) => (
-                    <ProductCard key={product.id} product={product} />
-                  ))}
+                products.map(p => (
+                  <Card key={p.id} className="rounded-2xl border-primary/10 shadow-sm overflow-hidden">
+                    <div className="h-1.5 w-full" style={{ backgroundColor: p.color }} />
+                    <CardHeader className="pb-2 pt-4 px-4">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-7 w-7 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0"
+                          style={{ backgroundColor: p.color }}
+                        >
+                          {p.name.charAt(0)}
+                        </div>
+                        <CardTitle className="text-base leading-tight">{p.name}</CardTitle>
+                      </div>
+                      <CardDescription className="text-xs mt-1">
+                        Top 10 · Por puntaje y tiempo
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-2 pb-3">
+                      <ProductBoard productId={p.id} />
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+
+              {/* Quick action to start a challenge */}
+              {!loadingProducts && products.length > 0 && (
+                <div className="rounded-2xl bg-primary/5 border border-primary/10 p-4 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-sm">¿Listo para competir?</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Completa tu desafío y aparece aquí</p>
+                  </div>
+                  <Link href="/">
+                    <Button size="sm" className="shrink-0">Ir a mi ruta</Button>
+                  </Link>
                 </div>
               )}
             </div>
-
-            {/* Leaderboard — one card per product with per-quiz tabs */}
-            {!loadingProducts && displayProducts.map(p => (
-              <div key={p.id} className="w-full max-w-lg md:max-w-4xl lg:max-w-5xl">
-                <Card className="bg-card shadow-lg rounded-xl border-primary/20">
-                  <CardHeader>
-                    <CardTitle className="text-2xl font-headline text-accent flex items-center gap-2">
-                      <Trophy className="text-yellow-500" /> Salón de la Fama — {p.name}
-                    </CardTitle>
-                    <CardDescription>
-                      Top 10 por puntaje y tiempo. ¡Supera los récords!
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ProductLeaderboard productId={p.id} productName={p.name} />
-                  </CardContent>
-                </Card>
-              </div>
-            ))}
           </main>
 
-          <footer className="bg-accent text-accent-foreground/80 py-4 px-4 sm:px-8 mt-8 md:mt-12">
-            <div className="max-w-7xl mx-auto text-center text-sm">
-              <p>&copy; {new Date().getFullYear()} Aviva. Todos los derechos reservados.</p>
-            </div>
-          </footer>
+          <BottomNav isAdmin={isAdmin} />
         </div>
       </SellerOnboardingGate>
     </ProtectedRoute>

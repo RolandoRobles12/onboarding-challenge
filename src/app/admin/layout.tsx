@@ -23,6 +23,7 @@ import {
   BellRing,
   UserCheck,
   FileText,
+  Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -56,6 +57,7 @@ const navigation: (NavItem | NavSection)[] = [
     section: 'Configuración',
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
+      { name: 'Niveles XP', href: '/admin/levels', icon: Layers },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
       { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },
     ],
@@ -220,6 +222,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     '/admin/enrollments': 'Inscripciones y Progreso',
                     '/admin/notifications': 'Notificaciones',
                     '/admin/learning-paths': 'Rutas del Jaguar Aviva',
+                    '/admin/levels': 'Niveles XP',
                   };
                   if (extraTitles[pathname]) return extraTitles[pathname];
                   for (const entry of navigation) {

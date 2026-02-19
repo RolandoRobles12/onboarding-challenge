@@ -99,8 +99,8 @@ function ResultsContent() {
       fireConfetti({ intensity: percentage >= 75 ? 'high' : 'medium' });
     }, 1600);
 
-    // Save attempt + mark journey steps — runs only once
-    if (!savedRef.current && user?.uid) {
+    // Save attempt + mark journey steps — runs only once, only when profile is ready
+    if (!savedRef.current && user?.uid && profile) {
       savedRef.current = true;
 
       const userId = user.uid;
@@ -129,8 +129,8 @@ function ResultsContent() {
               levelAchieved: level.name,
               badgesEarned: [],
               xpEarned: Math.round(percentage),
-              trainerName: profile?.nombre || user.displayName || '',
-              assignedKiosko: (profile as any)?.assignedKiosko || (profile as any)?.kiosco_asignado || '',
+              trainerName: profile.nombre || user.displayName || '',
+              assignedKiosko: (profile as any).assignedKiosko || (profile as any).kiosco_asignado || '',
             });
           }
 
@@ -157,7 +157,7 @@ function ResultsContent() {
       })();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, scoreStr, totalQuestionsStr, user?.uid]);
+  }, [productId, scoreStr, totalQuestionsStr, user?.uid, profile]);
 
   if (!productId || !scoreStr || !totalQuestionsStr) return null;
 
