@@ -105,6 +105,20 @@ function ResultsContent() {
 
       const userId = user.uid;
 
+      // Best-effort name: onboarding data field with "nombre"/"name" in key,
+      // then profile.nombre, then Firebase Auth displayName
+      const onboardingData = (profile as any).onboardingData as Record<string, string> | undefined;
+      const nameFromOnboarding = onboardingData
+        ? Object.entries(onboardingData).find(([k]) => /nombre|name|nombres/i.test(k))?.[1]
+        : undefined;
+      const resolvedName = (nameFromOnboarding || profile.nombre || user.displayName || '').trim();
+
+      // Kiosk: may be in profile.onboardingData or directly on the profile
+      const kioskFromOnboarding = onboardingData
+        ? Object.entries(onboardingData).find(([k]) => /kiosk|kiosco|kiosko/i.test(k))?.[1]
+        : undefined;
+      const resolvedKiosk = (kioskFromOnboarding || (profile as any).assignedKiosko || (profile as any).kiosco_asignado || '').trim();
+
       (async () => {
         try {
           // 1. Save quiz attempt to Firestore
@@ -129,8 +143,8 @@ function ResultsContent() {
               levelAchieved: level.name,
               badgesEarned: [],
               xpEarned: Math.round(percentage),
-              trainerName: profile.nombre || user.displayName || '',
-              assignedKiosko: (profile as any).assignedKiosko || (profile as any).kiosco_asignado || '',
+              trainerName: resolvedName,
+              assignedKiosko: resolvedKiosk,
             });
           }
 

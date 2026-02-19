@@ -610,7 +610,19 @@ export async function getQuizLeaderboard(
       .map(d => ({ id: d.id, ...d.data() } as QuizAttempt))
       .filter(d => d.status === 'completed');
     if (quizId) docs = docs.filter(d => d.quizId === quizId);
-    return docs
+
+    // Keep only the best attempt per user (highest %, then fastest time)
+    const bestByUser = new Map<string, QuizAttempt>();
+    for (const attempt of docs) {
+      const key = attempt.userId;
+      const prev = bestByUser.get(key);
+      if (!prev) { bestByUser.set(key, attempt); continue; }
+      const better = attempt.percentage > prev.percentage ||
+        (attempt.percentage === prev.percentage && attempt.timeTaken < prev.timeTaken);
+      if (better) bestByUser.set(key, attempt);
+    }
+
+    return Array.from(bestByUser.values())
       .sort((a, b) =>
         b.percentage !== a.percentage ? b.percentage - a.percentage : a.timeTaken - b.timeTaken
       )
@@ -1094,11 +1106,17 @@ export async function saveSellerOnboardingData(
 ): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
-    await updateDoc(docRef, {
+
+    // Try to extract the real name from whichever field key looks like a name
+    const nameKey = Object.keys(data).find(k => /nombre|name|nombres/i.test(k) && data[k].trim().length > 1);
+    const updates: DocumentData = {
       onboardingData: data,
       onboardingCompleted: true,
       updatedAt: serverTimestamp(),
-    } as DocumentData);
+    };
+    if (nameKey) updates['nombre'] = data[nameKey].trim();
+
+    await updateDoc(docRef, updates);
   } catch (error) {
     console.error('Error saving seller onboarding data:', error);
     throw error;

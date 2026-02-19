@@ -5,43 +5,51 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
-import { LogOut, Trophy, Award, ShieldCheck } from 'lucide-react';
+import { LogOut, Trophy, ShieldCheck, Swords, Play, Medal, Clock } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { BottomNav } from '@/components/BottomNav';
 import { cn } from '@/lib/utils';
 import { getQuizLeaderboard, getQuizzes } from '@/lib/firestore-service';
 import { useProducts } from '@/hooks/use-firestore';
 import type { QuizAttempt, Quiz } from '@/lib/types-scalable';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface Row {
   rank: number;
   name: string;
   kiosk: string;
+  percentage: number;
   score: number;
   maxScore: number;
-  percentage: number;
   timeTaken: number;
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function toRows(attempts: QuizAttempt[]): Row[] {
   return attempts.map((a, i) => ({
     rank: i + 1,
     name: a.trainerName || 'Participante',
     kiosk: a.assignedKiosko || '',
+    percentage: a.percentage,
     score: a.score,
     maxScore: a.maxScore,
-    percentage: a.percentage,
     timeTaken: a.timeTaken,
   }));
 }
 
 function fmtTime(s: number) {
+  if (!s || s <= 0) return '—';
   return `${Math.floor(s / 60)}m ${(s % 60).toString().padStart(2, '0')}s`;
 }
+
+// ─── Leaderboard table ────────────────────────────────────────────────────────
 
 function BoardTable({ data }: { data: Row[] }) {
   if (data.length === 0) {
@@ -57,25 +65,28 @@ function BoardTable({ data }: { data: Row[] }) {
         <TableRow>
           <TableHead className="w-8 text-center">#</TableHead>
           <TableHead>Nombre</TableHead>
-          <TableHead className="text-right">Puntaje</TableHead>
-          <TableHead className="text-right">Tiempo</TableHead>
+          <TableHead className="text-right">%</TableHead>
+          <TableHead className="text-right hidden sm:table-cell">Puntaje</TableHead>
+          <TableHead className="text-right hidden sm:table-cell">Tiempo</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {data.map((r) => (
           <TableRow key={r.rank} className={cn(r.rank === 1 && 'bg-yellow-50')}>
-            <TableCell className="text-center font-bold">
+            <TableCell className="text-center font-bold text-base">
               {r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : r.rank}
             </TableCell>
             <TableCell>
               <p className="font-medium text-sm leading-tight">{r.name}</p>
               {r.kiosk && <p className="text-xs text-muted-foreground">{r.kiosk}</p>}
             </TableCell>
-            <TableCell className="text-right font-mono text-sm">
-              <span className="font-semibold">{r.score}</span>
-              <span className="text-muted-foreground text-xs">/{r.maxScore}</span>
+            <TableCell className="text-right font-bold text-sm">
+              {Math.round(r.percentage)}%
             </TableCell>
-            <TableCell className="text-right font-mono text-xs text-muted-foreground">
+            <TableCell className="text-right font-mono text-xs text-muted-foreground hidden sm:table-cell">
+              {r.score}/{r.maxScore}
+            </TableCell>
+            <TableCell className="text-right font-mono text-xs text-muted-foreground hidden sm:table-cell">
               {fmtTime(r.timeTaken)}
             </TableCell>
           </TableRow>
@@ -95,7 +106,14 @@ function BoardSkeleton() {
   );
 }
 
-function ProductBoard({ productId }: { productId: string }) {
+// ─── Per-product block (leaderboard + challenges) ─────────────────────────────
+
+function ProductSection({ productId, productColor, productName, currentUserId }: {
+  productId: string;
+  productColor: string;
+  productName: string;
+  currentUserId: string;
+}) {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [generalRows, setGeneralRows] = useState<Row[]>([]);
   const [perQuiz, setPerQuiz] = useState<Record<string, Row[]>>({});
@@ -111,7 +129,7 @@ function ProductBoard({ productId }: { productId: string }) {
         setQuizzes(qs);
         setGeneralRows(gen);
 
-        if (qs.length > 1) {
+        if (qs.length > 0) {
           const results = await Promise.all(
             qs.map(q => getQuizLeaderboard(productId, q.id).then(toRows).catch(() => [] as Row[]))
           );
@@ -128,37 +146,103 @@ function ProductBoard({ productId }: { productId: string }) {
 
   if (loading) return <BoardSkeleton />;
 
-  if (quizzes.length <= 1) {
-    return <BoardTable data={generalRows} />;
-  }
-
   return (
-    <Tabs defaultValue="general">
-      <TabsList className="w-full mb-2">
-        <TabsTrigger value="general" className="flex-1">General</TabsTrigger>
-        {quizzes.map(q => (
-          <TabsTrigger key={q.id} value={q.id} className="flex-1 text-xs truncate">{q.title}</TabsTrigger>
-        ))}
-      </TabsList>
-      <TabsContent value="general"><BoardTable data={generalRows} /></TabsContent>
-      {quizzes.map(q => (
-        <TabsContent key={q.id} value={q.id}><BoardTable data={perQuiz[q.id] ?? []} /></TabsContent>
-      ))}
-    </Tabs>
+    <div className="space-y-4">
+      {/* ── Practice challenges ─────────────────────────────── */}
+      {quizzes.length > 0 && (
+        <div>
+          <div className="flex items-center gap-2 px-1 mb-2">
+            <Swords className="h-4 w-4 text-orange-500" />
+            <h3 className="text-sm font-bold">Practica tus desafíos</h3>
+            <Badge variant="secondary" className="text-[10px] h-4 px-1.5">no afecta el ranking</Badge>
+          </div>
+          <div className="space-y-2">
+            {quizzes.map(q => (
+              <div
+                key={q.id}
+                className="flex items-center gap-3 rounded-xl border bg-card px-3 py-3"
+              >
+                <div
+                  className="h-9 w-9 rounded-lg flex items-center justify-center text-white shrink-0"
+                  style={{ backgroundColor: productColor }}
+                >
+                  <Swords className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm leading-tight truncate">{q.title}</p>
+                  {q.description && (
+                    <p className="text-xs text-muted-foreground leading-tight mt-0.5 truncate">{q.description}</p>
+                  )}
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                      <Clock className="h-3 w-3" />{q.estimatedDuration} min
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">·</span>
+                    <span className="text-[10px] text-muted-foreground">{q.totalQuestions} preguntas</span>
+                  </div>
+                </div>
+                <Link href={`/${productId}/quiz?quizId=${q.id}`}>
+                  <Button size="sm" className="shrink-0 gap-1.5 rounded-lg h-8 px-3">
+                    <Play className="h-3 w-3" /> Practicar
+                  </Button>
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Leaderboard ─────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center gap-2 px-1 mb-2">
+          <Trophy className="h-4 w-4 text-yellow-500" />
+          <h3 className="text-sm font-bold">Salón de la Fama</h3>
+          <Badge variant="secondary" className="text-[10px] h-4 px-1.5">top 10</Badge>
+        </div>
+
+        {quizzes.length <= 1 ? (
+          <BoardTable data={generalRows} />
+        ) : (
+          <Tabs defaultValue="general">
+            <TabsList className="w-full mb-2 h-8">
+              <TabsTrigger value="general" className="flex-1 text-xs">General</TabsTrigger>
+              {quizzes.map(q => (
+                <TabsTrigger key={q.id} value={q.id} className="flex-1 text-xs truncate max-w-[100px]">
+                  {q.title}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <TabsContent value="general"><BoardTable data={generalRows} /></TabsContent>
+            {quizzes.map(q => (
+              <TabsContent key={q.id} value={q.id}>
+                <BoardTable data={perQuiz[q.id] ?? []} />
+              </TabsContent>
+            ))}
+          </Tabs>
+        )}
+      </div>
+    </div>
   );
 }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ChallengesPage() {
   const { user, profile, logout } = useAuth();
   const { products, loading: loadingProducts } = useProducts();
   const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
 
+  // For sellers, only show their assigned product; admins see all
+  const visibleProducts = isAdmin
+    ? products
+    : products.filter(p => p.id === profile?.producto);
+
   return (
     <ProtectedRoute>
       <SellerOnboardingGate>
         <div className="flex flex-col min-h-screen bg-background">
 
-          {/* Header — same as home */}
+          {/* Header */}
           <header className="bg-accent text-accent-foreground border-b sticky top-0 z-20">
             <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
               <Link href="/"><AvivaLogo className="h-8 w-auto" /></Link>
@@ -180,23 +264,23 @@ export default function ChallengesPage() {
             </div>
           </header>
 
-          {/* Content — same max-w-md as home */}
+          {/* Content */}
           <main className="flex-grow">
             <div className="max-w-md mx-auto px-4 py-5 pb-24 space-y-4">
 
               <div className="flex items-center gap-2 mb-1">
-                <Trophy className="h-5 w-5 text-yellow-500" />
-                <h1 className="text-lg font-bold">Salón de la Fama</h1>
+                <Medal className="h-5 w-5 text-orange-500" />
+                <h1 className="text-lg font-bold">Prácticas y Rankings</h1>
               </div>
 
               {loadingProducts ? (
                 <BoardSkeleton />
-              ) : products.length === 0 ? (
+              ) : visibleProducts.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-10">
-                  No hay productos configurados.
+                  No tienes un producto asignado.
                 </p>
               ) : (
-                products.map(p => (
+                visibleProducts.map(p => (
                   <Card key={p.id} className="rounded-2xl border-primary/10 shadow-sm overflow-hidden">
                     <div className="h-1.5 w-full" style={{ backgroundColor: p.color }} />
                     <CardHeader className="pb-2 pt-4 px-4">
@@ -210,27 +294,19 @@ export default function ChallengesPage() {
                         <CardTitle className="text-base leading-tight">{p.name}</CardTitle>
                       </div>
                       <CardDescription className="text-xs mt-1">
-                        Top 10 · Por puntaje y tiempo
+                        Practica cuando quieras · El ranking guarda tu mejor puntaje
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="px-2 pb-3">
-                      <ProductBoard productId={p.id} />
+                    <CardContent className="px-3 pb-4">
+                      <ProductSection
+                        productId={p.id}
+                        productColor={p.color}
+                        productName={p.name}
+                        currentUserId={user?.uid ?? ''}
+                      />
                     </CardContent>
                   </Card>
                 ))
-              )}
-
-              {/* Quick action to start a challenge */}
-              {!loadingProducts && products.length > 0 && (
-                <div className="rounded-2xl bg-primary/5 border border-primary/10 p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-sm">¿Listo para competir?</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">Completa tu desafío y aparece aquí</p>
-                  </div>
-                  <Link href="/">
-                    <Button size="sm" className="shrink-0">Ir a mi ruta</Button>
-                  </Link>
-                </div>
               )}
             </div>
           </main>

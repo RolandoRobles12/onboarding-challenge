@@ -137,7 +137,10 @@ function QuizComponent() {
           setLoadingQuiz(false);
           return;
         }
-        const q = firestoreQuizzes[0];
+        // Allow caller to specify a particular quiz via ?quizId=...
+        const requestedQuizId = searchParams.get('quizId');
+        const q = (requestedQuizId && firestoreQuizzes.find(q => q.id === requestedQuizId))
+          || firestoreQuizzes[0];
         setQuizId(q.id);
 
         // Cargar todas las preguntas de todas las misiones
