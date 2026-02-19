@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Star, MessageSquareQuote, Download, Timer, Trophy, Zap, Award } from 'lucide-react';
@@ -50,7 +50,8 @@ function ResultsContent() {
     const router = useRouter();
     const { fire: fireConfetti } = useConfetti();
 
-    const quizType = searchParams.get('quizType');
+    const routeParams = useParams<{ quizType: string }>();
+    const quizType = routeParams.quizType || searchParams.get('quizType');
     const fullName = searchParams.get('fullName') || searchParams.get('nombre') || 'Participante';
     const quizTitle = searchParams.get('quizTitle') || 'Quiz';
     const scoreStr = searchParams.get('score');
@@ -103,16 +104,25 @@ function ResultsContent() {
 
         setTimeout(() => setShowBadges(true), 2200);
 
+        const FALLBACK_MESSAGES: Record<string, string> = {
+            high: "¡Increíble! Tu desempeño demuestra verdadero dominio. ¡Sigue así!",
+            mid: "¡Buen trabajo! Cada paso te acerca más a ser un experto certificado.",
+            low: "¡No te rindas! El aprendizaje es un proceso. Repasa el material y vuelve a intentarlo.",
+        };
+        const fallback = percentage >= 75 ? FALLBACK_MESSAGES.high : percentage >= 60 ? FALLBACK_MESSAGES.mid : FALLBACK_MESSAGES.low;
+
         async function getFeedback() {
             try {
-                const aiFeedback = await generateMotivationalFeedback({
-                    quizTopic: quizTitle,
-                    score: score,
-                });
+                const timeout = new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('timeout')), 4000)
+                );
+                const aiFeedback = await Promise.race([
+                    generateMotivationalFeedback({ quizTopic: quizTitle, score }),
+                    timeout,
+                ]);
                 setFeedback(aiFeedback);
-            } catch (error) {
-                console.error("Failed to get AI feedback", error);
-                setFeedback({ message: "¡Gran esfuerzo! Sigue así y alcanzarás la maestría." });
+            } catch {
+                setFeedback({ message: fallback });
             } finally {
                 setLoadingFeedback(false);
             }
