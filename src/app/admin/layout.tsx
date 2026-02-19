@@ -24,6 +24,7 @@ import {
   UserCheck,
   FileText,
   Layers,
+  Clapperboard,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -38,6 +39,7 @@ const navigation: (NavItem | NavSection)[] = [
   {
     section: 'Catálogo de Contenido',
     items: [
+      { name: 'Videos', href: '/admin/videos', icon: Clapperboard },
       { name: 'Cursos', href: '/admin/courses', icon: BookOpen },
       { name: 'Evaluaciones y Desafíos', href: '/admin/quizzes', icon: Swords },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
