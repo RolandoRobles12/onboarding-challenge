@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams, useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Timer, Trophy, Zap } from 'lucide-react';
+import { Timer, Trophy, Zap, CheckCircle2, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import Link from 'next/link';
 import { getAvatarComponent } from '@/lib/avatars';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -43,7 +43,7 @@ function getFeedbackMessage(percentage: number): string {
 function ResultsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { fire: fireConfetti } = useConfetti();
   const savedRef = useRef(false);
 
@@ -56,10 +56,13 @@ function ResultsContent() {
   const avatarKey = searchParams.get('avatar');
   const startTimeStr = searchParams.get('startTime');
   const quizId = searchParams.get('quizId') || '';
+  const showFeedback = searchParams.get('showFeedback') || 'after_attempt';
 
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [animationReady, setAnimationReady] = useState(false);
   const [timeTaken, setTimeTaken] = useState<number | null>(null);
+  const [questionResults, setQuestionResults] = useState<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string }[]>([]);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
     if (!productId || !scoreStr || !totalQuestionsStr) {
@@ -76,6 +79,17 @@ function ResultsContent() {
     if (startTimeStr) {
       duration = Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000);
       setTimeTaken(duration);
+    }
+
+    // Load per-question results from sessionStorage
+    if (showFeedback !== 'never') {
+      try {
+        const raw = sessionStorage.getItem(`quiz_results_${productId}`);
+        if (raw) {
+          setQuestionResults(JSON.parse(raw));
+          sessionStorage.removeItem(`quiz_results_${productId}`);
+        }
+      } catch { /* ignore */ }
     }
 
     // Animations
@@ -115,6 +129,8 @@ function ResultsContent() {
               levelAchieved: level.name,
               badgesEarned: [],
               xpEarned: Math.round(percentage),
+              trainerName: profile?.nombre || user.displayName || '',
+              assignedKiosko: (profile as any)?.assignedKiosko || (profile as any)?.kiosco_asignado || '',
             });
           }
 
@@ -266,6 +282,48 @@ function ResultsContent() {
                 "{getFeedbackMessage(percentage)}"
               </blockquote>
             </motion.div>
+
+            {/* Per-question breakdown */}
+            {showFeedback !== 'never' && questionResults.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1.0 }}
+                className="text-left rounded-xl border border-white/80 bg-white/60 overflow-hidden"
+              >
+                <button
+                  onClick={() => setShowDetail(v => !v)}
+                  className="w-full flex items-center justify-between px-5 py-3 font-semibold text-sm text-accent hover:bg-white/40 transition-colors"
+                >
+                  <span>Detalle de respuestas ({questionResults.filter(r => r.isCorrect).length}/{questionResults.length} correctas)</span>
+                  {showDetail ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+                {showDetail && (
+                  <div className="divide-y divide-white/40 px-5 pb-3">
+                    {questionResults.map((r, i) => (
+                      <div key={i} className="py-3 flex gap-3 items-start">
+                        {r.isCorrect
+                          ? <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                          : <XCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />}
+                        <div className="text-sm space-y-0.5">
+                          <p className="font-medium text-foreground leading-snug">{r.text}</p>
+                          {!r.isCorrect && r.correctAnswer && (
+                            <p className="text-xs text-muted-foreground">
+                              Correcta: <span className="font-semibold text-emerald-600">{r.correctAnswer}</span>
+                            </p>
+                          )}
+                          {!r.isCorrect && r.userAnswer && (
+                            <p className="text-xs text-muted-foreground">
+                              Tu respuesta: <span className="text-destructive">{r.userAnswer}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </motion.div>
+            )}
 
             {/* Actions */}
             <motion.div

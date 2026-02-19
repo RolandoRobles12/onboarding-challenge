@@ -377,6 +377,18 @@ function JourneyDashboard({ userId, profile }: {
           });
         }
 
+        // Auto-mark badge steps if the user already has any badges
+        if (bLen > 0) {
+          allActions.forEach(a => {
+            if (a.type === 'badge' && !ids.has(a.id)) {
+              ids.add(a.id);
+              markPromises.push(
+                markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+              );
+            }
+          });
+        }
+
         await Promise.all(markPromises);
       }
 
