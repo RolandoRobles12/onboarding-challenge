@@ -345,21 +345,38 @@ function JourneyDashboard({ userId, profile }: {
       // Auto-mark info_form if onboarding done
       allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
 
-      // Auto-mark course steps whose enrollment is completed
-      const courseActions = allActions.filter(a => a.type === 'course' && a.config?.courseId);
-      if (foundJourney && courseActions.length > 0) {
-        const enrollments = await getUserEnrollments(userId).catch(() => []);
+      if (foundJourney) {
         const markPromises: Promise<void>[] = [];
-        courseActions.forEach(a => {
-          if (ids.has(a.id)) return; // already marked
-          const enr = enrollments.find(e => e.courseId === a.config!.courseId);
-          if (enr?.status === 'completed') {
-            ids.add(a.id);
-            markPromises.push(
-              markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
-            );
-          }
-        });
+
+        // Auto-mark course steps whose enrollment is completed
+        const courseActions = allActions.filter(a => a.type === 'course' && a.config?.courseId);
+        if (courseActions.length > 0) {
+          const enrollments = await getUserEnrollments(userId).catch(() => []);
+          courseActions.forEach(a => {
+            if (ids.has(a.id)) return;
+            const enr = enrollments.find(e => e.courseId === a.config!.courseId);
+            if (enr?.status === 'completed') {
+              ids.add(a.id);
+              markPromises.push(
+                markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+              );
+            }
+          });
+        }
+
+        // Auto-mark quiz/challenge/results steps if the user has a completed attempt for this product
+        const hasCompletedAttempt = (attempts as QuizAttempt[]).some(a => a.productId === productId);
+        if (hasCompletedAttempt) {
+          allActions.forEach(a => {
+            if ((a.type === 'quiz' || a.type === 'challenge' || a.type === 'results') && !ids.has(a.id)) {
+              ids.add(a.id);
+              markPromises.push(
+                markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+              );
+            }
+          });
+        }
+
         await Promise.all(markPromises);
       }
 
