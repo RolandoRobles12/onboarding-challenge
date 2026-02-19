@@ -20,12 +20,12 @@ import {
 } from '@/lib/firestore-service';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import type { Journey, JourneyStep, JourneyStage, Product, QuizAttempt } from '@/lib/types-scalable';
-import { getLevelInfo, calcXP } from '@/lib/xp';
+import { calcXP } from '@/lib/xp';
 import { BottomNav } from '@/components/BottomNav';
 import {
   LogOut, ShieldCheck, CheckCircle2, Lock, ChevronRight, FileText,
   HelpCircle, BarChart2, Award, AlertCircle, LayoutDashboard,
-  Trophy, Star, BookOpen, Swords, Medal, Zap,
+  Trophy, BookOpen, Swords, Medal, Zap,
   ChevronDown, ChevronUp, PlayCircle, Sparkles, Target, ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -35,17 +35,17 @@ import { getAvatarComponent } from '@/lib/avatars';
 
 function getNarrativePhase(pct: number, productName: string, firstName: string) {
   if (pct === 0) return { chapter: 1, phase: 'El Primer Día', title: 'La aventura comienza', emoji: '🚀',
-    storyText: `${firstName} acaba de aceptar el desafío. Hoy comienza su camino hacia convertirse en Promotor ${productName} Certificado.` };
+    storyText: `${firstName} acaba de aceptar el desafío. Hoy comienza su camino para dominar ${productName}.` };
   if (pct <= 25) return { chapter: 1, phase: 'Primeros Pasos', title: 'Aprendiendo los fundamentos', emoji: '🧭',
     storyText: `${firstName} está dando sus primeros pasos. Cada etapa completada es un paso más hacia la maestría.` };
   if (pct <= 50) return { chapter: 2, phase: 'En Entrenamiento', title: 'El agente se forja', emoji: '⚡',
-    storyText: `${firstName} avanza con determinación. Su entrenamiento está a la mitad y su potencial crece con cada acción.` };
+    storyText: `${firstName} avanza con determinación. Su entrenamiento crece con cada acción completada.` };
   if (pct <= 75) return { chapter: 3, phase: 'La Gran Prueba', title: 'Es hora de demostrar tu valor', emoji: '🎯',
     storyText: `El momento de la verdad. Las evaluaciones más importantes esperan — aquí es donde los grandes promotores se distinguen.` };
-  if (pct < 100) return { chapter: 4, phase: 'La Recta Final', title: 'Casi en la cima', emoji: '🏆',
-    storyText: `${firstName} puede ver la meta. Solo quedan las últimas misiones entre él y el título de Promotor ${productName} Certificado.` };
-  return { chapter: 5, phase: 'Misión Cumplida', title: '¡Promotor Aviva Certificado!', emoji: '🎖️',
-    storyText: `${firstName} ha completado su transformación. De aspirante a Promotor ${productName} Certificado — la historia de un vendedor que no se rindió.` };
+  if (pct < 100) return { chapter: 4, phase: 'La Recta Final', title: 'Casi al día con el contenido', emoji: '🏆',
+    storyText: `${firstName} casi termina el contenido disponible. ¡Sigue así, pronto habrá más módulos!` };
+  return { chapter: 4, phase: 'Al Corriente', title: '¡Contenido actual dominado!', emoji: '✨',
+    storyText: `${firstName} completó todo el contenido disponible. El equipo prepara nuevos módulos — ¡mantente atento!` };
 }
 
 // ─── Step metadata ────────────────────────────────────────────────────────────
@@ -473,7 +473,7 @@ function JourneyDashboard({ userId, profile }: {
 
   const color = product?.color ?? '#7C3AED';
   const narrative = getNarrativePhase(pct, product?.name ?? '', firstName);
-  const levelInfo = getLevelInfo(xp);
+
 
   return (
     <div className="space-y-4 pb-24">
@@ -498,7 +498,7 @@ function JourneyDashboard({ userId, profile }: {
             <div>
               <div className="flex justify-between text-white/70 text-xs mb-1.5">
                 <span>Progreso de la ruta</span>
-                <span className="font-semibold text-white">{finished ? '¡Completado!' : `${doneCount}/${totalCount}`}</span>
+                <span className="font-semibold text-white">{finished ? '¡Al corriente!' : `${doneCount}/${totalCount}`}</span>
               </div>
               <div className="h-2.5 bg-white/20 rounded-full overflow-hidden">
                 <div className="h-full bg-white rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
@@ -511,11 +511,6 @@ function JourneyDashboard({ userId, profile }: {
           <div className="flex items-center gap-1.5 text-white/80">
             <Zap className="h-3.5 w-3.5 text-yellow-300" />
             <span className="text-xs font-semibold">{xp} XP</span>
-          </div>
-          <div className="h-4 w-px bg-white/20" />
-          <div className="flex items-center gap-1.5 text-white/80">
-            <Star className="h-3.5 w-3.5 text-yellow-300 fill-yellow-300" />
-            <span className="text-xs font-medium">Nv.{levelInfo.level} {levelInfo.title}</span>
           </div>
           <div className="h-4 w-px bg-white/20" />
           <div className="flex items-center gap-1.5 text-white/80">
@@ -551,20 +546,17 @@ function JourneyDashboard({ userId, profile }: {
         </div>
       )}
 
-      {/* Completed state */}
+      {/* "Up to date" banner — shown when all current steps are done */}
       {finished && (
-        <div className="rounded-2xl bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 p-6 text-center">
-          <div className="text-5xl mb-3">🎖️</div>
-          <h3 className="font-bold text-xl text-amber-800">¡Ruta completada!</h3>
-          <p className="text-amber-700 text-sm mt-1.5 max-w-xs mx-auto">Eres un Promotor Aviva Certificado. ¡Felicidades!</p>
-          <div className="flex justify-center gap-2 mt-4">
-            <Button size="sm" className="gap-2" asChild>
-              <Link href={`/${productId}/certificate`}><Award className="h-4 w-4" /> Ver certificado</Link>
-            </Button>
-            <Button size="sm" variant="outline" asChild>
-              <Link href="/perfil"><Medal className="h-4 w-4 mr-1" /> Mis insignias</Link>
-            </Button>
-          </div>
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 p-5 text-center">
+          <div className="text-4xl mb-2">✨</div>
+          <h3 className="font-bold text-base text-emerald-800">¡Estás al corriente!</h3>
+          <p className="text-emerald-700 text-sm mt-1 max-w-xs mx-auto leading-snug">
+            Completaste todo el contenido disponible. Nuestro equipo prepara nuevos módulos — ¡vuelve pronto!
+          </p>
+          <Button size="sm" variant="outline" className="mt-3 border-emerald-300 text-emerald-700 hover:bg-emerald-50" asChild>
+            <Link href="/perfil"><Medal className="h-4 w-4 mr-1" /> Ver mis insignias</Link>
+          </Button>
         </div>
       )}
 
