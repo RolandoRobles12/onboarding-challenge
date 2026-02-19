@@ -1,27 +1,157 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
 import { BottomNav } from '@/components/BottomNav';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getVideos, getUserVideoViews, upsertVideoView } from '@/lib/firestore-service';
-import type { Video, VideoView } from '@/lib/types-scalable';
+import { Textarea } from '@/components/ui/textarea';
+import {
+  getVideos, getUserVideoViews, upsertVideoView,
+  getVideoReactions, setVideoReaction,
+  getVideoComments, addVideoComment, deleteVideoComment,
+} from '@/lib/firestore-service';
+import type { Video, VideoView, VideoReaction, VideoComment } from '@/lib/types-scalable';
 import {
   LogOut, ShieldCheck, Play, Pause, Volume2, VolumeX,
-  CheckCircle, Eye, Clapperboard, ChevronDown, ChevronUp,
+  CheckCircle, Clapperboard, ChevronDown, ChevronUp,
+  Share2, MessageCircle, Send, Trash2, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// ─── Video Player Card ─────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const COMPLETION_THRESHOLD = 0.8; // 80% = completed
-const SAVE_INTERVAL_MS = 8000;    // Save progress every 8s while playing
+const COMPLETION_THRESHOLD = 1.0;   // 100% required
+const SAVE_INTERVAL_MS = 8000;
+const REACTIONS = ['❤️', '👏', '🔥', '💡'] as const;
+
+// ─── Comment sheet ────────────────────────────────────────────────────────────
+
+function CommentSheet({
+  videoId,
+  userId,
+  trainerName,
+  isAdmin,
+  onClose,
+}: {
+  videoId: string;
+  userId: string;
+  trainerName: string;
+  isAdmin: boolean;
+  onClose: () => void;
+}) {
+  const [comments, setComments] = useState<VideoComment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    getVideoComments(videoId).then(c => { setComments(c); setLoading(false); });
+  }, [videoId]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [comments.length]);
+
+  async function handleSend() {
+    if (!text.trim()) return;
+    setSending(true);
+    const id = await addVideoComment({ videoId, userId, trainerName, text: text.trim() });
+    setComments(prev => [...prev, {
+      id, videoId, userId, trainerName,
+      text: text.trim(),
+      createdAt: { seconds: Date.now() / 1000 } as any,
+    }]);
+    setText('');
+    setSending(false);
+  }
+
+  async function handleDelete(commentId: string) {
+    await deleteVideoComment(commentId);
+    setComments(prev => prev.filter(c => c.id !== commentId));
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end" onClick={onClose}>
+      <div
+        className="bg-background rounded-t-2xl shadow-xl flex flex-col max-h-[70vh]"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <p className="font-semibold text-sm">
+            Comentarios{comments.length > 0 && ` (${comments.length})`}
+          </p>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Comment list */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {loading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
+            </div>
+          ) : comments.length === 0 ? (
+            <p className="text-center text-muted-foreground text-sm py-8">
+              Sin comentarios aún. ¡Sé el primero!
+            </p>
+          ) : (
+            comments.map(c => (
+              <div key={c.id} className="flex gap-2 items-start group">
+                <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
+                  {c.trainerName?.charAt(0)?.toUpperCase() || '?'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-foreground">{c.trainerName || 'Usuario'}</p>
+                  <p className="text-sm text-foreground leading-snug break-words">{c.text}</p>
+                </div>
+                {(isAdmin || c.userId === userId) && (
+                  <button
+                    onClick={() => handleDelete(c.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input */}
+        <div className="px-4 py-3 border-t flex gap-2 items-end">
+          <Textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Escribe un comentario…"
+            rows={1}
+            className="resize-none flex-1 min-h-[36px] max-h-24 text-sm"
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          />
+          <Button
+            size="icon"
+            className="shrink-0 h-9 w-9"
+            disabled={!text.trim() || sending}
+            onClick={handleSend}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Video card (TikTok style) ────────────────────────────────────────────────
 
 function VideoCard({
   video,
@@ -30,6 +160,7 @@ function VideoCard({
   resolvedName,
   resolvedKiosk,
   productId,
+  isAdmin,
   onViewUpdate,
 }: {
   video: Video;
@@ -38,23 +169,45 @@ function VideoCard({
   resolvedName: string;
   resolvedKiosk: string;
   productId?: string;
-  onViewUpdate: (videoId: string, update: Partial<VideoView>) => void;
+  isAdmin: boolean;
+  onViewUpdate: (videoId: string, partial: Partial<VideoView>) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const highestRef = useRef<number>(view?.watchedSeconds ?? 0);
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
   const [currentTime, setCurrentTime] = useState(view?.watchedSeconds ?? 0);
   const [duration, setDuration] = useState(video.duration || 0);
-  const [expanded, setExpanded] = useState(false);
-  const completed = (view?.completed) || (duration > 0 && highestRef.current / duration >= COMPLETION_THRESHOLD);
+  const [descExpanded, setDescExpanded] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+
+  // Reactions
+  const [reactions, setReactions] = useState<VideoReaction[]>([]);
+  const [myReaction, setMyReaction] = useState<string | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [commentCount, setCommentCount] = useState<number | null>(null);
+
+  // Completion: 100%
+  const completed = view?.completed || (duration > 0 && highestRef.current >= duration * 0.99);
+
+  useEffect(() => {
+    getVideoReactions(video.id).then(r => {
+      setReactions(r);
+      const mine = r.find(x => x.userId === userId);
+      setMyReaction(mine?.emoji ?? null);
+    });
+    getVideoComments(video.id).then(c => setCommentCount(c.length));
+  }, [video.id, userId]);
+
+  // ── Progress tracking ────────────────────────────────────────────────────
 
   const saveProgress = useCallback(async () => {
     const el = videoRef.current;
     if (!el) return;
-    const highest = highestRef.current;
     const dur = el.duration || video.duration || 0;
+    const highest = highestRef.current;
     await upsertVideoView(userId, video.id, {
       watchedSeconds: highest,
       duration: dur,
@@ -67,31 +220,17 @@ function VideoCard({
     onViewUpdate(video.id, { watchedSeconds: highest, percentWatched: pct, completed: done });
   }, [userId, video.id, video.duration, resolvedName, resolvedKiosk, productId, onViewUpdate]);
 
-  function startSaveTimer() {
+  function startTimer() {
     if (saveTimerRef.current) return;
     saveTimerRef.current = setInterval(saveProgress, SAVE_INTERVAL_MS);
   }
-
-  function stopSaveTimer() {
-    if (saveTimerRef.current) {
-      clearInterval(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
+  function stopTimer() {
+    if (saveTimerRef.current) { clearInterval(saveTimerRef.current); saveTimerRef.current = null; }
   }
+  useEffect(() => () => stopTimer(), []);
 
-  useEffect(() => () => { stopSaveTimer(); }, []);
-
-  function handlePlay() {
-    setPlaying(true);
-    startSaveTimer();
-  }
-
-  function handlePause() {
-    setPlaying(false);
-    stopSaveTimer();
-    saveProgress();
-  }
-
+  function handlePlay() { setPlaying(true); startTimer(); }
+  function handlePause() { setPlaying(false); stopTimer(); saveProgress(); }
   function handleTimeUpdate() {
     const el = videoRef.current;
     if (!el) return;
@@ -99,26 +238,22 @@ function VideoCard({
     setCurrentTime(t);
     if (t > highestRef.current) highestRef.current = t;
   }
-
   function handleLoadedMetadata() {
     const el = videoRef.current;
     if (!el) return;
     setDuration(el.duration);
   }
-
   function handleEnded() {
-    stopSaveTimer();
-    highestRef.current = duration;
+    stopTimer();
+    if (videoRef.current) highestRef.current = videoRef.current.duration || video.duration || highestRef.current;
     saveProgress();
     setPlaying(false);
   }
-
   function togglePlay() {
     const el = videoRef.current;
     if (!el) return;
-    if (el.paused) { el.play(); } else { el.pause(); }
+    el.paused ? el.play() : el.pause();
   }
-
   function toggleMute() {
     const el = videoRef.current;
     if (!el) return;
@@ -126,128 +261,207 @@ function VideoCard({
     setMuted(el.muted);
   }
 
+  // ── Reactions ────────────────────────────────────────────────────────────
+
+  async function handleReaction(emoji: string) {
+    const next = myReaction === emoji ? null : emoji;
+    setMyReaction(next);
+    setReactions(prev => {
+      const without = prev.filter(r => r.userId !== userId);
+      if (!next) return without;
+      return [...without, { id: `${userId}_${video.id}`, videoId: video.id, userId, trainerName: resolvedName, emoji: next, reactedAt: null as any }];
+    });
+    setShowPicker(false);
+    await setVideoReaction(userId, video.id, next, resolvedName);
+  }
+
+  // ── Share ────────────────────────────────────────────────────────────────
+
+  async function handleShare() {
+    const url = `${window.location.origin}/videos?v=${video.id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      alert('Enlace copiado al portapapeles');
+    } catch {
+      prompt('Copia este enlace:', url);
+    }
+  }
+
+  // ── Computed ─────────────────────────────────────────────────────────────
+
   const pct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
-  const viewedPct = view?.percentWatched ?? 0;
+  const totalReactions = reactions.length;
+  const reactionDisplay = myReaction ?? '❤️';
 
   return (
-    <div className="rounded-2xl overflow-hidden border shadow-sm bg-card">
-      {/* Video container */}
-      <div className="relative bg-black aspect-[9/16] max-h-[65vh]">
-        <video
-          ref={videoRef}
-          src={video.videoUrl}
-          poster={video.thumbnailUrl}
-          muted={muted}
-          playsInline
-          preload="metadata"
-          className="w-full h-full object-contain"
-          onPlay={handlePlay}
-          onPause={handlePause}
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={handleLoadedMetadata}
-          onEnded={handleEnded}
-        />
+    <>
+      <div id={`video-${video.id}`} className="relative rounded-2xl overflow-hidden bg-black shadow-lg">
 
-        {/* Play/Pause overlay */}
-        <button
-          className="absolute inset-0 flex items-center justify-center"
-          onClick={togglePlay}
-        >
-          {!playing && (
-            <div className="h-16 w-16 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
-              <Play className="h-8 w-8 text-white fill-white ml-1" />
+        {/* ── Video element ─────────────────────────────────── */}
+        <div className="relative aspect-[9/16] max-h-[78vh] w-full bg-black">
+          <video
+            ref={videoRef}
+            src={video.videoUrl}
+            poster={video.thumbnailUrl}
+            muted={muted}
+            playsInline
+            preload="metadata"
+            className="w-full h-full object-contain"
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onTimeUpdate={handleTimeUpdate}
+            onLoadedMetadata={handleLoadedMetadata}
+            onEnded={handleEnded}
+          />
+
+          {/* Play overlay (center) */}
+          <button
+            className="absolute inset-0 flex items-center justify-center z-10"
+            onClick={togglePlay}
+          >
+            {!playing && (
+              <div className="h-16 w-16 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center">
+                <Play className="h-8 w-8 text-white fill-white ml-1" />
+              </div>
+            )}
+          </button>
+
+          {/* Completed badge (top-left) */}
+          {completed && (
+            <div className="absolute top-3 left-3 z-20">
+              <div className="flex items-center gap-1 bg-emerald-500 text-white rounded-full px-2.5 py-1 text-xs font-semibold shadow">
+                <CheckCircle className="h-3.5 w-3.5" />
+                Visto
+              </div>
             </div>
           )}
-        </button>
 
-        {/* Completed badge */}
-        {completed && (
-          <div className="absolute top-3 right-3">
-            <div className="flex items-center gap-1 bg-emerald-500 text-white rounded-full px-2.5 py-1 text-xs font-semibold shadow">
-              <CheckCircle className="h-3.5 w-3.5" />
-              Visto
+          {/* ── Right-side action buttons (TikTok style) ──── */}
+          <div className="absolute right-3 bottom-20 z-20 flex flex-col items-center gap-5">
+
+            {/* Reaction button + picker */}
+            <div className="relative flex flex-col items-center">
+              {/* Emoji picker (appears above) */}
+              {showPicker && (
+                <div className="absolute bottom-full mb-2 flex flex-col gap-1.5 items-center bg-black/70 rounded-2xl px-2 py-2 backdrop-blur-sm">
+                  {REACTIONS.map(e => (
+                    <button
+                      key={e}
+                      onClick={() => handleReaction(e)}
+                      className={cn(
+                        'text-2xl transition-transform hover:scale-125',
+                        myReaction === e && 'scale-125'
+                      )}
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setShowPicker(p => !p)}
+                className="flex flex-col items-center gap-0.5"
+              >
+                <div className={cn(
+                  'h-12 w-12 rounded-full flex items-center justify-center text-2xl shadow-lg transition-transform active:scale-90',
+                  myReaction ? 'bg-white/20' : 'bg-black/40 backdrop-blur-sm'
+                )}>
+                  {reactionDisplay}
+                </div>
+                <span className="text-white text-xs font-semibold drop-shadow">{totalReactions || ''}</span>
+              </button>
             </div>
-          </div>
-        )}
 
-        {/* Controls */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-3 pt-8 pb-3">
+            {/* Comments */}
+            <button
+              onClick={() => setShowComments(true)}
+              className="flex flex-col items-center gap-0.5"
+            >
+              <div className="h-12 w-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center shadow-lg active:scale-90 transition-transform">
+                <MessageCircle className="h-6 w-6 text-white" />
+              </div>
+              <span className="text-white text-xs font-semibold drop-shadow">
+                {commentCount !== null && commentCount > 0 ? commentCount : ''}
+              </span>
+            </button>
+
+            {/* Share */}
+            <button
+              onClick={handleShare}
+              className="flex flex-col items-center gap-0.5"
+            >
+              <div className="h-12 w-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center shadow-lg active:scale-90 transition-transform">
+                <Share2 className="h-6 w-6 text-white" />
+              </div>
+            </button>
+          </div>
+
+          {/* ── Bottom overlay: title + progress ─────────── */}
+          <div className="absolute bottom-0 left-0 right-16 bg-gradient-to-t from-black/80 via-black/40 to-transparent px-4 pt-10 pb-3 z-10">
+            <h3 className="text-white font-bold text-sm leading-snug drop-shadow">{video.title}</h3>
+
+            {/* Mute button inline */}
+            <button onClick={toggleMute} className="absolute bottom-3 right-3 text-white/70">
+              {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+            </button>
+          </div>
+
           {/* Progress bar */}
           <div
-            className="h-1 bg-white/30 rounded-full overflow-hidden mb-3 cursor-pointer"
+            className="absolute bottom-0 left-0 right-0 h-1 bg-white/20 z-20 cursor-pointer"
             onClick={e => {
               const el = videoRef.current;
               if (!el || !duration) return;
               const rect = e.currentTarget.getBoundingClientRect();
-              const ratio = (e.clientX - rect.left) / rect.width;
-              el.currentTime = ratio * duration;
+              el.currentTime = ((e.clientX - rect.left) / rect.width) * duration;
             }}
           >
             <div className="h-full bg-white rounded-full transition-all" style={{ width: `${pct}%` }} />
           </div>
-
-          <div className="flex items-center gap-2">
-            <button onClick={togglePlay} className="text-white">
-              {playing
-                ? <Pause className="h-5 w-5" />
-                : <Play className="h-5 w-5 fill-white" />}
-            </button>
-            <span className="text-white/70 text-xs font-mono flex-1">
-              {Math.floor(currentTime / 60)}:{(Math.round(currentTime) % 60).toString().padStart(2, '0')}
-              {duration > 0 && ` / ${Math.floor(duration / 60)}:${(Math.round(duration) % 60).toString().padStart(2, '0')}`}
-            </span>
-            <button onClick={toggleMute} className="text-white">
-              {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-            </button>
-          </div>
         </div>
-      </div>
 
-      {/* Info */}
-      <div className="px-4 py-3">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1">
-            <h3 className="font-bold text-sm leading-tight">{video.title}</h3>
-            {video.description && (
-              <div>
-                <p className={cn('text-xs text-muted-foreground mt-1 leading-relaxed', !expanded && 'line-clamp-2')}>
-                  {video.description}
-                </p>
-                {video.description.length > 80 && (
-                  <button
-                    className="text-xs text-primary mt-0.5 flex items-center gap-0.5"
-                    onClick={() => setExpanded(e => !e)}
-                  >
-                    {expanded ? <><ChevronUp className="h-3 w-3" />Ver menos</> : <><ChevronDown className="h-3 w-3" />Ver más</>}
-                  </button>
-                )}
-              </div>
+        {/* ── Description below video ───────────────────── */}
+        {video.description && (
+          <div className="bg-card px-4 py-3">
+            <p className={cn('text-sm text-foreground leading-relaxed', !descExpanded && 'line-clamp-2')}>
+              {video.description}
+            </p>
+            {video.description.length > 90 && (
+              <button
+                className="text-xs text-primary mt-0.5 flex items-center gap-0.5"
+                onClick={() => setDescExpanded(e => !e)}
+              >
+                {descExpanded
+                  ? <><ChevronUp className="h-3 w-3" />Ver menos</>
+                  : <><ChevronDown className="h-3 w-3" />Ver más</>}
+              </button>
             )}
-          </div>
-          {viewedPct > 0 && !completed && (
-            <div className="shrink-0 flex items-center gap-1 text-xs text-muted-foreground">
-              <Eye className="h-3.5 w-3.5" />
-              {viewedPct}%
-            </div>
-          )}
-        </div>
-
-        {/* Tags */}
-        {video.tags && video.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-2">
-            {video.tags.map(t => (
-              <Badge key={t} variant="secondary" className="text-[10px] h-4 px-1.5">{t}</Badge>
-            ))}
           </div>
         )}
       </div>
-    </div>
+
+      {/* Comment sheet */}
+      {showComments && (
+        <CommentSheet
+          videoId={video.id}
+          userId={userId}
+          trainerName={resolvedName}
+          isAdmin={isAdmin}
+          onClose={() => {
+            setShowComments(false);
+            // Refresh comment count
+            getVideoComments(video.id).then(c => setCommentCount(c.length));
+          }}
+        />
+      )}
+    </>
   );
 }
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
+// ─── Inner feed (needs Suspense for useSearchParams) ──────────────────────────
 
-export default function VideosPage() {
+function VideoFeed() {
+  const searchParams = useSearchParams();
   const { user, profile, logout } = useAuth();
   const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
 
@@ -257,7 +471,6 @@ export default function VideosPage() {
 
   const productId = profile?.producto;
 
-  // Resolved identity for tracking
   const onboardingData = (profile as any)?.onboardingData as Record<string, string> | undefined;
   const nameFromOnboarding = onboardingData
     ? Object.entries(onboardingData).find(([k]) => /nombre|name|nombres/i.test(k))?.[1]
@@ -281,9 +494,17 @@ export default function VideosPage() {
       views.forEach(v => { map[v.videoId] = v; });
       setViewsMap(map);
       setLoading(false);
+
+      // Deep-link: scroll to ?v= video
+      const targetId = searchParams.get('v');
+      if (targetId) {
+        setTimeout(() => {
+          document.getElementById(`video-${targetId}`)?.scrollIntoView({ behavior: 'smooth' });
+        }, 600);
+      }
     }
     load();
-  }, [user?.uid, productId]);
+  }, [user?.uid, productId, searchParams]);
 
   const handleViewUpdate = useCallback((videoId: string, update: Partial<VideoView>) => {
     setViewsMap(prev => ({
@@ -296,116 +517,115 @@ export default function VideosPage() {
   const total = videos.length;
 
   return (
+    <div className="flex flex-col min-h-screen bg-background">
+      {/* Header */}
+      <header className="bg-accent text-accent-foreground border-b sticky top-0 z-30">
+        <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
+          <Link href="/"><AvivaLogo className="h-8 w-auto" /></Link>
+          <div className="flex items-center gap-1">
+            {isAdmin && (
+              <Link href="/admin/videos">
+                <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 gap-1">
+                  <ShieldCheck className="h-3.5 w-3.5" /> Admin
+                </Button>
+              </Link>
+            )}
+            {user && (
+              <Button variant="ghost" size="sm" onClick={logout} className="text-accent-foreground hover:bg-white/10 gap-1">
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Salir</span>
+              </Button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="flex-grow">
+        <div className="max-w-md mx-auto px-4 py-4 pb-28 space-y-5">
+
+          {/* Title + counter */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clapperboard className="h-5 w-5 text-primary" />
+              <h1 className="text-lg font-bold">Videos</h1>
+            </div>
+            {total > 0 && (
+              <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+                <CheckCircle className="h-4 w-4 text-emerald-500" />
+                {watched}/{total}
+              </span>
+            )}
+          </div>
+
+          {/* Overall progress */}
+          {total > 0 && (
+            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                style={{ width: `${Math.round((watched / total) * 100)}%` }}
+              />
+            </div>
+          )}
+
+          {/* Feed */}
+          {loading ? (
+            <div className="space-y-5">
+              {[...Array(2)].map((_, i) => (
+                <div key={i} className="rounded-2xl overflow-hidden shadow-lg">
+                  <Skeleton className="aspect-[9/16] max-h-[78vh] w-full" />
+                  <div className="p-4 space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : videos.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <Clapperboard className="h-12 w-12 text-muted-foreground opacity-30 mb-3" />
+              <p className="font-semibold text-lg">Sin videos disponibles</p>
+              <p className="text-muted-foreground text-sm mt-1 max-w-xs">
+                Vuelve pronto, tu equipo está preparando contenido.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {videos.map(v => (
+                <VideoCard
+                  key={v.id}
+                  video={v}
+                  view={viewsMap[v.id]}
+                  userId={user!.uid}
+                  resolvedName={resolvedName}
+                  resolvedKiosk={resolvedKiosk}
+                  productId={productId}
+                  isAdmin={isAdmin}
+                  onViewUpdate={handleViewUpdate}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
+      <BottomNav isAdmin={isAdmin} />
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function VideosPage() {
+  return (
     <ProtectedRoute>
       <SellerOnboardingGate>
-        <div className="flex flex-col min-h-screen bg-background">
-
-          {/* Header */}
-          <header className="bg-accent text-accent-foreground border-b sticky top-0 z-20">
-            <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
-              <Link href="/"><AvivaLogo className="h-8 w-auto" /></Link>
-              <div className="flex items-center gap-1">
-                {isAdmin && (
-                  <Link href="/admin/videos">
-                    <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 gap-1">
-                      <ShieldCheck className="h-3.5 w-3.5" /> Admin
-                    </Button>
-                  </Link>
-                )}
-                {user && (
-                  <Button variant="ghost" size="sm" onClick={logout} className="text-accent-foreground hover:bg-white/10 gap-1">
-                    <LogOut className="h-4 w-4" />
-                    <span className="hidden sm:inline">Salir</span>
-                  </Button>
-                )}
-              </div>
-            </div>
-          </header>
-
-          {/* Content */}
-          <main className="flex-grow">
-            <div className="max-w-md mx-auto px-4 py-5 pb-24 space-y-4">
-
-              {/* Title + progress */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clapperboard className="h-5 w-5 text-primary" />
-                  <h1 className="text-lg font-bold">Videos</h1>
-                </div>
-                {total > 0 && (
-                  <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <CheckCircle className="h-4 w-4 text-emerald-500" />
-                    <span>{watched}/{total} vistos</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Overall progress bar */}
-              {total > 0 && (
-                <div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500 rounded-full transition-all duration-700"
-                      style={{ width: `${Math.round((watched / total) * 100)}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {watched === total && total > 0
-                      ? '¡Completaste todos los videos disponibles! 🎉'
-                      : `${total - watched} video${total - watched !== 1 ? 's' : ''} pendiente${total - watched !== 1 ? 's' : ''}`}
-                  </p>
-                </div>
-              )}
-
-              {/* Hint */}
-              {total > 0 && (
-                <p className="text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
-                  💡 Toca el video para reproducirlo. Se marcará como <strong>Visto</strong> cuando hayas visto al menos el 80%.
-                </p>
-              )}
-
-              {/* Video list */}
-              {loading ? (
-                <div className="space-y-4">
-                  {[...Array(2)].map((_, i) => (
-                    <div key={i} className="rounded-2xl overflow-hidden border">
-                      <Skeleton className="aspect-[9/16] max-h-[65vh] w-full" />
-                      <div className="p-4 space-y-2">
-                        <Skeleton className="h-4 w-3/4" />
-                        <Skeleton className="h-3 w-1/2" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : videos.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <Clapperboard className="h-12 w-12 text-muted-foreground opacity-30 mb-3" />
-                  <p className="font-semibold text-lg">Sin videos disponibles</p>
-                  <p className="text-muted-foreground text-sm mt-1 max-w-xs">
-                    Tu administrador aún no ha publicado videos. Vuelve pronto.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {videos.map(v => (
-                    <VideoCard
-                      key={v.id}
-                      video={v}
-                      view={viewsMap[v.id]}
-                      userId={user!.uid}
-                      resolvedName={resolvedName}
-                      resolvedKiosk={resolvedKiosk}
-                      productId={productId}
-                      onViewUpdate={handleViewUpdate}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </main>
-
-          <BottomNav isAdmin={isAdmin} />
-        </div>
+        <Suspense fallback={
+          <div className="flex items-center justify-center min-h-screen">
+            <Clapperboard className="h-10 w-10 animate-pulse text-muted-foreground" />
+          </div>
+        }>
+          <VideoFeed />
+        </Suspense>
       </SellerOnboardingGate>
     </ProtectedRoute>
   );
