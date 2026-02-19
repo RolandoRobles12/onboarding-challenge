@@ -66,13 +66,14 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
   }, [video.id]);
 
   const completed = views.filter(v => v.completed).length;
+  const totalPlays = views.reduce((sum, v) => sum + (v.viewCount ?? 1), 0);
   const avgPct = views.length
     ? Math.round(views.reduce((sum, v) => sum + v.percentWatched, 0) / views.length)
     : 0;
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <BarChart2 className="h-5 w-5 text-primary" />
@@ -85,14 +86,18 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
         ) : (
           <>
             {/* Summary stats */}
-            <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="grid grid-cols-4 gap-3 text-center">
               <div className="rounded-xl border p-3">
-                <p className="text-2xl font-bold text-primary">{views.length}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Visualizaciones únicas</p>
+                <p className="text-2xl font-bold text-primary">{totalPlays}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Reproducciones</p>
+              </div>
+              <div className="rounded-xl border p-3">
+                <p className="text-2xl font-bold text-blue-600">{views.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Usuarios únicos</p>
               </div>
               <div className="rounded-xl border p-3">
                 <p className="text-2xl font-bold text-emerald-600">{completed}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Completaron (≥80%)</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Completaron (100%)</p>
               </div>
               <div className="rounded-xl border p-3">
                 <p className="text-2xl font-bold text-amber-600">{avgPct}%</p>
@@ -111,7 +116,8 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Nombre</TableHead>
-                      <TableHead className="text-right">% Visto</TableHead>
+                      <TableHead className="text-right">Reproducciones</TableHead>
+                      <TableHead className="text-right">% Máximo</TableHead>
                       <TableHead className="text-right">Completó</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -123,14 +129,19 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
                           {v.assignedKiosko && <p className="text-xs text-muted-foreground">{v.assignedKiosko}</p>}
                         </TableCell>
                         <TableCell className="text-right">
+                          <span className={`text-sm font-semibold ${(v.viewCount ?? 1) > 1 ? 'text-purple-600' : 'text-muted-foreground'}`}>
+                            {v.viewCount ?? 1}×
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
-                            <div className="h-1.5 w-16 bg-muted rounded-full overflow-hidden">
+                            <div className="h-1.5 w-14 bg-muted rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-primary rounded-full"
                                 style={{ width: `${v.percentWatched}%` }}
                               />
                             </div>
-                            <span className="text-xs font-mono">{v.percentWatched}%</span>
+                            <span className="text-xs font-mono w-7 text-right">{v.percentWatched}%</span>
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
