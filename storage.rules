@@ -1,13 +1,19 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Archivos de cursos (módulos y lecciones) - solo admins/trainers pueden subir
+    // Archivos de cursos (módulos y lecciones)
     match /courses/{courseId}/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if request.auth != null;
     }
 
-    // Archivos de certificados y logos - solo admins
+    // Videos del feed (solo admins/trainers pueden subir, todos los autenticados pueden leer)
+    match /videos/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Archivos de certificados y logos
     match /certificates/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if request.auth != null;
