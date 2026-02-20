@@ -2516,8 +2516,9 @@ export async function deleteOrgToken(key: string, orgId = DEFAULT_ORG_ID): Promi
 // ── Pulse Categories ──────────────────────────────────────────────────────────
 
 export async function getPulseCategories(): Promise<PulseCategory[]> {
+  const firestore = ensureFirestore();
   const snap = await getDocs(
-    query(collection(db!, COLLECTIONS.PULSE_CATEGORIES), orderBy('order', 'asc'))
+    query(collection(firestore, COLLECTIONS.PULSE_CATEGORIES), orderBy('order', 'asc'))
   );
   if (snap.empty) return [];
   return snap.docs.map(d => ({ id: d.id, ...d.data() }) as PulseCategory);
@@ -2527,23 +2528,25 @@ export async function savePulseCategory(
   cat: Omit<PulseCategory, 'id'>,
   id?: string
 ): Promise<string> {
+  const firestore = ensureFirestore();
   const ref = id
-    ? doc(db!, COLLECTIONS.PULSE_CATEGORIES, id)
-    : doc(collection(db!, COLLECTIONS.PULSE_CATEGORIES));
+    ? doc(firestore, COLLECTIONS.PULSE_CATEGORIES, id)
+    : doc(collection(firestore, COLLECTIONS.PULSE_CATEGORIES));
   await setDoc(ref, stripUndefined(cat), { merge: true });
   return ref.id;
 }
 
 export async function deletePulseCategory(id: string): Promise<void> {
-  await deleteDoc(doc(db!, COLLECTIONS.PULSE_CATEGORIES, id));
+  await deleteDoc(doc(ensureFirestore(), COLLECTIONS.PULSE_CATEGORIES, id));
 }
 
 export async function seedDefaultCategoriesIfEmpty(): Promise<void> {
+  const firestore = ensureFirestore();
   const existing = await getPulseCategories();
   if (existing.length > 0) return;
-  const batch = writeBatch(db!);
+  const batch = writeBatch(firestore);
   DEFAULT_PULSE_CATEGORIES.forEach((cat, i) => {
-    const ref = doc(collection(db!, COLLECTIONS.PULSE_CATEGORIES));
+    const ref = doc(collection(firestore, COLLECTIONS.PULSE_CATEGORIES));
     batch.set(ref, { ...cat, order: i });
   });
   await batch.commit();

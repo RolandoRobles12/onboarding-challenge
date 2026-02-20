@@ -147,7 +147,7 @@ export default function KnowledgePulsePage() {
     active: false,
     sendAt: '08:00',
     appUrl: '',
-    messageTemplate: '📡 *Pulso de Conocimiento* — {date}\n\nResponde tus 7 preguntas antes de las 12:00 PM:\n{link}',
+    messageTemplate: '📡 *Pulso de Conocimiento* — {date}\n\nResponde tus 7 preguntas antes de las 12:00 PM. ¡Tienes hasta las 12:00 PM de hoy!',
   });
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [directRecipients, setDirectRecipients] = useState<SlackDirectRecipient[]>([]);
@@ -841,7 +841,7 @@ export default function KnowledgePulsePage() {
                   <div className="space-y-1.5">
                     <Label>URL de la app</Label>
                     <Input placeholder="https://app.avivacredito.com" value={slackForm.appUrl} onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))} />
-                    <p className="text-xs text-muted-foreground">URL base para generar el enlace <code>{'{link}'}</code> en el mensaje.</p>
+                    <p className="text-xs text-muted-foreground">URL base usada en el botón <strong>📚 Responder el Pulso →</strong> que se adjunta al mensaje.</p>
                   </div>
                   <div className="space-y-1.5">
                     <Label>Plantilla del mensaje</Label>
@@ -850,7 +850,7 @@ export default function KnowledgePulsePage() {
                       value={slackForm.messageTemplate}
                       onChange={e => setSlackForm(f => ({ ...f, messageTemplate: e.target.value }))}
                     />
-                    <p className="text-xs text-muted-foreground">Variables: <code>{'{date}'}</code>, <code>{'{link}'}</code></p>
+                    <p className="text-xs text-muted-foreground">Variable disponible: <code>{'{date}'}</code>. El enlace a la app se envía automáticamente como botón interactivo de Slack.</p>
                   </div>
                 </CardContent>
               </Card>
