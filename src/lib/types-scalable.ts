@@ -269,6 +269,7 @@ export interface UserProfile {
   trainerId?: string;        // UID del capacitador asignado
   fechaIngreso?: string;     // Fecha de ingreso (YYYY-MM-DD)
   active?: boolean;          // false = usuario desactivado (sin acceso)
+  slackId?: string;          // ID de usuario en Slack (ej: U01234567)
 
   // Metadata
   createdAt: Timestamp;
@@ -1169,6 +1170,30 @@ export interface SlackNotificationConfig {
   updatedAt: Timestamp;
   updatedBy: string;
 }
+
+// ── Pulse Categories (dynamic, stored in Firestore) ──────────────────────────
+
+export interface PulseCategory {
+  id: string;
+  key: string;          // unique slug, used as module field on questions
+  name: string;         // Display name
+  emoji: string;        // Single emoji
+  description: string;  // Short description
+  color: string;        // Tailwind classes for badge color (e.g. "bg-blue-500/10 border-blue-200 text-blue-700")
+  dotColor: string;     // Tailwind class for progress dot (e.g. "bg-blue-500")
+  order: number;        // Display order
+  active: boolean;
+}
+
+// Default seed categories (used to initialize Firestore if empty)
+export const DEFAULT_PULSE_CATEGORIES: Omit<PulseCategory, 'id'>[] = [
+  { key: 'banca_conversacional', name: 'Banca Conversacional', emoji: '💬', description: 'Productos y técnicas de venta conversacional bancaria.', color: 'bg-blue-500/10 border-blue-200 text-blue-700', dotColor: 'bg-blue-500', order: 0, active: true },
+  { key: 'pagos_renovacion', name: 'Pagos y Renovación', emoji: '💳', description: 'Procesos de pago, renovación y cobranza de créditos.', color: 'bg-green-500/10 border-green-200 text-green-700', dotColor: 'bg-green-500', order: 1, active: true },
+  { key: 'solicitud_credito', name: 'Solicitud de Crédito', emoji: '📋', description: 'Documentación, requisitos y flujo de solicitud de crédito.', color: 'bg-purple-500/10 border-purple-200 text-purple-700', dotColor: 'bg-purple-500', order: 2, active: true },
+  { key: 'herramientas', name: 'Herramientas', emoji: '🛠️', description: 'Plataformas digitales, CRM y herramientas de trabajo.', color: 'bg-orange-500/10 border-orange-200 text-orange-700', dotColor: 'bg-orange-500', order: 3, active: true },
+  { key: 'politicas_procesos', name: 'Políticas y Procesos', emoji: '📜', description: 'Políticas internas, reglamentos y procedimientos.', color: 'bg-red-500/10 border-red-200 text-red-700', dotColor: 'bg-red-500', order: 4, active: true },
+  { key: 'incentivos', name: 'Incentivos', emoji: '🏆', description: 'Comisiones, bonos, concursos y esquema de incentivos.', color: 'bg-yellow-500/10 border-yellow-200 text-yellow-700', dotColor: 'bg-yellow-500', order: 5, active: true },
+];
 
 // ============================================================================
 // ANALYTICS DEL PULSO

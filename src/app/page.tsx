@@ -571,12 +571,63 @@ function JourneyDashboard({ userId, profile }: {
   );
 
   if (!journey || journey.status === 'draft') return (
-    <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-16 text-center pb-24">
-      <AlertCircle className="h-10 w-10 text-muted-foreground mb-3" />
-      <p className="font-semibold text-lg">Ruta no configurada</p>
-      <p className="text-muted-foreground text-sm mt-1 max-w-xs">
-        Tu administrador aún no ha configurado la ruta para <strong>{product?.name ?? 'tu producto'}</strong>.
-      </p>
+    <div className="rounded-2xl overflow-hidden border border-primary/10">
+      {/* Gradient hero */}
+      <div className="relative bg-gradient-to-br from-primary/8 via-violet-500/6 to-primary/4 px-6 py-10 text-center overflow-hidden">
+        {/* Decorative background dots */}
+        <div className="absolute inset-0 pointer-events-none opacity-30">
+          <div className="absolute top-4 left-8 text-2xl animate-pulse">✨</div>
+          <div className="absolute top-6 right-10 text-xl animate-pulse" style={{ animationDelay: '0.5s' }}>⭐</div>
+          <div className="absolute bottom-6 left-14 text-xl animate-pulse" style={{ animationDelay: '1s' }}>💫</div>
+          <div className="absolute bottom-4 right-8 text-2xl animate-pulse" style={{ animationDelay: '1.5s' }}>✨</div>
+        </div>
+
+        {/* Jaguar mascot */}
+        <div className="relative text-6xl mb-4 inline-block">
+          🐆
+          <span className="absolute -top-1 -right-2 text-xl animate-bounce">🔮</span>
+        </div>
+
+        <div className="relative space-y-2">
+          <span className="text-[10px] font-bold tracking-widest uppercase text-primary/70 bg-primary/10 px-3 py-1 rounded-full">
+            PRÓXIMAMENTE
+          </span>
+          <h2 className="text-xl font-bold mt-2">
+            Algo increíble está en camino
+          </h2>
+          <p className="text-muted-foreground text-sm leading-relaxed max-w-xs mx-auto">
+            El equipo está construyendo tu ruta de aprendizaje para{' '}
+            <strong className="text-foreground">{product?.name ?? 'tu producto'}</strong>.
+            Lo que se viene te va a sorprender.
+          </p>
+        </div>
+      </div>
+
+      {/* Teaser cards row */}
+      <div className="grid grid-cols-3 border-t border-primary/10">
+        {[
+          { icon: '🎯', label: 'Retos', hint: 'Pon a prueba tu conocimiento' },
+          { icon: '🏆', label: 'Logros', hint: 'Gana insignias y puntos' },
+          { icon: '📈', label: 'Progreso', hint: 'Sigue tu avance en tiempo real' },
+        ].map((item, i) => (
+          <div
+            key={i}
+            className="flex flex-col items-center py-4 px-2 text-center border-r last:border-r-0 border-primary/10 gap-1"
+          >
+            <span className="text-2xl opacity-50 blur-[1px]">{item.icon}</span>
+            <p className="text-xs font-semibold text-muted-foreground/60">{item.label}</p>
+            <p className="text-[10px] text-muted-foreground/40 leading-tight hidden sm:block">{item.hint}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Bottom bar */}
+      <div className="bg-muted/30 border-t border-primary/10 px-4 py-3 flex items-center gap-2">
+        <Sparkles className="h-3.5 w-3.5 text-primary/50 shrink-0 animate-pulse" />
+        <p className="text-xs text-muted-foreground">
+          Vuelve pronto — los mejores promotores son los primeros en estar listos.
+        </p>
+      </div>
     </div>
   );
 

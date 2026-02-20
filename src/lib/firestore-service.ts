@@ -58,8 +58,9 @@ import type {
   KnowledgeModule,
   SEGMENTATION_FIELD_KEYS,
   OrgTokenConfig,
+  PulseCategory,
 } from './types-scalable';
-import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
+import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-scalable';
 import type {
   Course,
   LearningPath,
@@ -114,6 +115,8 @@ const COLLECTIONS = {
   PULSE_CONFIG: 'pulse_config',
   // --- Tokens de Organización ---
   ORG_TOKENS: 'org_tokens',
+  // --- Pulse Categories ---
+  PULSE_CATEGORIES: 'pulseCategories',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -2508,4 +2511,40 @@ export async function saveOrgToken(
 /** Elimina un token de organización. */
 export async function deleteOrgToken(key: string, orgId = DEFAULT_ORG_ID): Promise<void> {
   await deleteDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
+}
+
+// ── Pulse Categories ──────────────────────────────────────────────────────────
+
+export async function getPulseCategories(): Promise<PulseCategory[]> {
+  const snap = await getDocs(
+    query(collection(db!, COLLECTIONS.PULSE_CATEGORIES), orderBy('order', 'asc'))
+  );
+  if (snap.empty) return [];
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as PulseCategory);
+}
+
+export async function savePulseCategory(
+  cat: Omit<PulseCategory, 'id'>,
+  id?: string
+): Promise<string> {
+  const ref = id
+    ? doc(db!, COLLECTIONS.PULSE_CATEGORIES, id)
+    : doc(collection(db!, COLLECTIONS.PULSE_CATEGORIES));
+  await setDoc(ref, stripUndefined(cat), { merge: true });
+  return ref.id;
+}
+
+export async function deletePulseCategory(id: string): Promise<void> {
+  await deleteDoc(doc(db!, COLLECTIONS.PULSE_CATEGORIES, id));
+}
+
+export async function seedDefaultCategoriesIfEmpty(): Promise<void> {
+  const existing = await getPulseCategories();
+  if (existing.length > 0) return;
+  const batch = writeBatch(db!);
+  DEFAULT_PULSE_CATEGORIES.forEach((cat, i) => {
+    const ref = doc(collection(db!, COLLECTIONS.PULSE_CATEGORIES));
+    batch.set(ref, { ...cat, order: i });
+  });
+  await batch.commit();
 }
