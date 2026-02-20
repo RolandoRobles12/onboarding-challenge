@@ -1124,6 +1124,7 @@ export interface SlackChannel {
   channelId: string;   // ID del canal en Slack (ej: C01234567)
   channelName: string; // Nombre visible (ej: #conocimiento-diario)
   description?: string;
+  vertical?: string;   // Vertical de producto asociada (ej: 'Aviva Tu Compra') o vacío para todos
   active: boolean;
 }
 

@@ -99,6 +99,8 @@ export default function KnowledgePulsePage() {
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [newChannelId, setNewChannelId] = useState('');
   const [newChannelName, setNewChannelName] = useState('');
+  const [newChannelVertical, setNewChannelVertical] = useState('');
+  const [channelVerticalFilter, setChannelVerticalFilter] = useState<string>('todos');
 
   // Edit pulse dialog
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -249,10 +251,20 @@ export default function KnowledgePulsePage() {
     const id = newChannelId.trim();
     const name = newChannelName.trim();
     if (!id || !name) return;
-    setChannels(prev => [...prev, { id: crypto.randomUUID(), channelId: id, channelName: name, active: true }]);
+    setChannels(prev => [...prev, {
+      id: crypto.randomUUID(),
+      channelId: id,
+      channelName: name,
+      vertical: newChannelVertical.trim() || undefined,
+      active: true,
+    }]);
     setNewChannelId('');
     setNewChannelName('');
+    setNewChannelVertical('');
   };
+
+  // Derived: unique verticals from channels
+  const channelVerticals = Array.from(new Set(channels.map(c => c.vertical).filter(Boolean))) as string[];
 
   const handleSendTestSlack = async () => {
     try {
@@ -608,28 +620,93 @@ export default function KnowledgePulsePage() {
                   <CardTitle>Canales y Destinatarios</CardTitle>
                   <CardDescription>
                     Agrega los IDs de los canales de Slack donde se publicará el pulso.
-                    Para obtener el ID de un canal, abre su información en Slack.
+                    Puedes asignar una vertical de producto a cada canal para organizarlos.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* Vertical filter */}
+                  {channels.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        onClick={() => setChannelVerticalFilter('todos')}
+                        className={cn(
+                          'text-xs px-2.5 py-1 rounded-full border font-medium transition-colors',
+                          channelVerticalFilter === 'todos'
+                            ? 'bg-primary text-primary-foreground border-primary'
+                            : 'bg-background text-muted-foreground border-border hover:border-primary/40'
+                        )}
+                      >
+                        Todos ({channels.length})
+                      </button>
+                      {channelVerticals.map(v => {
+                        const count = channels.filter(c => c.vertical === v).length;
+                        return (
+                          <button
+                            key={v}
+                            onClick={() => setChannelVerticalFilter(v)}
+                            className={cn(
+                              'text-xs px-2.5 py-1 rounded-full border font-medium transition-colors',
+                              channelVerticalFilter === v
+                                ? 'bg-primary text-primary-foreground border-primary'
+                                : 'bg-background text-muted-foreground border-border hover:border-primary/40'
+                            )}
+                          >
+                            {v} ({count})
+                          </button>
+                        );
+                      })}
+                      {channels.some(c => !c.vertical) && (
+                        <button
+                          onClick={() => setChannelVerticalFilter('sin_vertical')}
+                          className={cn(
+                            'text-xs px-2.5 py-1 rounded-full border font-medium transition-colors',
+                            channelVerticalFilter === 'sin_vertical'
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'bg-background text-muted-foreground border-border hover:border-primary/40'
+                          )}
+                        >
+                          Sin vertical ({channels.filter(c => !c.vertical).length})
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     {channels.length === 0 && (
                       <p className="text-sm text-muted-foreground text-center py-4">No hay canales configurados.</p>
                     )}
-                    {channels.map(ch => (
-                      <div key={ch.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/40">
-                        <div>
-                          <p className="text-sm font-medium">{ch.channelName}</p>
-                          <p className="text-xs text-muted-foreground font-mono">{ch.channelId}</p>
+                    {channels
+                      .filter(ch =>
+                        channelVerticalFilter === 'todos' ? true :
+                        channelVerticalFilter === 'sin_vertical' ? !ch.vertical :
+                        ch.vertical === channelVerticalFilter
+                      )
+                      .map(ch => (
+                        <div key={ch.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/40 gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="text-sm font-medium">{ch.channelName}</p>
+                              {ch.vertical && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
+                                  {ch.vertical}
+                                </span>
+                              )}
+                              {!ch.vertical && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground border font-medium">
+                                  Todas las verticales
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground font-mono mt-0.5">{ch.channelId}</p>
+                          </div>
+                          <Button
+                            variant="ghost" size="icon"
+                            onClick={() => setChannels(prev => prev.filter(c => c.id !== ch.id))}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
                         </div>
-                        <Button
-                          variant="ghost" size="icon"
-                          onClick={() => setChannels(prev => prev.filter(c => c.id !== ch.id))}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    ))}
+                      ))}
                   </div>
 
                   <div className="border-t pt-4 space-y-2">
@@ -646,6 +723,11 @@ export default function KnowledgePulsePage() {
                         onChange={e => setNewChannelName(e.target.value)}
                       />
                     </div>
+                    <Input
+                      placeholder="Vertical de producto (ej: Aviva Tu Compra) — dejar vacío para todos"
+                      value={newChannelVertical}
+                      onChange={e => setNewChannelVertical(e.target.value)}
+                    />
                     <Button variant="outline" size="sm" className="w-full" onClick={handleAddChannel}>
                       <Plus className="h-4 w-4 mr-1.5" /> Agregar Canal
                     </Button>
