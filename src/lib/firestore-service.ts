@@ -54,6 +54,7 @@ import type {
   PulseAnswer,
   PulseBacklogItem,
   SlackNotificationConfig,
+  PulseConfig,
   KnowledgeModule,
   SEGMENTATION_FIELD_KEYS,
   OrgTokenConfig,
@@ -110,6 +111,7 @@ const COLLECTIONS = {
   PULSE_ATTEMPTS: 'pulse_attempts',
   PULSE_BACKLOGS: 'pulse_backlogs',
   SLACK_CONFIG: 'slack_config',
+  PULSE_CONFIG: 'pulse_config',
   // --- Tokens de Organización ---
   ORG_TOKENS: 'org_tokens',
 } as const;
@@ -2356,6 +2358,42 @@ export async function saveSlackConfig(
   orgId = DEFAULT_ORG_ID
 ): Promise<void> {
   await setDoc(getDocRef(COLLECTIONS.SLACK_CONFIG, orgId), stripUndefined({
+    ...config,
+    organizationId: orgId,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  }));
+}
+
+// ----------- Pulse Config -----------
+
+const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'> = {
+  questionsPerPulse: 7,
+  activeModules: [],          // empty = all modules
+  closeAt: '12:00',
+  sameQuestionsForAll: true,
+  randomizeAnswerOrder: false,
+};
+
+/** Obtiene la configuración global del pulso de conocimiento. */
+export async function getPulseConfig(orgId = DEFAULT_ORG_ID): Promise<PulseConfig> {
+  try {
+    const snap = await getDoc(getDocRef(COLLECTIONS.PULSE_CONFIG, orgId));
+    if (snap.exists()) return { id: snap.id, ...snap.data() } as PulseConfig;
+    return { ...DEFAULT_PULSE_CONFIG, organizationId: orgId };
+  } catch (error) {
+    console.error('Error getting pulse config:', error);
+    return { ...DEFAULT_PULSE_CONFIG, organizationId: orgId };
+  }
+}
+
+/** Guarda la configuración global del pulso. */
+export async function savePulseConfig(
+  config: Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt'>,
+  updatedBy: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  await setDoc(getDocRef(COLLECTIONS.PULSE_CONFIG, orgId), stripUndefined({
     ...config,
     organizationId: orgId,
     updatedAt: serverTimestamp(),
