@@ -143,6 +143,7 @@ export default function KnowledgePulsePage() {
   // Slack config (Slack tab)
   const [loadingSlack, setLoadingSlack] = useState(false);
   const [savingSlack, setSavingSlack] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
   const [slackForm, setSlackForm] = useState({
     active: false,
     sendAt: '08:00',
@@ -325,12 +326,53 @@ export default function KnowledgePulsePage() {
   };
 
   const handleSendTestSlack = async () => {
+    setSendingTest(true);
     try {
-      const res = await fetch('/api/pulse/send-slack', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: todayStr(), test: true }) });
-      if (!res.ok) throw new Error(await res.text());
-      toast({ title: 'Mensaje de prueba enviado' });
+      const res = await fetch('/api/pulse/send-slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: todayStr(), test: true }),
+      });
+      const data = await res.json() as {
+        message?: string;
+        error?: string;
+        results?: { target: string; type: string; ok: boolean; error?: string }[];
+      };
+
+      if (!res.ok && !data.results) {
+        // Hard error (no results at all — token missing, config missing, etc.)
+        toast({
+          variant: 'destructive',
+          title: 'Error al enviar',
+          description: data.error ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+
+      const results = data.results ?? [];
+      const failed = results.filter(r => !r.ok);
+      const succeeded = results.filter(r => r.ok);
+
+      if (failed.length === 0) {
+        const channels = succeeded.filter(r => r.type === 'channel').length;
+        const dms = succeeded.filter(r => r.type === 'dm').length;
+        const parts = [
+          channels > 0 ? `${channels} canal${channels !== 1 ? 'es' : ''}` : '',
+          dms > 0 ? `${dms} DM${dms !== 1 ? 's' : ''}` : '',
+        ].filter(Boolean).join(', ');
+        toast({ title: '✅ Prueba enviada', description: `Enviado a: ${parts || 'sin destinatarios'}` });
+      } else {
+        const details = failed.map(r => `${r.target}: ${r.error ?? 'error desconocido'}`).join(' · ');
+        toast({
+          variant: 'destructive',
+          title: `⚠️ ${succeeded.length} ok, ${failed.length} fallaron`,
+          description: details,
+        });
+      }
     } catch (err: unknown) {
       toast({ variant: 'destructive', title: 'Error al enviar', description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setSendingTest(false);
     }
   };
 
@@ -934,8 +976,9 @@ export default function KnowledgePulsePage() {
                 <CardHeader>
                   <CardTitle>Mensajes directos (DM)</CardTitle>
                   <CardDescription>
-                    Además de los canales, puedes enviar el mensaje directamente al DM de usuarios específicos.
-                    Usa el Slack User ID (comienza con U, ej: U01234567).
+                    Destinatarios adicionales de DM. Los usuarios con Slack ID configurado en
+                    <strong> Admin → Slack</strong> ya reciben DM automáticamente; agrega aquí
+                    IDs extra que no estén registrados como usuarios.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -969,8 +1012,9 @@ export default function KnowledgePulsePage() {
               </Card>
 
               <div className="lg:col-span-2 flex gap-3 justify-end">
-                <Button variant="outline" onClick={handleSendTestSlack}>
-                  <Send className="h-4 w-4 mr-2" /> Enviar prueba
+                <Button variant="outline" onClick={handleSendTestSlack} disabled={sendingTest}>
+                  <Send className="h-4 w-4 mr-2" />
+                  {sendingTest ? 'Enviando...' : 'Enviar prueba'}
                 </Button>
                 <Button onClick={handleSaveSlack} disabled={savingSlack}>
                   {savingSlack ? 'Guardando...' : 'Guardar configuración'}
