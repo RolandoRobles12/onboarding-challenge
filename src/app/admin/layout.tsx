@@ -27,6 +27,7 @@ import {
   Clapperboard,
   Radio,
   KeyRound,
+  FolderKanban,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -70,6 +71,7 @@ const navigation: (NavItem | NavSection)[] = [
     section: 'Pulso de Conocimiento',
     items: [
       { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
+      { name: 'Categorías', href: '/admin/categories', icon: FolderKanban },
     ],
   },
   {

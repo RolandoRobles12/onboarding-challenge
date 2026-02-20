@@ -213,7 +213,7 @@ export interface Question {
   explanation?: string; // explicación de la respuesta correcta
   options: QuestionOption[];
   type: QuestionType;
-  difficulty: QuizDifficulty;
+  difficulty?: QuizDifficulty;
   tags: string[];
   category?: string;
   module?: KnowledgeModule; // Módulo de conocimiento (Knowledge Pulse)
@@ -818,7 +818,6 @@ export interface QuestionFormData {
   text: string;
   explanation?: string;
   type: QuestionType;
-  difficulty: QuizDifficulty;
   options: Omit<QuestionOption, 'id'>[];
   tags: string[];
   category?: string;
