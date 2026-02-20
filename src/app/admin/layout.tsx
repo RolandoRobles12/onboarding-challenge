@@ -28,6 +28,7 @@ import {
   Radio,
   KeyRound,
   FolderKanban,
+  MessageSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -54,6 +55,7 @@ const navigation: (NavItem | NavSection)[] = [
     items: [
       { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
       { name: 'Categorías', href: '/admin/categories', icon: FolderKanban },
+      { name: 'Configuración Slack', href: '/admin/slack', icon: MessageSquare },
     ],
   },
   {

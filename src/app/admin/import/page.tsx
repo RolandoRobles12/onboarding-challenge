@@ -16,7 +16,7 @@ import {
   AlertTriangle, Download, Eye, Loader2, Trash2, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { QuestionType, QuizDifficulty } from '@/lib/types-scalable';
+import type { QuestionType } from '@/lib/types-scalable';
 const uuidv4 = () => crypto.randomUUID();
 
 interface ParsedQuestion {
@@ -24,7 +24,7 @@ interface ParsedQuestion {
   text: string;
   options: { text: string; isCorrect: boolean }[];
   type: QuestionType;
-  difficulty: QuizDifficulty;
+  module: string;
   category: string;
   tags: string[];
   explanation: string;
@@ -37,7 +37,7 @@ interface ParsedQuestion {
 
 type ColumnKey =
   | 'text' | 'option1' | 'option2' | 'option3' | 'option4' | 'option5'
-  | 'correct' | 'type' | 'difficulty' | 'category' | 'tags'
+  | 'correct' | 'type' | 'module' | 'category' | 'tags'
   | 'explanation' | 'isTricky' | 'trickyHint';
 
 const COLUMN_LABELS: Record<ColumnKey, string> = {
@@ -48,8 +48,8 @@ const COLUMN_LABELS: Record<ColumnKey, string> = {
   option4: 'Opción 4',
   option5: 'Opción 5',
   correct: 'Respuesta(s) Correcta(s)',
-  type: 'Tipo (single_choice / multiple_choice)',
-  difficulty: 'Dificultad (easy / medium / hard)',
+  type: 'Tipo (single_choice / multiple_choice / true_false / fill_in_the_blank / open_text / tricky)',
+  module: 'Módulo',
   category: 'Categoría',
   tags: 'Etiquetas (separadas por |)',
   explanation: 'Explicación',
@@ -57,10 +57,12 @@ const COLUMN_LABELS: Record<ColumnKey, string> = {
   trickyHint: 'Pista Tricky',
 };
 
-const REQUIRED_COLUMNS: ColumnKey[] = ['text', 'option1', 'option2', 'correct'];
+const REQUIRED_COLUMNS: ColumnKey[] = ['text', 'type', 'correct'];
 
 function generateCSVTemplate(): string {
   const headers = Object.keys(COLUMN_LABELS).join(',');
+
+  // Example 1: single_choice
   const example1 = [
     '"¿Qué significa AOS?"',
     '"Aviva On System"',
@@ -70,15 +72,17 @@ function generateCSVTemplate(): string {
     '""',
     '"Aviva On System"',
     '"single_choice"',
-    '"medium"',
+    '"herramientas"',
     '"Plataformas"',
     '"AOS|herramientas"',
     '"AOS significa Aviva On System, la plataforma principal."',
     '"false"',
     '""',
   ].join(',');
+
+  // Example 2: multiple_choice
   const example2 = [
-    '"¿Cuáles son documentos requeridos para crédito BA? (Selecciona todos)"',
+    '"¿Cuáles son documentos requeridos para crédito? (Selecciona todos)"',
     '"INE vigente"',
     '"Comprobante de domicilio"',
     '"Acta de nacimiento"',
@@ -86,14 +90,87 @@ function generateCSVTemplate(): string {
     '"RFC"',
     '"INE vigente|Comprobante de domicilio"',
     '"multiple_choice"',
-    '"hard"',
+    '"solicitud_credito"',
     '"Documentos"',
     '"requisitos|documentos"',
     '"Se requieren INE y comprobante de domicilio."',
     '"false"',
     '""',
   ].join(',');
-  return `${headers}\n${example1}\n${example2}`;
+
+  // Example 3: true_false
+  const example3 = [
+    '"¿El pago mínimo evita el cobro de intereses?"',
+    '"Verdadero"',
+    '"Falso"',
+    '""',
+    '""',
+    '""',
+    '"Falso"',
+    '"true_false"',
+    '"pagos_renovacion"',
+    '"Pagos"',
+    '"pagos|intereses"',
+    '"El pago mínimo NO evita intereses; solo evita cargos por mora."',
+    '"false"',
+    '""',
+  ].join(',');
+
+  // Example 4: fill_in_the_blank
+  const example4 = [
+    '"El crédito BA se puede solicitar a partir de ___ de antigüedad en la empresa"',
+    '"3 meses"',
+    '"6 meses"',
+    '"1 año"',
+    '""',
+    '""',
+    '"3 meses"',
+    '"fill_in_the_blank"',
+    '"solicitud_credito"',
+    '"Requisitos"',
+    '"credito|requisitos|antigüedad"',
+    '"El requisito mínimo de antigüedad es 3 meses."',
+    '"false"',
+    '""',
+  ].join(',');
+
+  // Example 5: open_text
+  const example5 = [
+    '"¿Qué pasos seguirías si un cliente rechaza una renovación?"',
+    '""',
+    '""',
+    '""',
+    '""',
+    '""',
+    '""',
+    '"open_text"',
+    '"banca_conversacional"',
+    '"Ventas"',
+    '"objeciones|renovacion"',
+    '"Escuchar objeción, empatizar, presentar beneficios y ofrecer alternativas."',
+    '"false"',
+    '""',
+  ].join(',');
+
+  // Example 6: tricky
+  const example6 = [
+    '"¿Cuántos días tiene el cliente para hacer el primer pago después de la disposición?"',
+    '"30 días"',
+    '"15 días"',
+    '"45 días"',
+    '"Depende del día de corte"',
+    '""',
+    '"Depende del día de corte"',
+    '"tricky"',
+    '"pagos_renovacion"',
+    '"Pagos"',
+    '"pagos|primer_pago|disposicion"',
+    '"El primer pago depende del ciclo de corte de la cuenta, no de un plazo fijo."',
+    '"true"',
+    '"Cuidado: la respuesta parece obvia pero depende de variables de la cuenta."',
+  ].join(',');
+
+  return `${headers}\n${example1}\n${example2}\n${example3}\n${example4}\n${example5}\n${example6}`;
 }
 
 function parseRow(row: Record<string, string>): ParsedQuestion {
@@ -103,44 +180,102 @@ function parseRow(row: Record<string, string>): ParsedQuestion {
   const text = (row.text || '').trim();
   if (!text) errors.push('Falta el texto de la pregunta');
 
+  const rawType = (row.type || 'single_choice').trim().toLowerCase();
+  const validTypes: QuestionType[] = [
+    'single_choice', 'multiple_choice', 'true_false',
+    'fill_in_the_blank', 'open_text', 'tricky',
+  ];
+  const type: QuestionType = validTypes.includes(rawType as QuestionType)
+    ? (rawType as QuestionType)
+    : 'single_choice';
+
+  if (!validTypes.includes(rawType as QuestionType)) {
+    errors.push(`Tipo desconocido "${rawType}". Usa: ${validTypes.join(', ')}`);
+  }
+
   const optionFields: ColumnKey[] = ['option1', 'option2', 'option3', 'option4', 'option5'];
   const rawOptions = optionFields
     .map((f) => (row[f] || '').trim())
     .filter(Boolean);
 
-  if (rawOptions.length < 2) errors.push('Se requieren al menos 2 opciones');
-
   const correctRaw = (row.correct || '').trim();
-  if (!correctRaw) errors.push('Falta la(s) respuesta(s) correcta(s)');
-
   const correctAnswers = correctRaw.split('|').map((c) => c.trim()).filter(Boolean);
 
-  const options = rawOptions.map((optText) => ({
-    text: optText,
-    isCorrect: correctAnswers.includes(optText),
-  }));
+  let options: { text: string; isCorrect: boolean }[] = [];
+  let isTricky = false;
 
-  const hasCorrect = options.some((o) => o.isCorrect);
-  if (!hasCorrect && correctRaw) {
-    errors.push(`La respuesta "${correctRaw}" no coincide con ninguna opción`);
+  if (type === 'open_text') {
+    // open_text: no options, no correct answer needed (manual grading)
+    options = [];
+  } else if (type === 'true_false') {
+    // true_false: auto-generate options if not provided
+    const tfOptions = rawOptions.length >= 2
+      ? rawOptions.slice(0, 2)
+      : ['Verdadero', 'Falso'];
+    options = tfOptions.map((optText) => ({
+      text: optText,
+      isCorrect: correctAnswers.includes(optText),
+    }));
+    if (!correctRaw) {
+      errors.push('Falta la respuesta correcta (Verdadero o Falso)');
+    } else {
+      const hasCorrect = options.some((o) => o.isCorrect);
+      if (!hasCorrect) {
+        errors.push(`La respuesta "${correctRaw}" no coincide con las opciones (usa "Verdadero" o "Falso")`);
+      }
+    }
+  } else if (type === 'fill_in_the_blank') {
+    // fill_in_the_blank: options are possible completions, at least 1 required
+    if (rawOptions.length < 1) {
+      errors.push('Se requiere al menos 1 opción de completado para fill_in_the_blank');
+    }
+    if (!correctRaw) {
+      errors.push('Falta la respuesta correcta');
+    }
+    options = rawOptions.map((optText) => ({
+      text: optText,
+      isCorrect: correctAnswers.includes(optText),
+    }));
+    if (correctRaw && rawOptions.length >= 1) {
+      const hasCorrect = options.some((o) => o.isCorrect);
+      if (!hasCorrect) {
+        errors.push(`La respuesta "${correctRaw}" no coincide con ninguna opción`);
+      }
+    }
+  } else {
+    // single_choice, multiple_choice, tricky: require at least 2 options
+    if (rawOptions.length < 2) {
+      errors.push('Se requieren al menos 2 opciones');
+    }
+    if (!correctRaw) {
+      errors.push('Falta la(s) respuesta(s) correcta(s)');
+    }
+    options = rawOptions.map((optText) => ({
+      text: optText,
+      isCorrect: correctAnswers.includes(optText),
+    }));
+    if (correctRaw && rawOptions.length >= 2) {
+      const hasCorrect = options.some((o) => o.isCorrect);
+      if (!hasCorrect) {
+        errors.push(`La respuesta "${correctRaw}" no coincide con ninguna opción`);
+      }
+    }
+    if (type === 'tricky') {
+      isTricky = true;
+    }
   }
 
-  const rawType = (row.type || 'single_choice').trim().toLowerCase();
-  const type: QuestionType = ['single_choice', 'multiple_choice', 'tricky'].includes(rawType)
-    ? (rawType as QuestionType)
-    : 'single_choice';
+  // For non-tricky types, also check the isTricky column
+  if (type !== 'tricky') {
+    const isTrickyRaw = (row.isTricky || '').trim().toLowerCase();
+    isTricky = isTrickyRaw === 'true' || isTrickyRaw === '1' || isTrickyRaw === 'si' || isTrickyRaw === 'sí';
+  }
 
-  const rawDiff = (row.difficulty || 'medium').trim().toLowerCase();
-  const difficulty: QuizDifficulty = ['easy', 'medium', 'hard'].includes(rawDiff)
-    ? (rawDiff as QuizDifficulty)
-    : 'medium';
-
+  const module = (row.module || '').trim();
   const category = (row.category || '').trim();
   const tagsRaw = (row.tags || '').trim();
   const tags = tagsRaw ? tagsRaw.split('|').map((t) => t.trim()).filter(Boolean) : [];
   const explanation = (row.explanation || '').trim();
-  const isTrickyRaw = (row.isTricky || '').trim().toLowerCase();
-  const isTricky = isTrickyRaw === 'true' || isTrickyRaw === '1' || isTrickyRaw === 'si' || isTrickyRaw === 'sí';
   const trickyHint = (row.trickyHint || '').trim();
 
   return {
@@ -148,7 +283,7 @@ function parseRow(row: Record<string, string>): ParsedQuestion {
     text,
     options,
     type,
-    difficulty,
+    module,
     category,
     tags,
     explanation,
@@ -272,13 +407,15 @@ export default function ImportPage() {
         text: q.text,
         explanation: q.explanation || undefined,
         type: q.type,
-        difficulty: q.difficulty,
-        options: q.options.map((o, i) => ({
-          id: uuidv4(),
-          text: o.text,
-          isCorrect: o.isCorrect,
-          order: i,
-        })),
+        module: q.module || undefined,
+        options: q.type === 'open_text'
+          ? []
+          : q.options.map((o, i) => ({
+              id: uuidv4(),
+              text: o.text,
+              isCorrect: o.isCorrect,
+              order: i,
+            })),
         tags: q.tags,
         category: q.category || undefined,
         isTricky: q.isTricky,
@@ -291,7 +428,7 @@ export default function ImportPage() {
       await batchCreateQuestions(questionsToCreate as any, profile?.uid || '');
       setImportDone(true);
       toast({
-        title: `✅ ${toImport.length} preguntas importadas correctamente`,
+        title: `${toImport.length} preguntas importadas correctamente`,
         description: `Producto: ${products.find((p) => p.id === selectedProductId)?.name}`,
       });
       setParsedQuestions([]);
@@ -335,7 +472,9 @@ export default function ImportPage() {
           </CardTitle>
           <CardDescription>
             Descarga la plantilla CSV con el formato correcto. Las columnas obligatorias son:{' '}
-            <strong>text, option1, option2, correct</strong>.
+            <strong>text, type, correct</strong>. Tipos soportados:{' '}
+            <strong>single_choice, multiple_choice, true_false, fill_in_the_blank, open_text, tricky</strong>.
+            La plantilla incluye un ejemplo de cada tipo.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -465,20 +604,13 @@ export default function ImportPage() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-muted-foreground font-mono">#{idx + 1}</span>
-                      <span
-                        className={cn(
-                          'text-xs px-1.5 py-0.5 rounded',
-                          q.difficulty === 'easy'
-                            ? 'bg-green-100 text-green-700'
-                            : q.difficulty === 'hard'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-yellow-100 text-yellow-700'
-                        )}
-                      >
-                        {q.difficulty}
-                      </span>
+                      {q.module && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+                          {q.module}
+                        </span>
+                      )}
                       <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
                         {q.type}
                       </span>
@@ -517,20 +649,29 @@ export default function ImportPage() {
                   <div className="px-3 pb-3 border-t bg-muted/30">
                     <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
                       <div>
-                        <p className="font-medium text-muted-foreground mb-1">Opciones:</p>
-                        {q.options.map((o, i) => (
-                          <p
-                            key={i}
-                            className={cn(
-                              'flex items-center gap-1',
-                              o.isCorrect ? 'text-green-700 font-medium' : 'text-foreground'
-                            )}
-                          >
-                            {o.isCorrect ? '✓' : '○'} {o.text}
+                        {q.options.length > 0 ? (
+                          <>
+                            <p className="font-medium text-muted-foreground mb-1">Opciones:</p>
+                            {q.options.map((o, i) => (
+                              <p
+                                key={i}
+                                className={cn(
+                                  'flex items-center gap-1',
+                                  o.isCorrect ? 'text-green-700 font-medium' : 'text-foreground'
+                                )}
+                              >
+                                {o.isCorrect ? '✓' : '○'} {o.text}
+                              </p>
+                            ))}
+                          </>
+                        ) : (
+                          <p className="text-muted-foreground italic">
+                            {q.type === 'open_text' ? 'Respuesta abierta (sin opciones)' : 'Sin opciones'}
                           </p>
-                        ))}
+                        )}
                       </div>
                       <div>
+                        {q.module && <p><span className="text-muted-foreground">Módulo:</span> {q.module}</p>}
                         {q.category && <p><span className="text-muted-foreground">Categoría:</span> {q.category}</p>}
                         {q.tags.length > 0 && <p><span className="text-muted-foreground">Tags:</span> {q.tags.join(', ')}</p>}
                         {q.explanation && <p className="mt-1"><span className="text-muted-foreground">Explicación:</span> {q.explanation}</p>}
@@ -573,7 +714,7 @@ export default function ImportPage() {
           </Button>
           {importDone && (
             <span className="flex items-center gap-1 text-green-600 font-medium">
-              <CheckCircle className="h-5 w-5" /> ¡Importación completada!
+              <CheckCircle className="h-5 w-5" /> Importacion completada!
             </span>
           )}
         </div>
