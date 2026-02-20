@@ -6,8 +6,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BarChart3, TrendingUp, Users, Award, Clock, Target, Zap, Radio, BookOpen, X, Plus } from 'lucide-react';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
-import { getDailyPulses, getPulseAttemptsByDate } from '@/lib/firestore-service';
-import type { PulseAttempt, DailyPulse } from '@/lib/types-scalable';
+import { getDailyPulses, getPulseAttemptsByDate, getQuestions, getAllUsers } from '@/lib/firestore-service';
+import type { PulseAttempt, DailyPulse, Question, KnowledgeModule } from '@/lib/types-scalable';
+import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { cn } from '@/lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -27,6 +28,13 @@ const GRANULARITY_LABELS: Record<CosechaGranularity, string> = {
   mes: 'Por mes',
   trimestre: 'Por trimestre',
   año: 'Por año',
+};
+
+const MODULE_COLORS: Record<string, string> = {
+  banca_conversacional: 'bg-blue-500/10 text-blue-700 border-blue-200',
+  pagos_renovacion: 'bg-green-500/10 text-green-700 border-green-200',
+  solicitud_credito: 'bg-purple-500/10 text-purple-700 border-purple-200',
+  herramientas: 'bg-orange-500/10 text-orange-700 border-orange-200',
 };
 
 type OptFilter = 'dimension' | 'cosechaGranularity' | 'cosechaFrom' | 'cosechaTo';
@@ -192,6 +200,8 @@ export default function AnalyticsPage() {
   const [loadingPulse, setLoadingPulse] = useState(false);
   const [pulseAttempts, setPulseAttempts] = useState<PulseAttempt[]>([]);
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
+  const [questionMap, setQuestionMap] = useState<Record<string, Question>>({});
+  const [totalUsers, setTotalUsers] = useState(0);
 
   // Filter state
   const [periodDays, setPeriodDays] = useState('30');
@@ -256,8 +266,16 @@ export default function AnalyticsPage() {
     setLoadingPulse(true);
     const endDate = todayStr();
     const startDate = addDays(endDate, -parseInt(periodDays));
-    getDailyPulses(startDate, endDate).then(async pulseList => {
+    Promise.all([
+      getDailyPulses(startDate, endDate),
+      getQuestions('pulse', false),
+      getAllUsers(),
+    ]).then(async ([pulseList, allQs, allUsers]) => {
       setPulses(pulseList);
+      setTotalUsers(allUsers.length);
+      const map: Record<string, Question> = {};
+      for (const q of allQs) map[q.id] = q;
+      setQuestionMap(map);
       const allAttempts: PulseAttempt[] = [];
       for (const p of pulseList) {
         const att = await getPulseAttemptsByDate(p.date);
@@ -291,6 +309,9 @@ export default function AnalyticsPage() {
   const overallPct = filteredAttempts.length > 0
     ? Math.round(filteredAttempts.reduce((s, a) => s + a.percentage, 0) / filteredAttempts.length)
     : 0;
+
+  const uniqueRespondents = new Set(filteredAttempts.map(a => a.userId)).size;
+  const participationRate = totalUsers > 0 ? Math.round((uniqueRespondents / totalUsers) * 100) : 0;
 
   const segmentMetrics = activeOptFilters.has('dimension')
     ? buildSegmentMetrics(filteredAttempts, dimension, cosechaGranularity)
@@ -523,11 +544,11 @@ export default function AnalyticsPage() {
                   color={overallPct >= 70 ? 'text-green-500' : 'text-orange-500'}
                 />
                 <StatCard
-                  title="Promedio respuestas/día"
-                  value={pulses.length > 0 ? Math.round(filteredAttempts.length / pulses.length) : 0}
-                  description="participación diaria"
+                  title="Tasa de participación"
+                  value={`${participationRate}%`}
+                  description={`${uniqueRespondents} de ${totalUsers} usuarios respondieron`}
                   icon={TrendingUp}
-                  color="text-purple-500"
+                  color={participationRate >= 70 ? 'text-green-500' : participationRate >= 40 ? 'text-orange-500' : 'text-purple-500'}
                 />
               </div>
 
@@ -597,30 +618,43 @@ export default function AnalyticsPage() {
                     <p className="text-sm text-muted-foreground text-center py-6">No hay datos disponibles aún.</p>
                   ) : (
                     <div className="space-y-3">
-                      {questionMetrics.slice(0, 10).map((qm, idx) => (
-                        <div key={qm.questionId} className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/40">
-                          <span className="text-muted-foreground font-bold text-sm w-5 text-right">{idx + 1}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-muted-foreground font-mono">{qm.questionId.slice(-8)}</p>
-                            <div className="h-1.5 bg-muted rounded-full mt-1 overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full rounded-full',
-                                  qm.correctRate >= 70 ? 'bg-green-500' : qm.correctRate >= 40 ? 'bg-orange-400' : 'bg-red-500'
-                                )}
-                                style={{ width: `${qm.correctRate}%` }}
-                              />
+                      {questionMetrics.slice(0, 10).map((qm, idx) => {
+                        const q = questionMap[qm.questionId];
+                        return (
+                          <div key={qm.questionId} className="flex items-start gap-3 p-2 rounded-lg hover:bg-muted/40">
+                            <span className="text-muted-foreground font-bold text-sm w-5 text-right shrink-0 mt-0.5">{idx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium leading-snug line-clamp-2">
+                                {q?.text ?? <span className="font-mono text-xs text-muted-foreground">{qm.questionId.slice(-8)}</span>}
+                              </p>
+                              {q?.module && (
+                                <span className={cn(
+                                  'text-[10px] px-1.5 py-0.5 rounded-full border font-medium mt-1 inline-block',
+                                  MODULE_COLORS[q.module] ?? 'bg-muted text-muted-foreground border-border'
+                                )}>
+                                  {KNOWLEDGE_MODULE_LABELS[q.module as KnowledgeModule] ?? q.module}
+                                </span>
+                              )}
+                              <div className="h-1.5 bg-muted rounded-full mt-1.5 overflow-hidden">
+                                <div
+                                  className={cn(
+                                    'h-full rounded-full',
+                                    qm.correctRate >= 70 ? 'bg-green-500' : qm.correctRate >= 40 ? 'bg-orange-400' : 'bg-red-500'
+                                  )}
+                                  style={{ width: `${qm.correctRate}%` }}
+                                />
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className={cn(
+                                'text-sm font-bold',
+                                qm.correctRate >= 70 ? 'text-green-600' : qm.correctRate >= 40 ? 'text-orange-500' : 'text-red-500'
+                              )}>{qm.correctRate}%</span>
+                              <p className="text-[10px] text-muted-foreground">{qm.timesAsked} veces</p>
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <span className={cn(
-                              'text-sm font-bold',
-                              qm.correctRate >= 70 ? 'text-green-600' : qm.correctRate >= 40 ? 'text-orange-500' : 'text-red-500'
-                            )}>{qm.correctRate}%</span>
-                            <p className="text-[10px] text-muted-foreground">{qm.timesAsked} veces</p>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </CardContent>
