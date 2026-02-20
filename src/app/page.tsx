@@ -19,6 +19,8 @@ import {
   getUserEnrollments,
   getLevelsConfig,
   getLevelFromConfig,
+  getDailyPulse,
+  getPulseAttempt,
   type LevelConfig,
 } from '@/lib/firestore-service';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
@@ -30,6 +32,7 @@ import {
   HelpCircle, BarChart2, Award, AlertCircle, LayoutDashboard,
   Trophy, BookOpen, Swords, Medal, Zap,
   ChevronDown, ChevronUp, PlayCircle, Sparkles, Target, ListChecks,
+  Radio, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvatarComponent } from '@/lib/avatars';
@@ -250,6 +253,69 @@ function StageCard({ stage, index, status, completedIds, productId, journeyId, o
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Pulse Today Card ─────────────────────────────────────────────────────────
+
+function PulseTodayCard({ userId }: { userId: string }) {
+  const [status, setStatus] = useState<'loading' | 'no_pulse' | 'pending' | 'done' | 'closed'>('loading');
+  const [correctAnswers, setCorrectAnswers] = useState<number | null>(null);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    Promise.all([getDailyPulse(today), getPulseAttempt(userId, today)]).then(([pulse, attempt]) => {
+      if (!pulse || pulse.status === 'scheduled') { setStatus('no_pulse'); return; }
+      if (attempt?.status === 'completed') {
+        setCorrectAnswers(attempt.correctAnswers);
+        setStatus('done');
+        return;
+      }
+      if (pulse.status === 'closed') { setStatus('closed'); return; }
+      setStatus('pending');
+    }).catch(() => setStatus('no_pulse'));
+  }, [userId]);
+
+  if (status === 'loading' || status === 'no_pulse') return null;
+
+  return (
+    <Link href="/pulse">
+      <div className={cn(
+        'rounded-2xl border p-4 flex items-center gap-4 transition-all hover:shadow-md',
+        status === 'done'
+          ? 'bg-green-50 border-green-200'
+          : status === 'closed'
+          ? 'bg-muted/40 border-muted'
+          : 'bg-primary/5 border-primary/20 animate-pulse-slow',
+      )}>
+        <div className={cn(
+          'h-11 w-11 rounded-xl flex items-center justify-center shrink-0',
+          status === 'done' ? 'bg-green-500/15' : status === 'closed' ? 'bg-muted' : 'bg-primary/10',
+        )}>
+          {status === 'done'
+            ? <CheckCircle2 className="h-6 w-6 text-green-600" />
+            : status === 'closed'
+            ? <Clock className="h-6 w-6 text-muted-foreground" />
+            : <Radio className="h-6 w-6 text-primary" />
+          }
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={cn('font-semibold text-sm',
+            status === 'done' ? 'text-green-700' : status === 'closed' ? 'text-muted-foreground' : 'text-primary'
+          )}>
+            {status === 'done' ? '¡Pulso completado!' : status === 'closed' ? 'Pulso cerrado' : 'Pulso de hoy disponible'}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {status === 'done'
+              ? `${correctAnswers}/7 respuestas correctas`
+              : status === 'closed'
+              ? 'El tiempo de respuesta terminó'
+              : '7 preguntas · Responde antes de las 12 PM'}
+          </p>
+        </div>
+        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+      </div>
+    </Link>
   );
 }
 
@@ -575,6 +641,8 @@ function JourneyDashboard({ userId, profile }: {
           </Button>
         </div>
       )}
+
+      <PulseTodayCard userId={userId} />
 
       <MiniLeaderboard productId={productId} currentUserName={profile.nombre ?? ''} />
     </div>

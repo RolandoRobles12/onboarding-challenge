@@ -93,6 +93,7 @@ export default function KnowledgePulsePage() {
     active: false,
     sendAt: '08:00',
     closeAt: '12:00',
+    appUrl: '',
     messageTemplate: '📡 *Pulso de Conocimiento* — {date}\n\nResponde tus 7 preguntas antes de las 12:00 PM:\n{link}',
   });
   const [channels, setChannels] = useState<SlackChannel[]>([]);
@@ -130,6 +131,7 @@ export default function KnowledgePulsePage() {
           active: cfg.active,
           sendAt: cfg.sendAt,
           closeAt: cfg.closeAt,
+          appUrl: cfg.appUrl ?? '',
           messageTemplate: cfg.messageTemplate,
         });
         setChannels(cfg.channels);
@@ -548,7 +550,7 @@ export default function KnowledgePulsePage() {
                   <CardTitle>Notificación Slack</CardTitle>
                   <CardDescription>
                     El bot enviará un mensaje con el link del pulso a los canales configurados.
-                    Asegúrate de agregar la variable <code className="text-xs bg-muted px-1 rounded">SLACK_BOT_TOKEN</code> en tus variables de entorno.
+                    Solo necesitas agregar <code className="text-xs bg-muted px-1 rounded">SLACK_BOT_TOKEN</code> en tus variables de entorno.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -576,6 +578,17 @@ export default function KnowledgePulsePage() {
                         onChange={e => setSlackForm(f => ({ ...f, closeAt: e.target.value }))}
                       />
                     </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>URL de la app</Label>
+                    <Input
+                      placeholder="https://app.avivacredito.com"
+                      value={slackForm.appUrl}
+                      onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      La URL base de tu plataforma. Se usa para generar el link <code>{'{link}'}</code> en el mensaje.
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label>Plantilla del mensaje</Label>

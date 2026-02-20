@@ -2,9 +2,10 @@
  * POST /api/pulse/send-slack
  * Envía el mensaje del Pulso de Conocimiento a los canales de Slack configurados.
  *
- * Variables de entorno requeridas:
+ * Variable de entorno requerida:
  *   SLACK_BOT_TOKEN  — Token del bot de Slack (xoxb-...)
- *   NEXT_PUBLIC_APP_URL — URL base de la app (ej: https://app.avivacredito.com)
+ *
+ * La URL de la app se configura en /admin/knowledge-pulse → Config Slack → "URL de la app".
  *
  * Body: { date: "YYYY-MM-DD", test?: boolean }
  */
@@ -34,8 +35,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No hay canales activos configurados' }, { status: 400 });
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.avivacredito.com';
-    const pulseLink = `${appUrl}/pulse`;
+    // La URL de la app se lee del config de Slack (configurada por el admin, sin env var adicional)
+    const pulseLink = `${cfg.appUrl.replace(/\/$/, '')}/pulse`;
 
     // Format display date
     const [y, m, d] = date.split('-').map(Number);

@@ -1129,13 +1129,15 @@ export interface SlackChannel {
 
 /**
  * Configuración global del bot de Slack para el Knowledge Pulse.
- * El bot token se guarda en variables de entorno (SLACK_BOT_TOKEN).
+ * Solo requiere SLACK_BOT_TOKEN como variable de entorno.
+ * El resto (incluyendo la URL de la app) se configura desde el panel de admin.
  */
 export interface SlackNotificationConfig {
   organizationId: string;
   active: boolean;
   sendAt: string;        // HH:MM en horario local del equipo (ej: "08:00")
   closeAt: string;       // HH:MM límite para responder (ej: "12:00")
+  appUrl: string;        // URL base de la app, sin barra final (ej: https://app.avivacredito.com)
   messageTemplate: string; // Plantilla del mensaje. Soporta {date}, {link}
   channels: SlackChannel[];
   updatedAt: Timestamp;
