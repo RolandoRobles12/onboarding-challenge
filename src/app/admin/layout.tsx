@@ -26,6 +26,7 @@ import {
   Layers,
   Clapperboard,
   Radio,
+  KeyRound,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -76,6 +77,7 @@ const navigation: (NavItem | NavSection)[] = [
     items: [
       { name: 'Usuarios', href: '/admin/users', icon: Users },
       { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
+      { name: 'Tokens', href: '/admin/tokens', icon: KeyRound },
     ],
   },
 ];

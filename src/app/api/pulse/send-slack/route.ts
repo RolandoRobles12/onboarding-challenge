@@ -11,15 +11,20 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSlackConfig } from '@/lib/firestore-service';
+import { getSlackConfig, getOrgToken } from '@/lib/firestore-service';
 
 export async function POST(req: NextRequest) {
   try {
     const { date, test = false } = await req.json() as { date: string; test?: boolean };
 
-    const token = process.env.SLACK_BOT_TOKEN;
+    // Leer token desde Firestore primero; si no existe, usar variable de entorno como respaldo
+    const storedToken = await getOrgToken('slack_bot_token');
+    const token = storedToken?.value || process.env.SLACK_BOT_TOKEN;
     if (!token) {
-      return NextResponse.json({ error: 'SLACK_BOT_TOKEN no configurado' }, { status: 500 });
+      return NextResponse.json(
+        { error: 'SLACK_BOT_TOKEN no configurado. Agrégalo en Admin → Sistema → Tokens o como variable de entorno.' },
+        { status: 500 }
+      );
     }
 
     const cfg = await getSlackConfig();

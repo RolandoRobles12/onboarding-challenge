@@ -56,6 +56,7 @@ import type {
   SlackNotificationConfig,
   KnowledgeModule,
   SEGMENTATION_FIELD_KEYS,
+  OrgTokenConfig,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
@@ -109,6 +110,8 @@ const COLLECTIONS = {
   PULSE_ATTEMPTS: 'pulse_attempts',
   PULSE_BACKLOGS: 'pulse_backlogs',
   SLACK_CONFIG: 'slack_config',
+  // --- Tokens de Organización ---
+  ORG_TOKENS: 'org_tokens',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -2412,4 +2415,59 @@ export async function scheduleAutoPulse(
   }
 
   return selected.slice(0, 7);
+}
+
+// ----------- Org Tokens -----------
+
+/** Obtiene un token específico de la organización por su clave. */
+export async function getOrgToken(
+  key: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<OrgTokenConfig | null> {
+  try {
+    const snap = await getDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
+    return snap.exists() ? (snap.data() as OrgTokenConfig) : null;
+  } catch (error) {
+    console.error('Error getting org token:', error);
+    return null;
+  }
+}
+
+/** Lista todos los tokens configurados para la organización. */
+export async function getOrgTokens(orgId = DEFAULT_ORG_ID): Promise<OrgTokenConfig[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.ORG_TOKENS),
+      where('organizationId', '==', orgId),
+      orderBy('key', 'asc'),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as OrgTokenConfig);
+  } catch (error) {
+    console.error('Error getting org tokens:', error);
+    return [];
+  }
+}
+
+/** Guarda o actualiza un token de organización. */
+export async function saveOrgToken(
+  key: string,
+  label: string,
+  value: string,
+  updatedBy: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  await setDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`), {
+    key,
+    label,
+    value,
+    organizationId: orgId,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  });
+}
+
+/** Elimina un token de organización. */
+export async function deleteOrgToken(key: string, orgId = DEFAULT_ORG_ID): Promise<void> {
+  await deleteDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
 }

@@ -1184,3 +1184,23 @@ export interface PulseAnalyticsReport {
   // Por módulo
   byModule: (PulseSegmentMetric & { module: KnowledgeModule })[];
 }
+
+// ============================================================================
+// TOKENS DE ORGANIZACIÓN
+// ============================================================================
+
+/**
+ * Token genérico almacenado en Firestore bajo la colección `org_tokens`.
+ * Permite que el administrador configure API keys / tokens de integración
+ * directamente desde el panel de admin, sin necesidad de variables de entorno.
+ *
+ * Cada documento usa `key` como ID (ej: "slack_bot_token").
+ */
+export interface OrgTokenConfig {
+  key: string;          // Identificador del token (ej: "slack_bot_token")
+  label: string;        // Nombre legible para mostrar en la UI
+  value: string;        // Valor del token (guardado en texto plano en Firestore)
+  organizationId: string;
+  updatedAt: Timestamp;
+  updatedBy: string;
+}
