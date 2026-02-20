@@ -678,6 +678,8 @@ export interface JourneyStage {
   description?: string;
   required: boolean;
   actions: JourneyStep[];
+  /** Si es false, el usuario ve un teaser "próximamente" en lugar del contenido. */
+  visible?: boolean;
 }
 
 // ============================================================================
@@ -777,6 +779,8 @@ export interface Journey {
   /** @deprecated - flat list kept for backward compat; use stages instead. */
   steps?: JourneyStep[];
   active: boolean;
+  /** 'draft' = solo visible para admins; 'published' = visible para usuarios. */
+  status?: 'draft' | 'published';
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdBy: string;

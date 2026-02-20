@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import {
@@ -23,6 +23,7 @@ import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
   BookOpen, Swords, Medal, Info, ListChecks, Pencil, X, ClipboardList,
+  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock,
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
@@ -564,6 +565,11 @@ function StageCard({
         <Badge variant="secondary" className="text-xs shrink-0">
           {stage.actions.length} {stage.actions.length === 1 ? 'acción' : 'acciones'}
         </Badge>
+        {stage.visible === false && (
+          <Badge variant="outline" className="text-xs shrink-0 border-amber-300 text-amber-600 bg-amber-50 gap-1">
+            <EyeOff className="h-3 w-3" /> Oculto
+          </Badge>
+        )}
 
         <div className="flex items-center gap-0.5">
           <button
@@ -579,6 +585,14 @@ function StageCard({
             className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30 rounded"
           >
             <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          {/* Visibility toggle */}
+          <button
+            onClick={() => onUpdate({ ...stage, visible: stage.visible === false ? true : false })}
+            className={`p-1 rounded transition-colors ${stage.visible === false ? 'text-amber-500 hover:text-amber-600' : 'text-muted-foreground hover:text-foreground'}`}
+            title={stage.visible === false ? 'Etapa oculta — clic para mostrar' : 'Clic para ocultar etapa'}
+          >
+            {stage.visible === false ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>
           <button onClick={onRemove} className="p-1 text-destructive hover:text-destructive/80 rounded">
             <Trash2 className="h-3.5 w-3.5" />
@@ -669,8 +683,13 @@ export default function JourneyPage() {
   const [badges, setBadges] = useState<BadgeType[]>([]);
   const [forms, setForms] = useState<JourneyForm[]>([]);
   const [journeyName, setJourneyName] = useState('');
+  const [journeyStatus, setJourneyStatus] = useState<'draft' | 'published'>('published');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [hasUnsaved, setHasUnsaved] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const initialLoadDoneRef = useRef(false);
 
   // Load global resources
   useEffect(() => {
@@ -694,6 +713,7 @@ export default function JourneyPage() {
         if (existingJourney) {
           setJourney(existingJourney);
           setJourneyName(existingJourney.name);
+          setJourneyStatus((existingJourney as any).status ?? 'published');
 
           // Backward compat: if stages[], use them; if steps[], wrap in one stage
           const anyJ = existingJourney as any;
@@ -746,6 +766,9 @@ export default function JourneyPage() {
         }
 
         setQuizzes(productQuizzes);
+        setHasUnsaved(false);
+        setLastSavedAt(null);
+        setTimeout(() => { initialLoadDoneRef.current = true; }, 300); // allow state to settle
       } catch (error) {
         console.error(error);
         toast({ variant: 'destructive', title: 'Error', description: 'No se pudo cargar la ruta.' });
@@ -754,6 +777,7 @@ export default function JourneyPage() {
       }
     }
 
+    initialLoadDoneRef.current = false;
     load();
   }, [selectedProductId, products]);
 
@@ -801,24 +825,31 @@ export default function JourneyPage() {
     setStages(newStages);
   };
 
-  // ── Save ────────────────────────────────────────────────────────────────
+  // ── Mark unsaved on changes (after initial load) ────────────────────────
 
-  const handleSave = async () => {
+  useEffect(() => {
+    if (!initialLoadDoneRef.current || !selectedProductId) return;
+    setHasUnsaved(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stages, journeyName, journeyStatus]);
+
+  // ── Auto-save debounce (3s after last change) ────────────────────────────
+
+  const handleSave = useCallback(async (silent = false) => {
     if (!selectedProductId) return;
     const userId = profile?.uid || 'admin';
     if (!journeyName.trim()) {
-      toast({ variant: 'destructive', title: 'Error', description: 'Ingresa un nombre para la ruta.' });
+      if (!silent) toast({ variant: 'destructive', title: 'Error', description: 'Ingresa un nombre para la ruta.' });
       return;
     }
 
-    setSaving(true);
+    if (!silent) setSaving(true); else setAutoSaving(true);
     try {
       const stagesWithOrder = stages.map((s, i) => ({
         ...s,
         order: i,
         actions: s.actions.map((a, j) => ({ ...a, order: j })),
       }));
-      // Keep a flattened steps[] for backward compat with older readers
       const flatSteps = stagesWithOrder.flatMap(s => s.actions);
 
       await saveJourney(
@@ -829,18 +860,27 @@ export default function JourneyPage() {
           stages: stagesWithOrder,
           steps: flatSteps,
           active: true,
+          status: journeyStatus,
         } as any,
         userId,
         journey?.id
       );
-      toast({ title: 'Ruta guardada', description: 'La ruta se guardó correctamente.' });
+      setHasUnsaved(false);
+      setLastSavedAt(new Date());
+      if (!silent) toast({ title: 'Ruta guardada' });
     } catch (error) {
       console.error(error);
-      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la ruta.' });
+      if (!silent) toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar la ruta.' });
     } finally {
-      setSaving(false);
+      if (!silent) setSaving(false); else setAutoSaving(false);
     }
-  };
+  }, [selectedProductId, profile?.uid, journeyName, stages, journeyStatus, journey?.id]);
+
+  useEffect(() => {
+    if (!hasUnsaved || !selectedProductId) return;
+    const timer = setTimeout(() => { handleSave(true); }, 3000);
+    return () => clearTimeout(timer);
+  }, [hasUnsaved, handleSave, selectedProductId]);
 
   const handleDelete = async () => {
     if (!journey?.id || !confirm('¿Eliminar esta ruta?')) return;
@@ -956,21 +996,40 @@ export default function JourneyPage() {
                       </div>
                     )}
                   </div>
-                  <div className="flex gap-2 flex-wrap">
-                    {journey && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive"
-                        onClick={handleDelete}
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="flex gap-2 flex-wrap">
+                      {/* Draft / Publish toggle */}
+                      <button
+                        onClick={() => setJourneyStatus(s => s === 'published' ? 'draft' : 'published')}
+                        className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                          journeyStatus === 'published'
+                            ? 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
+                            : 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+                        }`}
                       >
-                        <Trash2 className="h-4 w-4 mr-1" /> Eliminar ruta
+                        {journeyStatus === 'published'
+                          ? <><Globe className="h-3.5 w-3.5" /> Publicado</>
+                          : <><FileEdit className="h-3.5 w-3.5" /> Borrador</>
+                        }
+                      </button>
+                      {journey && (
+                        <Button variant="outline" size="sm" className="text-destructive" onClick={handleDelete}>
+                          <Trash2 className="h-4 w-4 mr-1" /> Eliminar
+                        </Button>
+                      )}
+                      <Button size="sm" onClick={() => handleSave(false)} disabled={saving || autoSaving}>
+                        <Save className="h-4 w-4 mr-1" />
+                        {saving ? 'Guardando...' : 'Guardar'}
                       </Button>
-                    )}
-                    <Button size="sm" onClick={handleSave} disabled={saving}>
-                      <Save className="h-4 w-4 mr-1" />
-                      {saving ? 'Guardando...' : 'Guardar ruta'}
-                    </Button>
+                    </div>
+                    {/* Save indicator */}
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1 h-4">
+                      {autoSaving && <><RefreshCw className="h-3 w-3 animate-spin" /> Guardando automáticamente...</>}
+                      {!autoSaving && hasUnsaved && <><Clock className="h-3 w-3 text-amber-500" /> Cambios sin guardar</>}
+                      {!autoSaving && !hasUnsaved && lastSavedAt && (
+                        <><CheckCircle2 className="h-3 w-3 text-green-500" /> Guardado {lastSavedAt.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}</>
+                      )}
+                    </div>
                   </div>
                 </div>
               </CardHeader>

@@ -256,6 +256,66 @@ function StageCard({ stage, index, status, completedIds, productId, journeyId, o
   );
 }
 
+// ─── Coming Soon Teaser ───────────────────────────────────────────────────────
+
+const TEASER_COPY = [
+  {
+    headline: '🔮 Algo increíble está en camino...',
+    body: 'Nuestro equipo está construyendo algo especial para ti. ¡No te lo vas a querer perder!',
+  },
+  {
+    headline: '✨ Una sorpresa se acerca',
+    body: 'Muy pronto desbloquearás esta etapa y descubrirás lo que te espera. ¡Sigue avanzando!',
+  },
+  {
+    headline: '🚀 Próximamente: algo épico',
+    body: 'Estamos preparando contenido que va a llevarte al siguiente nivel. ¡Mantente atento!',
+  },
+  {
+    headline: '🎯 Tu próximo reto se prepara',
+    body: 'Los mejores promotores saben que lo más emocionante siempre está por llegar. ¡Prepárate!',
+  },
+  {
+    headline: '🌟 Se está cocinando algo genial',
+    body: 'Nuestro equipo trabaja en algo que te va a encantar. Vale la pena esperar — te lo prometemos.',
+  },
+];
+
+function ComingSoonTeaser({ stage, index }: { stage: JourneyStage; index: number }) {
+  const palette = STAGE_COLORS[index % STAGE_COLORS.length];
+  const copy = TEASER_COPY[index % TEASER_COPY.length];
+
+  return (
+    <div className="rounded-2xl border-2 border-dashed border-primary/25 overflow-hidden relative">
+      {/* Subtle animated background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/4 via-primary/8 to-violet-500/5 animate-pulse pointer-events-none" />
+
+      <div className="relative flex items-center gap-3 px-4 py-4">
+        {/* Stage number (faded) */}
+        <div className={cn(
+          'h-8 w-8 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0 opacity-30',
+          palette.dot,
+        )}>
+          {index + 1}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <p className="text-xs text-muted-foreground/70 font-medium truncate">{stage.title}</p>
+            <span className="text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-bold shrink-0 tracking-wide">
+              PRÓXIMAMENTE
+            </span>
+          </div>
+          <p className="font-bold text-sm leading-tight text-foreground/80">{copy.headline}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{copy.body}</p>
+        </div>
+
+        <Sparkles className="h-5 w-5 text-primary/30 shrink-0 animate-pulse" />
+      </div>
+    </div>
+  );
+}
+
 // ─── Pulse Today Card ─────────────────────────────────────────────────────────
 
 function PulseTodayCard({ userId }: { userId: string }) {
@@ -510,7 +570,7 @@ function JourneyDashboard({ userId, profile }: {
     </div>
   );
 
-  if (!journey) return (
+  if (!journey || journey.status === 'draft') return (
     <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-16 text-center pb-24">
       <AlertCircle className="h-10 w-10 text-muted-foreground mb-3" />
       <p className="font-semibold text-lg">Ruta no configurada</p>
@@ -532,12 +592,16 @@ function JourneyDashboard({ userId, profile }: {
   const isStageDone = (s: JourneyStage) =>
     s.actions.length === 0 || s.actions.filter(a => a.required).every(a => completedIds.has(a.id));
 
-  const getStageStatus = (idx: number): 'completed' | 'active' | 'locked' => {
-    if (isStageDone(stages[idx])) return 'completed';
-    return stages.slice(0, idx).every(isStageDone) ? 'active' : 'locked';
+  // Hidden stages (visible === false) are teasers — excluded from progress
+  const visibleStages = stages.filter(s => s.visible !== false);
+
+  const getStageStatus = (stage: JourneyStage): 'completed' | 'active' | 'locked' => {
+    if (isStageDone(stage)) return 'completed';
+    const vIdx = visibleStages.indexOf(stage);
+    return visibleStages.slice(0, vIdx).every(isStageDone) ? 'active' : 'locked';
   };
 
-  const allActions = stages.flatMap(s => s.actions);
+  const allActions = visibleStages.flatMap(s => s.actions);
   const doneCount = allActions.filter(a => completedIds.has(a.id)).length;
   const totalCount = allActions.length;
   const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
@@ -614,16 +678,18 @@ function JourneyDashboard({ userId, profile }: {
       ) : (
         <div className="space-y-3">
           {stages.map((stage, i) => (
-            <StageCard
-              key={stage.id}
-              stage={stage}
-              index={i}
-              status={getStageStatus(i)}
-              completedIds={completedIds}
-              productId={productId}
-              journeyId={journey.id}
-              onMarkComplete={handleMarkComplete}
-            />
+            stage.visible === false
+              ? <ComingSoonTeaser key={stage.id} stage={stage} index={i} />
+              : <StageCard
+                  key={stage.id}
+                  stage={stage}
+                  index={i}
+                  status={getStageStatus(stage)}
+                  completedIds={completedIds}
+                  productId={productId}
+                  journeyId={journey.id}
+                  onMarkComplete={handleMarkComplete}
+                />
           ))}
         </div>
       )}

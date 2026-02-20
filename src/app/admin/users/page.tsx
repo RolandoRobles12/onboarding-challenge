@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useProducts } from '@/hooks/use-firestore';
-import { getAllUsers, updateUserProfile, addToWhitelist, getWhitelistEntries, deleteWhitelistEntry } from '@/lib/firestore-service';
+import { getAllUsers, updateUserProfile, addToWhitelist } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,12 +24,12 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  Users, Search, UserCog, ShieldCheck, Mail, Plus, Trash2,
-  Loader2, RefreshCw, CheckCircle, Clock, UserX, UserCheck,
+  Users, Search, UserCog, Plus, Trash2,
+  Loader2, RefreshCw, CheckCircle, UserX, UserCheck,
   Upload, FileSpreadsheet, AlertCircle, ArrowRight, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UserProfile, UserRole, WhitelistEntry } from '@/lib/types-scalable';
+import type { UserProfile, UserRole } from '@/lib/types-scalable';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -68,9 +68,7 @@ export default function UsersPage() {
   const { products } = useProducts();
 
   const [users, setUsers] = useState<UserProfile[]>([]);
-  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadingWL, setLoadingWL] = useState(true);
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
 
@@ -94,11 +92,6 @@ export default function UsersPage() {
   // Reactivate confirm
   const [reactivatingUser, setReactivatingUser] = useState<UserProfile | null>(null);
 
-  // Whitelist
-  const [addWLOpen, setAddWLOpen] = useState(false);
-  const [wlForm, setWLForm] = useState({ email: '', role: 'seller' as UserRole, kiosko: '', productId: '' });
-  const [savingWL, setSavingWL] = useState(false);
-  const [deletingWL, setDeletingWL] = useState<WhitelistEntry | null>(null);
 
   // CSV import
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,16 +103,13 @@ export default function UsersPage() {
 
   const fetchAll = async () => {
     setLoading(true);
-    setLoadingWL(true);
     try {
-      const [usersData, wlData] = await Promise.all([getAllUsers(), getWhitelistEntries()]);
+      const usersData = await getAllUsers();
       setUsers(usersData);
-      setWhitelist(wlData);
     } catch (err: unknown) {
       toast({ title: 'Error al cargar datos', description: err instanceof Error ? err.message : 'Error desconocido', variant: 'destructive' });
     } finally {
       setLoading(false);
-      setLoadingWL(false);
     }
   };
 
@@ -236,41 +226,6 @@ export default function UsersPage() {
     }
   };
 
-  // ── Whitelist ─────────────────────────────────────────────────────────────
-
-  const handleAddWhitelist = async () => {
-    if (!wlForm.email.trim()) { toast({ title: 'El email es obligatorio', variant: 'destructive' }); return; }
-    setSavingWL(true);
-    try {
-      await addToWhitelist({
-        organizationId: 'aviva-credito',
-        email: wlForm.email.trim().toLowerCase(),
-        role: wlForm.role,
-        assignedKiosko: wlForm.kiosko || undefined,
-        assignedProductId: wlForm.productId || undefined,
-        addedBy: currentUser?.uid || '',
-        expiresAt: undefined,
-      } as never);
-      await getWhitelistEntries().then(setWhitelist);
-      toast({ title: 'Email agregado a la whitelist' });
-      setAddWLOpen(false);
-      setWLForm({ email: '', role: 'seller', kiosko: '', productId: '' });
-    } catch (err: unknown) {
-      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
-    } finally {
-      setSavingWL(false);
-    }
-  };
-
-  const handleDeleteWL = async (entry: WhitelistEntry) => {
-    try {
-      await deleteWhitelistEntry(entry.id);
-      setWhitelist(prev => prev.filter(w => w.id !== entry.id));
-      toast({ title: 'Entrada eliminada' });
-    } finally {
-      setDeletingWL(null);
-    }
-  };
 
   // ── CSV / XLS import ──────────────────────────────────────────────────────
 
@@ -463,9 +418,6 @@ export default function UsersPage() {
           <TabsTrigger value="inactive" className="gap-1.5">
             <UserX className="h-4 w-4" /> Inactivos ({inactiveUsers.length})
           </TabsTrigger>
-          <TabsTrigger value="whitelist" className="gap-1.5">
-            <ShieldCheck className="h-4 w-4" /> Whitelist ({whitelist.length})
-          </TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5">
             <FileSpreadsheet className="h-4 w-4" /> Importar
           </TabsTrigger>
@@ -525,59 +477,6 @@ export default function UsersPage() {
                 {filteredInactive.map(u => <UserCard key={u.uid} user={u} showReactivate />)}
               </div>
             </>
-          )}
-        </TabsContent>
-
-        {/* ── Whitelist ──────────────────────────────────────────────── */}
-        <TabsContent value="whitelist" className="space-y-4 mt-4">
-          <div className="flex justify-end">
-            <Button onClick={() => setAddWLOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" /> Agregar email
-            </Button>
-          </div>
-
-          {loadingWL ? (
-            <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
-          ) : whitelist.length === 0 ? (
-            <Card><CardContent className="py-12 text-center">
-              <ShieldCheck className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">No hay entradas en la whitelist</p>
-            </CardContent></Card>
-          ) : (
-            <div className="space-y-2">
-              {whitelist.map(entry => (
-                <Card key={entry.id} className="hover:border-primary/30 transition-colors">
-                  <CardContent className="flex items-center gap-4 py-3 px-4">
-                    <Mail className="h-5 w-5 text-muted-foreground shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-medium text-sm">{entry.email}</p>
-                        <span className={cn('text-xs px-1.5 py-0.5 rounded-full border font-medium', ROLE_COLORS[entry.role])}>
-                          {ROLE_LABELS[entry.role]}
-                        </span>
-                        {entry.used ? (
-                          <span className="text-xs flex items-center gap-0.5 text-green-600">
-                            <CheckCircle className="h-3 w-3" /> Usado
-                          </span>
-                        ) : (
-                          <span className="text-xs flex items-center gap-0.5 text-muted-foreground">
-                            <Clock className="h-3 w-3" /> Pendiente
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
-                        {entry.assignedKiosko && <span>Hub: {entry.assignedKiosko}</span>}
-                        {entry.assignedProductId && <span>Producto: {getProductName(entry.assignedProductId)}</span>}
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="icon" className="text-destructive shrink-0"
-                      onClick={() => setDeletingWL(entry)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
           )}
         </TabsContent>
 
@@ -857,75 +756,6 @@ export default function UsersPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── Add whitelist dialog ──────────────────────────────────────────── */}
-      <Dialog open={addWLOpen} onOpenChange={setAddWLOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Agregar a Whitelist</DialogTitle>
-            <DialogDescription>El usuario podrá registrarse con este email y se le asignará el rol indicado.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Email *</Label>
-              <Input type="email" value={wlForm.email} onChange={e => setWLForm(p => ({ ...p, email: e.target.value }))} placeholder="usuario@empresa.com" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Rol</Label>
-              <Select value={wlForm.role} onValueChange={v => setWLForm(p => ({ ...p, role: v as UserRole }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
-                    <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-                <Input value={wlForm.kiosko} onChange={e => setWLForm(p => ({ ...p, kiosko: e.target.value }))} placeholder="Ej: CDMX-01" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Producto <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-                <Select value={wlForm.productId || '__none__'} onValueChange={v => setWLForm(p => ({ ...p, productId: v === '__none__' ? '' : v }))}>
-                  <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Sin asignar</SelectItem>
-                    {products.map(p => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddWLOpen(false)}>Cancelar</Button>
-            <Button onClick={handleAddWhitelist} disabled={savingWL} className="gap-2">
-              {savingWL ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Agregar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Delete whitelist confirm ──────────────────────────────────────── */}
-      <AlertDialog open={!!deletingWL} onOpenChange={() => setDeletingWL(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar de la whitelist?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se eliminará <strong>{deletingWL?.email}</strong>. El usuario no podrá registrarse con este email.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deletingWL && handleDeleteWL(deletingWL)} className="bg-destructive hover:bg-destructive/90">
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
