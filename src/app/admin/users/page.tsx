@@ -1,17 +1,21 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import { useProducts } from '@/hooks/use-firestore';
 import { getAllUsers, updateUserProfile, addToWhitelist, getWhitelistEntries, deleteWhitelistEntry } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -21,16 +25,18 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   Users, Search, UserCog, ShieldCheck, Mail, Plus, Trash2,
-  Loader2, RefreshCw, CheckCircle, Clock, UserX
+  Loader2, RefreshCw, CheckCircle, Clock, UserX, UserCheck,
+  Upload, FileSpreadsheet, AlertCircle, ArrowRight, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { UserProfile, UserRole, WhitelistEntry } from '@/lib/types-scalable';
-import { Skeleton } from '@/components/ui/skeleton';
+
+// ── Constants ──────────────────────────────────────────────────────────────
 
 const ROLE_LABELS: Record<UserRole, string> = {
   super_admin: 'Super Admin',
   admin: 'Admin',
-  trainer: 'Trainer',
+  trainer: 'Capacitador',
   seller: 'Jaguar Aviva',
 };
 
@@ -40,6 +46,22 @@ const ROLE_COLORS: Record<UserRole, string> = {
   trainer: 'bg-blue-100 text-blue-700 border-blue-200',
   seller: 'bg-green-100 text-green-700 border-green-200',
 };
+
+const CSV_COLUMNS = ['email', 'nombre', 'rol', 'kiosko', 'producto', 'fecha_ingreso', 'capacitador_email'];
+
+type CsvRow = {
+  email: string;
+  nombre?: string;
+  rol?: string;
+  kiosko?: string;
+  producto?: string;
+  fecha_ingreso?: string;
+  capacitador_email?: string;
+  _status: 'update' | 'whitelist' | 'error';
+  _error?: string;
+};
+
+// ── Component ──────────────────────────────────────────────────────────────
 
 export default function UsersPage() {
   const { profile: currentUser } = useAuth();
@@ -52,95 +74,172 @@ export default function UsersPage() {
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
 
-  // Edit user dialog
+  // Edit user
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
-  const [newRole, setNewRole] = useState<UserRole>('seller');
-  const [newProducto, setNewProducto] = useState<string>('');
-  const [savingRole, setSavingRole] = useState(false);
+  const [editForm, setEditForm] = useState({
+    nombre: '',
+    rol: 'seller' as UserRole,
+    producto: '',
+    assignedKiosko: '',
+    trainerId: '',
+    fechaIngreso: '',
+  });
+  const [saving, setSaving] = useState(false);
 
-  // Whitelist add dialog
+  // Bulk deactivate
+  const [bulkDeactivateOpen, setBulkDeactivateOpen] = useState(false);
+  const [bulkEmailsInput, setBulkEmailsInput] = useState('');
+  const [deactivating, setDeactivating] = useState(false);
+
+  // Reactivate confirm
+  const [reactivatingUser, setReactivatingUser] = useState<UserProfile | null>(null);
+
+  // Whitelist
   const [addWLOpen, setAddWLOpen] = useState(false);
   const [wlForm, setWLForm] = useState({ email: '', role: 'seller' as UserRole, kiosko: '', productId: '' });
   const [savingWL, setSavingWL] = useState(false);
-
-  // Delete whitelist
   const [deletingWL, setDeletingWL] = useState<WhitelistEntry | null>(null);
 
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const data = await getAllUsers();
-      setUsers(data);
-    } catch (err: any) {
-      toast({ title: 'Error al cargar usuarios', description: err.message, variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // CSV import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<{ updated: number; whitelist: number; errors: number } | null>(null);
 
-  const fetchWhitelist = async () => {
+  // ── Data loading ─────────────────────────────────────────────────────────
+
+  const fetchAll = async () => {
+    setLoading(true);
     setLoadingWL(true);
     try {
-      const data = await getWhitelistEntries();
-      setWhitelist(data);
-    } catch (err: any) {
-      toast({ title: 'Error al cargar whitelist', description: err.message, variant: 'destructive' });
+      const [usersData, wlData] = await Promise.all([getAllUsers(), getWhitelistEntries()]);
+      setUsers(usersData);
+      setWhitelist(wlData);
+    } catch (err: unknown) {
+      toast({ title: 'Error al cargar datos', description: err instanceof Error ? err.message : 'Error desconocido', variant: 'destructive' });
     } finally {
+      setLoading(false);
       setLoadingWL(false);
     }
   };
 
-  useEffect(() => {
-    fetchUsers();
-    fetchWhitelist();
-  }, []);
+  useEffect(() => { fetchAll(); }, []);
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((u) => {
-      const matchSearch =
-        u.nombre?.toLowerCase().includes(search.toLowerCase()) ||
-        u.email?.toLowerCase().includes(search.toLowerCase());
-      const matchRole = filterRole === 'all' || u.rol === filterRole;
-      return matchSearch && matchRole;
-    });
-  }, [users, search, filterRole]);
+  // ── Derived ───────────────────────────────────────────────────────────────
 
-  const NONE_PRODUCT = '__none__';
+  const activeUsers = useMemo(() => users.filter(u => u.active !== false), [users]);
+  const inactiveUsers = useMemo(() => users.filter(u => u.active === false), [users]);
+  const trainers = useMemo(() => activeUsers.filter(u => u.rol === 'trainer'), [activeUsers]);
 
-  const handleEditRole = (user: UserProfile) => {
-    setEditingUser(user);
-    setNewRole(user.rol);
-    setNewProducto(user.producto || NONE_PRODUCT);
+  const filteredActive = useMemo(() => activeUsers.filter(u => {
+    const q = search.toLowerCase();
+    const matchSearch = u.nombre?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || u.assignedKiosko?.toLowerCase().includes(q);
+    const matchRole = filterRole === 'all' || u.rol === filterRole;
+    return matchSearch && matchRole;
+  }), [activeUsers, search, filterRole]);
+
+  const filteredInactive = useMemo(() => inactiveUsers.filter(u => {
+    const q = search.toLowerCase();
+    return u.nombre?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q);
+  }), [inactiveUsers, search]);
+
+  const roleCounts = useMemo(() => activeUsers.reduce((acc, u) => {
+    acc[u.rol] = (acc[u.rol] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>), [activeUsers]);
+
+  const getProductName = (id?: string) => products.find(p => p.id === id)?.name || id || '—';
+  const getTrainerName = (id?: string) => {
+    if (!id) return '—';
+    const t = users.find(u => u.uid === id);
+    return t ? (t.nombre || t.email) : id;
   };
 
-  const handleSaveRole = async () => {
+  // ── Edit user ─────────────────────────────────────────────────────────────
+
+  const openEdit = (user: UserProfile) => {
+    setEditingUser(user);
+    setEditForm({
+      nombre: user.nombre || '',
+      rol: user.rol,
+      producto: user.producto || '',
+      assignedKiosko: user.assignedKiosko || '',
+      trainerId: user.trainerId || '',
+      fechaIngreso: user.fechaIngreso || '',
+    });
+  };
+
+  const handleSaveEdit = async () => {
     if (!editingUser) return;
-    setSavingRole(true);
+    setSaving(true);
     try {
-      const updates: Partial<UserProfile> = { rol: newRole };
-      if (newProducto && newProducto !== NONE_PRODUCT) updates.producto = newProducto;
+      const updates: Partial<UserProfile> = {
+        nombre: editForm.nombre || editingUser.nombre,
+        rol: editForm.rol,
+        producto: editForm.producto || undefined,
+        assignedKiosko: editForm.assignedKiosko || undefined,
+        trainerId: editForm.trainerId || undefined,
+        fechaIngreso: editForm.fechaIngreso || undefined,
+      };
       await updateUserProfile(editingUser.uid, updates);
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.uid === editingUser.uid
-            ? { ...u, rol: newRole, ...(newProducto && newProducto !== NONE_PRODUCT ? { producto: newProducto } : {}) }
-            : u
-        )
-      );
-      toast({ title: 'Usuario actualizado correctamente' });
+      setUsers(prev => prev.map(u => u.uid === editingUser.uid ? { ...u, ...updates } : u));
+      toast({ title: 'Usuario actualizado' });
       setEditingUser(null);
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } catch (err: unknown) {
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
     } finally {
-      setSavingRole(false);
+      setSaving(false);
     }
   };
+
+  // ── Bulk deactivate ───────────────────────────────────────────────────────
+
+  const bulkMatchedUsers = useMemo(() => {
+    if (!bulkEmailsInput.trim()) return [];
+    const emails = bulkEmailsInput.split(/[\n,;]+/).map(e => e.trim().toLowerCase()).filter(Boolean);
+    return emails.map(email => ({
+      email,
+      user: activeUsers.find(u => u.email.toLowerCase() === email) || null,
+    }));
+  }, [bulkEmailsInput, activeUsers]);
+
+  const handleBulkDeactivate = async () => {
+    const toDeactivate = bulkMatchedUsers.filter(m => m.user);
+    if (toDeactivate.length === 0) return;
+    setDeactivating(true);
+    try {
+      await Promise.all(toDeactivate.map(m => updateUserProfile(m.user!.uid, { active: false })));
+      setUsers(prev => prev.map(u => {
+        const found = toDeactivate.find(m => m.user?.uid === u.uid);
+        return found ? { ...u, active: false } : u;
+      }));
+      toast({ title: `${toDeactivate.length} usuario${toDeactivate.length !== 1 ? 's' : ''} desactivado${toDeactivate.length !== 1 ? 's' : ''}` });
+      setBulkDeactivateOpen(false);
+      setBulkEmailsInput('');
+    } catch (err: unknown) {
+      toast({ title: 'Error al desactivar', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
+    } finally {
+      setDeactivating(false);
+    }
+  };
+
+  // ── Reactivate ────────────────────────────────────────────────────────────
+
+  const handleReactivate = async (user: UserProfile) => {
+    try {
+      await updateUserProfile(user.uid, { active: true });
+      setUsers(prev => prev.map(u => u.uid === user.uid ? { ...u, active: true } : u));
+      toast({ title: `${user.nombre || user.email} reactivado` });
+      setReactivatingUser(null);
+    } catch (err: unknown) {
+      toast({ title: 'Error al reactivar', variant: 'destructive' });
+    }
+  };
+
+  // ── Whitelist ─────────────────────────────────────────────────────────────
 
   const handleAddWhitelist = async () => {
-    if (!wlForm.email.trim()) {
-      toast({ title: 'El email es obligatorio', variant: 'destructive' });
-      return;
-    }
+    if (!wlForm.email.trim()) { toast({ title: 'El email es obligatorio', variant: 'destructive' }); return; }
     setSavingWL(true);
     try {
       await addToWhitelist({
@@ -151,13 +250,13 @@ export default function UsersPage() {
         assignedProductId: wlForm.productId || undefined,
         addedBy: currentUser?.uid || '',
         expiresAt: undefined,
-      } as any);
-      await fetchWhitelist();
-      toast({ title: '✅ Email agregado a la whitelist' });
+      } as never);
+      await getWhitelistEntries().then(setWhitelist);
+      toast({ title: 'Email agregado a la whitelist' });
       setAddWLOpen(false);
       setWLForm({ email: '', role: 'seller', kiosko: '', productId: '' });
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } catch (err: unknown) {
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
     } finally {
       setSavingWL(false);
     }
@@ -166,33 +265,179 @@ export default function UsersPage() {
   const handleDeleteWL = async (entry: WhitelistEntry) => {
     try {
       await deleteWhitelistEntry(entry.id);
-      setWhitelist((prev) => prev.filter((w) => w.id !== entry.id));
-      toast({ title: 'Entrada eliminada de la whitelist' });
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+      setWhitelist(prev => prev.filter(w => w.id !== entry.id));
+      toast({ title: 'Entrada eliminada' });
     } finally {
       setDeletingWL(null);
     }
   };
 
-  const roleCounts = useMemo(() => {
-    return users.reduce(
-      (acc, u) => {
-        acc[u.rol] = (acc[u.rol] || 0) + 1;
-        return acc;
-      },
-      {} as Record<string, number>
+  // ── CSV / XLS import ──────────────────────────────────────────────────────
+
+  const userEmailSet = useMemo(() => new Set(users.map(u => u.email.toLowerCase())), [users]);
+
+  function parseRows(raw: Record<string, string>[]): CsvRow[] {
+    return raw.map(row => {
+      const email = (row.email || row.Email || row.correo || '').trim().toLowerCase();
+      if (!email) return { ...row, email: '', _status: 'error', _error: 'Email vacío' } as CsvRow;
+      if (!email.includes('@')) return { email, _status: 'error', _error: 'Email inválido' } as CsvRow;
+      const status = userEmailSet.has(email) ? 'update' : 'whitelist';
+      return {
+        email,
+        nombre: row.nombre || row.Nombre || '',
+        rol: row.rol || row.Rol || row.role || 'seller',
+        kiosko: row.kiosko || row.Kiosko || row.hub || '',
+        producto: row.producto || row.Producto || '',
+        fecha_ingreso: row.fecha_ingreso || row['Fecha Ingreso'] || row.fechaIngreso || '',
+        capacitador_email: row.capacitador_email || row.capacitador || '',
+        _status: status,
+      } as CsvRow;
+    });
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportResults(null);
+    const ext = file.name.split('.').pop()?.toLowerCase();
+
+    if (ext === 'csv') {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (res) => {
+          setCsvRows(parseRows(res.data as Record<string, string>[]));
+        },
+        error: () => toast({ title: 'Error al leer CSV', variant: 'destructive' }),
+      });
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const wb = XLSX.read(ev.target?.result, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
+        setCsvRows(parseRows(data));
+      };
+      reader.readAsBinaryString(file);
+    } else {
+      toast({ title: 'Formato no soportado. Usa .csv, .xlsx o .xls', variant: 'destructive' });
+    }
+    // Reset input for re-upload
+    e.target.value = '';
+  };
+
+  const downloadTemplate = () => {
+    const rows = [
+      CSV_COLUMNS,
+      ['juan@empresa.com', 'Juan García', 'seller', 'CDMX-01', '', '2024-01-15', ''],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Usuarios');
+    XLSX.writeFile(wb, 'plantilla_usuarios.xlsx');
+  };
+
+  const handleImport = async () => {
+    const validRows = csvRows.filter(r => r._status !== 'error');
+    if (validRows.length === 0) return;
+    setImporting(true);
+    let updated = 0, newWL = 0, errors = 0;
+    try {
+      for (const row of validRows) {
+        try {
+          if (row._status === 'update') {
+            const user = users.find(u => u.email.toLowerCase() === row.email);
+            if (!user) { errors++; continue; }
+            const trainer = row.capacitador_email ? users.find(u => u.email.toLowerCase() === row.capacitador_email!.toLowerCase()) : null;
+            const prod = row.producto ? products.find(p => p.name.toLowerCase() === row.producto!.toLowerCase() || p.id === row.producto) : null;
+            await updateUserProfile(user.uid, {
+              ...(row.nombre ? { nombre: row.nombre } : {}),
+              ...(row.rol && ['seller','trainer','admin','super_admin'].includes(row.rol) ? { rol: row.rol as UserRole } : {}),
+              ...(row.kiosko ? { assignedKiosko: row.kiosko } : {}),
+              ...(prod ? { producto: prod.id } : {}),
+              ...(row.fecha_ingreso ? { fechaIngreso: row.fecha_ingreso } : {}),
+              ...(trainer ? { trainerId: trainer.uid } : {}),
+            });
+            updated++;
+          } else {
+            const prod = row.producto ? products.find(p => p.name.toLowerCase() === row.producto!.toLowerCase() || p.id === row.producto) : null;
+            await addToWhitelist({
+              organizationId: 'aviva-credito',
+              email: row.email,
+              role: (row.rol && ['seller','trainer','admin','super_admin'].includes(row.rol) ? row.rol : 'seller') as UserRole,
+              assignedKiosko: row.kiosko || undefined,
+              assignedProductId: prod?.id || undefined,
+              addedBy: currentUser?.uid || '',
+              expiresAt: undefined,
+            } as never);
+            newWL++;
+          }
+        } catch {
+          errors++;
+        }
+      }
+      setImportResults({ updated, whitelist: newWL, errors });
+      toast({ title: `Importación completada: ${updated} actualizados, ${newWL} en whitelist, ${errors} errores` });
+      await fetchAll();
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // ── User Card ─────────────────────────────────────────────────────────────
+
+  function UserCard({ user, showReactivate }: { user: UserProfile; showReactivate?: boolean }) {
+    return (
+      <Card className={cn('transition-colors', showReactivate ? 'opacity-70' : 'hover:border-primary/30')}>
+        <CardContent className="flex items-center gap-3 py-3 px-4">
+          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-primary font-bold text-sm">
+            {(user.nombre || user.email || '?').charAt(0).toUpperCase()}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="font-medium text-sm truncate">{user.nombre || '(sin nombre)'}</p>
+              <span className={cn('text-xs px-1.5 py-0.5 rounded-full border font-medium shrink-0', ROLE_COLORS[user.rol])}>
+                {ROLE_LABELS[user.rol]}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+            <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
+              {user.producto && <span>Producto: {getProductName(user.producto)}</span>}
+              {user.assignedKiosko && <span>Hub: {user.assignedKiosko}</span>}
+              {user.trainerId && <span>Capacitador: {getTrainerName(user.trainerId)}</span>}
+              {user.fechaIngreso && <span>Ingreso: {user.fechaIngreso}</span>}
+            </div>
+          </div>
+          {showReactivate ? (
+            <Button size="sm" variant="outline" onClick={() => setReactivatingUser(user)} className="shrink-0 gap-1">
+              <UserCheck className="h-3.5 w-3.5" /> Reactivar
+            </Button>
+          ) : (
+            <Button
+              variant="outline" size="sm"
+              onClick={() => openEdit(user)}
+              disabled={user.uid === currentUser?.uid}
+              className="gap-1 shrink-0"
+            >
+              <UserCog className="h-3.5 w-3.5" /> Editar
+            </Button>
+          )}
+        </CardContent>
+      </Card>
     );
-  }, [users]);
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Usuarios</h1>
-          <p className="text-muted-foreground mt-1">Gestiona usuarios registrados y accesos</p>
+          <p className="text-muted-foreground mt-1">Gestiona usuarios, accesos e importa desde CSV/XLS</p>
         </div>
-        <Button variant="outline" onClick={() => { fetchUsers(); fetchWhitelist(); }} className="gap-2">
+        <Button variant="outline" onClick={fetchAll} className="gap-2">
           <RefreshCw className="h-4 w-4" /> Actualizar
         </Button>
       </div>
@@ -210,117 +455,102 @@ export default function UsersPage() {
         ))}
       </div>
 
-      <Tabs defaultValue="users">
-        <TabsList>
-          <TabsTrigger value="users" className="gap-2">
-            <Users className="h-4 w-4" /> Usuarios ({users.length})
+      <Tabs defaultValue="active">
+        <TabsList className="flex-wrap h-auto gap-1">
+          <TabsTrigger value="active" className="gap-1.5">
+            <Users className="h-4 w-4" /> Activos ({activeUsers.length})
           </TabsTrigger>
-          <TabsTrigger value="whitelist" className="gap-2">
+          <TabsTrigger value="inactive" className="gap-1.5">
+            <UserX className="h-4 w-4" /> Inactivos ({inactiveUsers.length})
+          </TabsTrigger>
+          <TabsTrigger value="whitelist" className="gap-1.5">
             <ShieldCheck className="h-4 w-4" /> Whitelist ({whitelist.length})
+          </TabsTrigger>
+          <TabsTrigger value="import" className="gap-1.5">
+            <FileSpreadsheet className="h-4 w-4" /> Importar
           </TabsTrigger>
         </TabsList>
 
-        {/* Users Tab */}
-        <TabsContent value="users" className="space-y-4 mt-4">
-          <div className="flex gap-3">
-            <div className="relative flex-1 max-w-sm">
+        {/* ── Active users ───────────────────────────────────────────── */}
+        <TabsContent value="active" className="space-y-4 mt-4">
+          <div className="flex gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-48">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre o email..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+              <Input placeholder="Buscar nombre, email o hub..." value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
             </div>
             <Select value={filterRole} onValueChange={setFilterRole}>
-              <SelectTrigger className="w-36">
+              <SelectTrigger className="w-40">
                 <SelectValue placeholder="Rol" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos los roles</SelectItem>
-                {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
+                {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
                   <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <Button variant="outline" className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/5"
+              onClick={() => setBulkDeactivateOpen(true)}>
+              <UserX className="h-4 w-4" /> Desactivar en bulk
+            </Button>
           </div>
 
           {loading ? (
-            <div className="space-y-2">
-              {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
-            </div>
-          ) : filteredUsers.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <UserX className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">No se encontraron usuarios</p>
-              </CardContent>
-            </Card>
+            <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
+          ) : filteredActive.length === 0 ? (
+            <Card><CardContent className="py-12 text-center">
+              <UserX className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">No se encontraron usuarios</p>
+            </CardContent></Card>
           ) : (
             <div className="space-y-2">
-              {filteredUsers.map((user) => (
-                <Card key={user.uid} className="hover:border-primary/30 transition-colors">
-                  <CardContent className="flex items-center gap-4 py-3 px-4">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-primary font-semibold">
-                      {(user.nombre || user.email || '?').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-sm truncate">{user.nombre || '(sin nombre)'}</p>
-                        <span className={cn('text-xs px-1.5 py-0.5 rounded-full border font-medium', ROLE_COLORS[user.rol])}>
-                          {ROLE_LABELS[user.rol]}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                      {user.producto && (
-                        <p className="text-xs text-muted-foreground">
-                          Producto: {products.find((p) => p.id === user.producto)?.name || user.producto}
-                        </p>
-                      )}
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEditRole(user)}
-                      className="gap-1 flex-shrink-0"
-                      disabled={user.uid === currentUser?.uid}
-                    >
-                      <UserCog className="h-3.5 w-3.5" /> Editar
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
+              {filteredActive.map(u => <UserCard key={u.uid} user={u} />)}
             </div>
           )}
         </TabsContent>
 
-        {/* Whitelist Tab */}
+        {/* ── Inactive users ─────────────────────────────────────────── */}
+        <TabsContent value="inactive" className="space-y-4 mt-4">
+          {inactiveUsers.length === 0 ? (
+            <Card><CardContent className="py-12 text-center">
+              <CheckCircle className="h-12 w-12 mx-auto text-green-500 mb-3" />
+              <p className="text-muted-foreground">No hay usuarios desactivados</p>
+            </CardContent></Card>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Estos usuarios tienen acceso bloqueado. Puedes reactivarlos en cualquier momento.
+              </p>
+              <div className="space-y-2">
+                {filteredInactive.map(u => <UserCard key={u.uid} user={u} showReactivate />)}
+              </div>
+            </>
+          )}
+        </TabsContent>
+
+        {/* ── Whitelist ──────────────────────────────────────────────── */}
         <TabsContent value="whitelist" className="space-y-4 mt-4">
           <div className="flex justify-end">
             <Button onClick={() => setAddWLOpen(true)} className="gap-2">
-              <Plus className="h-4 w-4" /> Agregar Email
+              <Plus className="h-4 w-4" /> Agregar email
             </Button>
           </div>
 
           {loadingWL ? (
-            <div className="space-y-2">
-              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-14 w-full" />)}
-            </div>
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
           ) : whitelist.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <ShieldCheck className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
-                <p className="text-muted-foreground">No hay entradas en la whitelist</p>
-              </CardContent>
-            </Card>
+            <Card><CardContent className="py-12 text-center">
+              <ShieldCheck className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">No hay entradas en la whitelist</p>
+            </CardContent></Card>
           ) : (
             <div className="space-y-2">
-              {whitelist.map((entry) => (
+              {whitelist.map(entry => (
                 <Card key={entry.id} className="hover:border-primary/30 transition-colors">
                   <CardContent className="flex items-center gap-4 py-3 px-4">
-                    <Mail className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                    <Mail className="h-5 w-5 text-muted-foreground shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-sm">{entry.email}</p>
                         <span className={cn('text-xs px-1.5 py-0.5 rounded-full border font-medium', ROLE_COLORS[entry.role])}>
                           {ROLE_LABELS[entry.role]}
@@ -336,18 +566,12 @@ export default function UsersPage() {
                         )}
                       </div>
                       <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
-                        {entry.assignedKiosko && <span>Kiosko: {entry.assignedKiosko}</span>}
-                        {entry.assignedProductId && (
-                          <span>Producto: {products.find((p) => p.id === entry.assignedProductId)?.name || entry.assignedProductId}</span>
-                        )}
+                        {entry.assignedKiosko && <span>Hub: {entry.assignedKiosko}</span>}
+                        {entry.assignedProductId && <span>Producto: {getProductName(entry.assignedProductId)}</span>}
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="text-destructive hover:text-destructive flex-shrink-0"
-                      onClick={() => setDeletingWL(entry)}
-                    >
+                    <Button variant="ghost" size="icon" className="text-destructive shrink-0"
+                      onClick={() => setDeletingWL(entry)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </CardContent>
@@ -356,116 +580,318 @@ export default function UsersPage() {
             </div>
           )}
         </TabsContent>
+
+        {/* ── CSV / XLS Import ───────────────────────────────────────── */}
+        <TabsContent value="import" className="space-y-5 mt-4">
+          {/* Instructions */}
+          <Card className="bg-muted/30">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex items-start gap-3 text-sm">
+                <AlertCircle className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+                <div className="space-y-1">
+                  <p className="font-medium">¿Cómo funciona la importación?</p>
+                  <p className="text-muted-foreground">
+                    Si el email <strong>ya existe</strong> en la plataforma se actualiza el perfil del usuario.
+                    Si <strong>no existe</strong>, se agrega a la whitelist para que el usuario se registre por primera vez.
+                  </p>
+                  <p className="text-muted-foreground text-xs mt-1">
+                    Columnas aceptadas: <code className="bg-muted rounded px-1">{CSV_COLUMNS.join(', ')}</code>
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex flex-wrap gap-3">
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2">
+              <Upload className="h-4 w-4" /> Subir archivo CSV / XLS
+            </Button>
+            <Button variant="ghost" onClick={downloadTemplate} className="gap-2 text-muted-foreground">
+              <FileSpreadsheet className="h-4 w-4" /> Descargar plantilla XLS
+            </Button>
+            <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileChange} />
+          </div>
+
+          {/* Preview */}
+          {csvRows.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 text-sm flex-wrap">
+                  <span className="font-medium">{csvRows.length} filas</span>
+                  <span className="text-blue-600 flex items-center gap-1">
+                    <ArrowRight className="h-3.5 w-3.5" />
+                    {csvRows.filter(r => r._status === 'update').length} actualizarán perfil
+                  </span>
+                  <span className="text-green-600 flex items-center gap-1">
+                    <Plus className="h-3.5 w-3.5" />
+                    {csvRows.filter(r => r._status === 'whitelist').length} irán a whitelist
+                  </span>
+                  {csvRows.filter(r => r._status === 'error').length > 0 && (
+                    <span className="text-destructive flex items-center gap-1">
+                      <X className="h-3.5 w-3.5" />
+                      {csvRows.filter(r => r._status === 'error').length} con error
+                    </span>
+                  )}
+                </div>
+                <Button onClick={handleImport} disabled={importing || csvRows.filter(r => r._status !== 'error').length === 0} className="gap-2">
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  Importar {csvRows.filter(r => r._status !== 'error').length} registros
+                </Button>
+              </div>
+
+              <div className="border rounded-xl overflow-auto max-h-80">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Estado</th>
+                      <th className="px-3 py-2 text-left font-semibold">Email</th>
+                      <th className="px-3 py-2 text-left font-semibold">Nombre</th>
+                      <th className="px-3 py-2 text-left font-semibold">Rol</th>
+                      <th className="px-3 py-2 text-left font-semibold">Hub</th>
+                      <th className="px-3 py-2 text-left font-semibold">Producto</th>
+                      <th className="px-3 py-2 text-left font-semibold">Ingreso</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvRows.map((row, idx) => (
+                      <tr key={idx} className={cn('border-t', row._status === 'error' && 'bg-destructive/5')}>
+                        <td className="px-3 py-2 shrink-0">
+                          {row._status === 'update' && (
+                            <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 text-[10px]">Actualizar</Badge>
+                          )}
+                          {row._status === 'whitelist' && (
+                            <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-[10px]">Nuevo</Badge>
+                          )}
+                          {row._status === 'error' && (
+                            <Badge variant="destructive" className="text-[10px]">{row._error}</Badge>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono">{row.email || '—'}</td>
+                        <td className="px-3 py-2">{row.nombre || '—'}</td>
+                        <td className="px-3 py-2">{row.rol || '—'}</td>
+                        <td className="px-3 py-2">{row.kiosko || '—'}</td>
+                        <td className="px-3 py-2">{row.producto || '—'}</td>
+                        <td className="px-3 py-2">{row.fecha_ingreso || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Import results */}
+              {importResults && (
+                <Card className="border-green-200 bg-green-50">
+                  <CardContent className="pt-4 pb-3">
+                    <p className="font-semibold text-green-800 text-sm">Importación completada</p>
+                    <div className="flex gap-4 mt-2 text-sm text-green-700">
+                      <span>{importResults.updated} perfiles actualizados</span>
+                      <span>{importResults.whitelist} añadidos a whitelist</span>
+                      {importResults.errors > 0 && <span className="text-destructive">{importResults.errors} errores</span>}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </TabsContent>
       </Tabs>
 
-      {/* Edit User Dialog */}
+      {/* ── Edit user dialog ──────────────────────────────────────────────── */}
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>Editar Usuario</DialogTitle>
-            <DialogDescription>
-              Edita el rol y producto asignado a <strong>{editingUser?.nombre || editingUser?.email}</strong>
-            </DialogDescription>
+            <DialogDescription>{editingUser?.email}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
-              <Label>Rol</Label>
-              <Select value={newRole} onValueChange={(v) => setNewRole(v as UserRole)}>
-                <SelectTrigger className="mt-2">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
-                    <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Producto asignado</Label>
-              <Select value={newProducto} onValueChange={setNewProducto}>
-                <SelectTrigger className="mt-2">
-                  <SelectValue placeholder="Sin producto asignado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE_PRODUCT}>Sin producto asignado</SelectItem>
-                  {products.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: p.color }} />
-                        {p.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                El producto define qué journey verá el usuario en su dashboard.
-              </p>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2 space-y-1.5">
+                <Label>Nombre completo</Label>
+                <Input value={editForm.nombre} onChange={e => setEditForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Nombre del usuario" />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Rol</Label>
+                <Select value={editForm.rol} onValueChange={v => setEditForm(f => ({ ...f, rol: v as UserRole }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                      <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Producto asignado</Label>
+                <Select value={editForm.producto || '__none__'} onValueChange={v => setEditForm(f => ({ ...f, producto: v === '__none__' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="Sin producto" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin producto</SelectItem>
+                    {products.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        <span className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                          {p.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                <Input
+                  value={editForm.assignedKiosko}
+                  onChange={e => setEditForm(f => ({ ...f, assignedKiosko: e.target.value }))}
+                  placeholder="Ej: CDMX-01"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Fecha de ingreso</Label>
+                <Input
+                  type="date"
+                  value={editForm.fechaIngreso}
+                  onChange={e => setEditForm(f => ({ ...f, fechaIngreso: e.target.value }))}
+                />
+              </div>
+
+              <div className="col-span-2 space-y-1.5">
+                <Label>Capacitador asignado <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                <Select value={editForm.trainerId || '__none__'} onValueChange={v => setEditForm(f => ({ ...f, trainerId: v === '__none__' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="Sin capacitador" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Sin capacitador</SelectItem>
+                    {trainers.map(t => (
+                      <SelectItem key={t.uid} value={t.uid}>{t.nombre || t.email}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {trainers.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No hay usuarios con rol "Capacitador" activos.</p>
+                )}
+              </div>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
-            <Button onClick={handleSaveRole} disabled={savingRole}>
-              {savingRole ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Guardar
+            <Button onClick={handleSaveEdit} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Guardar cambios
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Add Whitelist Dialog */}
+      {/* ── Bulk deactivate dialog ────────────────────────────────────────── */}
+      <Dialog open={bulkDeactivateOpen} onOpenChange={v => { setBulkDeactivateOpen(v); if (!v) setBulkEmailsInput(''); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Desactivar usuarios en bulk</DialogTitle>
+            <DialogDescription>
+              Pega los correos de los usuarios que deseas desactivar (uno por línea, o separados por coma).
+              Se bloqueará su acceso inmediatamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <Textarea
+              value={bulkEmailsInput}
+              onChange={e => setBulkEmailsInput(e.target.value)}
+              placeholder={'juan@empresa.com\nmaria@empresa.com\ncarlos@empresa.com'}
+              rows={6}
+              className="font-mono text-xs"
+            />
+
+            {bulkMatchedUsers.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {bulkMatchedUsers.filter(m => m.user).length} usuarios encontrados
+                </p>
+                <div className="space-y-1 max-h-36 overflow-y-auto">
+                  {bulkMatchedUsers.map(({ email, user }) => (
+                    <div key={email} className={cn('flex items-center gap-2 text-xs px-2 py-1 rounded', user ? 'bg-orange-50 text-orange-700' : 'bg-muted text-muted-foreground line-through')}>
+                      {user ? <UserX className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
+                      <span>{email}</span>
+                      {!user && <span className="ml-auto text-[10px]">no encontrado</span>}
+                      {user && <span className="ml-auto font-medium">{user.nombre}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDeactivateOpen(false)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              onClick={handleBulkDeactivate}
+              disabled={deactivating || bulkMatchedUsers.filter(m => m.user).length === 0}
+            >
+              {deactivating
+                ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                : <UserX className="h-4 w-4 mr-2" />
+              }
+              Desactivar {bulkMatchedUsers.filter(m => m.user).length} usuarios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reactivate confirm ────────────────────────────────────────────── */}
+      <AlertDialog open={!!reactivatingUser} onOpenChange={() => setReactivatingUser(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Reactivar usuario?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{reactivatingUser?.nombre || reactivatingUser?.email}</strong> recuperará acceso completo a la plataforma.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => reactivatingUser && handleReactivate(reactivatingUser)}>
+              Reactivar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── Add whitelist dialog ──────────────────────────────────────────── */}
       <Dialog open={addWLOpen} onOpenChange={setAddWLOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Agregar a Whitelist</DialogTitle>
-            <DialogDescription>
-              El usuario podrá registrarse con este email y se le asignará el rol indicado automáticamente.
-            </DialogDescription>
+            <DialogDescription>El usuario podrá registrarse con este email y se le asignará el rol indicado.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
               <Label>Email *</Label>
-              <Input
-                type="email"
-                value={wlForm.email}
-                onChange={(e) => setWLForm((p) => ({ ...p, email: e.target.value }))}
-                placeholder="usuario@empresa.com"
-                className="mt-1"
-              />
+              <Input type="email" value={wlForm.email} onChange={e => setWLForm(p => ({ ...p, email: e.target.value }))} placeholder="usuario@empresa.com" />
             </div>
-            <div>
+            <div className="space-y-1.5">
               <Label>Rol</Label>
-              <Select value={wlForm.role} onValueChange={(v) => setWLForm((p) => ({ ...p, role: v as UserRole }))}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
+              <Select value={wlForm.role} onValueChange={v => setWLForm(p => ({ ...p, role: v as UserRole }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
+                  {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
                     <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Kiosko (opcional)</Label>
-                <Input
-                  value={wlForm.kiosko}
-                  onChange={(e) => setWLForm((p) => ({ ...p, kiosko: e.target.value }))}
-                  placeholder="Ej: CDMX-01"
-                  className="mt-1"
-                />
+              <div className="space-y-1.5">
+                <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Input value={wlForm.kiosko} onChange={e => setWLForm(p => ({ ...p, kiosko: e.target.value }))} placeholder="Ej: CDMX-01" />
               </div>
-              <div>
-                <Label>Producto (opcional)</Label>
-                <Select value={wlForm.productId} onValueChange={(v) => setWLForm((p) => ({ ...p, productId: v }))}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Sin asignar" />
-                  </SelectTrigger>
+              <div className="space-y-1.5">
+                <Label>Producto <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Select value={wlForm.productId || '__none__'} onValueChange={v => setWLForm(p => ({ ...p, productId: v === '__none__' ? '' : v }))}>
+                  <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Sin asignar</SelectItem>
-                    {products.map((p) => (
+                    <SelectItem value="__none__">Sin asignar</SelectItem>
+                    {products.map(p => (
                       <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -483,21 +909,18 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Whitelist Confirm */}
+      {/* ── Delete whitelist confirm ──────────────────────────────────────── */}
       <AlertDialog open={!!deletingWL} onOpenChange={() => setDeletingWL(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Eliminar de la whitelist?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se eliminará <strong>{deletingWL?.email}</strong> de la whitelist. El usuario no podrá registrarse con este email.
+              Se eliminará <strong>{deletingWL?.email}</strong>. El usuario no podrá registrarse con este email.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => deletingWL && handleDeleteWL(deletingWL)}
-              className="bg-destructive hover:bg-destructive/90"
-            >
+            <AlertDialogAction onClick={() => deletingWL && handleDeleteWL(deletingWL)} className="bg-destructive hover:bg-destructive/90">
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>

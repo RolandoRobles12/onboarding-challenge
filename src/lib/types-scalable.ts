@@ -255,6 +255,12 @@ export interface UserProfile {
   onboardingCompleted: boolean; // si ya completó el formulario de ingreso
   onboardingData?: Record<string, string>; // datos del formulario de ingreso (fieldKey → valor)
 
+  // Campos operativos editables por admin
+  assignedKiosko?: string;  // Hub / Kiosko asignado
+  trainerId?: string;        // UID del capacitador asignado
+  fechaIngreso?: string;     // Fecha de ingreso (YYYY-MM-DD)
+  active?: boolean;          // false = usuario desactivado (sin acceso)
+
   // Metadata
   createdAt: Timestamp;
   updatedAt: Timestamp;
