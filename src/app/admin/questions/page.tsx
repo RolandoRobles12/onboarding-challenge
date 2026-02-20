@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuestions, useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -13,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
 import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine } from 'lucide-react';
-import type { QuestionFormData, QuizDifficulty, QuestionType, QuestionOption, KnowledgeModule } from '@/lib/types-scalable';
+import type { QuestionFormData, QuestionType, QuestionOption, KnowledgeModule } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -22,11 +23,17 @@ export default function QuestionsPage() {
   const { profile } = useAuth();
   const { products } = useProducts();
   const { questions, loading, refresh } = useQuestions();
+  const searchParams = useSearchParams();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterProduct, setFilterProduct] = useState<string>('all');
-  const [filterDifficulty, setFilterDifficulty] = useState<string>('all');
-  const [filterModule, setFilterModule] = useState<string>('all');
+  const [filterModule, setFilterModule] = useState<string>(() => searchParams.get('module') ?? 'all');
+
+  // Sync module filter if URL param changes (e.g. navigating from categories page)
+  useEffect(() => {
+    const mod = searchParams.get('module');
+    if (mod) setFilterModule(mod);
+  }, [searchParams]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<any>(null);
   const [saving, setSaving] = useState(false);
@@ -35,7 +42,6 @@ export default function QuestionsPage() {
     text: '',
     explanation: '',
     type: 'single_choice',
-    difficulty: 'medium',
     options: [
       { text: '', isCorrect: false, order: 0 },
       { text: '', isCorrect: false, order: 1 },
@@ -95,12 +101,11 @@ export default function QuestionsPage() {
         question.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesProduct = filterProduct === 'all' || question.productId === filterProduct;
-      const matchesDifficulty = filterDifficulty === 'all' || question.difficulty === filterDifficulty;
       const matchesModule = filterModule === 'all' || question.module === filterModule || (filterModule === 'none' && !question.module);
 
-      return matchesSearch && matchesProduct && matchesDifficulty && matchesModule;
+      return matchesSearch && matchesProduct && matchesModule;
     });
-  }, [questions, searchQuery, filterProduct, filterDifficulty]);
+  }, [questions, searchQuery, filterProduct, filterModule]);
 
   const handleOpenDialog = (question?: any) => {
     if (question) {
@@ -109,7 +114,6 @@ export default function QuestionsPage() {
         text: question.text,
         explanation: question.explanation || '',
         type: question.type,
-        difficulty: question.difficulty,
         options: question.options,
         tags: question.tags || [],
         category: question.category || '',
@@ -129,7 +133,6 @@ export default function QuestionsPage() {
         text: '',
         explanation: '',
         type: 'single_choice',
-        difficulty: 'medium',
         options: [
           { text: '', isCorrect: false, order: 0 },
           { text: '', isCorrect: false, order: 1 },
@@ -310,15 +313,6 @@ export default function QuestionsPage() {
     return products.find(p => p.id === productId)?.name || 'Desconocido';
   };
 
-  const getDifficultyColor = (difficulty: string) => {
-    switch (difficulty) {
-      case 'easy': return 'bg-green-500';
-      case 'medium': return 'bg-yellow-500';
-      case 'hard': return 'bg-red-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -380,39 +374,25 @@ export default function QuestionsPage() {
                   />
                 </div>
 
-                {/* Tipo y dificultad */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Tipo *</Label>
-                    <Select value={formData.type} onValueChange={(v) => handleTypeChange(v as QuestionType)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {(Object.entries(QUESTION_TYPE_LABELS) as [QuestionType, string][]).map(([val, label]) => (
-                          <SelectItem key={val} value={val}>{label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-muted-foreground leading-tight">
-                      {formData.type === 'true_false' && 'El alumno elige entre Verdadero o Falso.'}
-                      {formData.type === 'fill_in_the_blank' && 'El alumno toca la respuesta del banco de palabras. Usa ___ en el texto para indicar el espacio en blanco.'}
-                      {formData.type === 'open_text' && 'Respuesta libre. Calificación manual por el admin.'}
-                      {formData.type === 'single_choice' && 'El alumno elige una sola opción correcta.'}
-                      {formData.type === 'multiple_choice' && 'El alumno puede elegir varias opciones correctas.'}
-                      {formData.type === 'tricky' && 'Otorga una vida extra si se responde correctamente.'}
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Dificultad *</Label>
-                    <Select value={formData.difficulty} onValueChange={(v) => setFormData({ ...formData, difficulty: v as QuizDifficulty })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="easy">Fácil</SelectItem>
-                        <SelectItem value="medium">Medio</SelectItem>
-                        <SelectItem value="hard">Difícil</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                {/* Tipo */}
+                <div className="space-y-2">
+                  <Label>Tipo *</Label>
+                  <Select value={formData.type} onValueChange={(v) => handleTypeChange(v as QuestionType)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(Object.entries(QUESTION_TYPE_LABELS) as [QuestionType, string][]).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground leading-tight">
+                    {formData.type === 'true_false' && 'El alumno elige entre Verdadero o Falso.'}
+                    {formData.type === 'fill_in_the_blank' && 'El alumno toca la respuesta del banco de palabras. Usa ___ en el texto para indicar el espacio en blanco.'}
+                    {formData.type === 'open_text' && 'Respuesta libre. Calificación manual por el admin.'}
+                    {formData.type === 'single_choice' && 'El alumno elige una sola opción correcta.'}
+                    {formData.type === 'multiple_choice' && 'El alumno puede elegir varias opciones correctas.'}
+                    {formData.type === 'tricky' && 'Otorga una vida extra si se responde correctamente.'}
+                  </p>
                 </div>
 
                 {/* ── Opciones (single, multiple, tricky) ────────────────── */}
@@ -724,7 +704,7 @@ export default function QuestionsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -749,18 +729,6 @@ export default function QuestionsPage() {
               </SelectContent>
             </Select>
 
-            <Select value={filterDifficulty} onValueChange={setFilterDifficulty}>
-              <SelectTrigger>
-                <SelectValue placeholder="Filtrar por dificultad" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las dificultades</SelectItem>
-                <SelectItem value="easy">Fácil</SelectItem>
-                <SelectItem value="medium">Medio</SelectItem>
-                <SelectItem value="hard">Difícil</SelectItem>
-              </SelectContent>
-            </Select>
-
             <Select value={filterModule} onValueChange={setFilterModule}>
               <SelectTrigger>
                 <SelectValue placeholder="Filtrar por módulo" />
@@ -778,35 +746,23 @@ export default function QuestionsPage() {
       </Card>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Total</CardDescription>
+            <CardDescription>Total de preguntas</CardDescription>
             <CardTitle className="text-3xl">{questions.length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Fáciles</CardDescription>
-            <CardTitle className="text-3xl">
-              {questions.filter(q => q.difficulty === 'easy').length}
-            </CardTitle>
+            <CardDescription>Con módulo asignado</CardDescription>
+            <CardTitle className="text-3xl">{questions.filter(q => q.module).length}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Medias</CardDescription>
-            <CardTitle className="text-3xl">
-              {questions.filter(q => q.difficulty === 'medium').length}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Difíciles</CardDescription>
-            <CardTitle className="text-3xl">
-              {questions.filter(q => q.difficulty === 'hard').length}
-            </CardTitle>
+            <CardDescription>Sin módulo</CardDescription>
+            <CardTitle className="text-3xl">{questions.filter(q => !q.module).length}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -823,11 +779,11 @@ export default function QuestionsPage() {
           <CardContent className="py-12 text-center">
             <HelpCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
             <p className="text-muted-foreground">
-              {searchQuery || filterProduct !== 'all' || filterDifficulty !== 'all' || filterModule !== 'all'
+              {searchQuery || filterProduct !== 'all' || filterModule !== 'all'
                 ? 'No se encontraron preguntas con los filtros seleccionados'
                 : 'No hay preguntas aún'}
             </p>
-            {!searchQuery && filterProduct === 'all' && filterDifficulty === 'all' && filterModule === 'all' && (
+            {!searchQuery && filterProduct === 'all' && filterModule === 'all' && (
               <Button className="mt-4" onClick={() => handleOpenDialog()}>
                 <Plus className="mr-2 h-4 w-4" />
                 Crear Primera Pregunta
@@ -909,9 +865,6 @@ export default function QuestionsPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs px-2 py-1 rounded-full bg-secondary">
                         {getProductName(question.productId)}
-                      </span>
-                      <span className={`text-xs px-2 py-1 rounded-full text-white ${getDifficultyColor(question.difficulty)}`}>
-                        {question.difficulty === 'easy' ? 'Fácil' : question.difficulty === 'medium' ? 'Medio' : 'Difícil'}
                       </span>
                       <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                         {QUESTION_TYPE_LABELS[question.type as QuestionType] || question.type}
