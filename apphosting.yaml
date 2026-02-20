@@ -1,39 +1,34 @@
-# Settings to manage and configure a Firebase App Hosting backend.
-# https://firebase.google.com/docs/app-hosting/configure
-
 runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
+  minInstances: 0
 
 env:
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
-    value: REEMPLAZA_CON_TU_API_KEY
+    value: AIzaSyAwnlZzagwKGpwqz2kXBhMgTIMzbOKghdw
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
-    value: REEMPLAZA_CON_TU_AUTH_DOMAIN
+    value: aviva-onb-app.firebaseapp.com
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
-    value: REEMPLAZA_CON_TU_PROJECT_ID
+    value: aviva-onb-app
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-    value: REEMPLAZA_CON_TU_STORAGE_BUCKET
+    value: aviva-onb-app.firebasestorage.app
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
-    value: REEMPLAZA_CON_TU_MESSAGING_SENDER_ID
+    value: 152132017968
     availability:
       - BUILD
       - RUNTIME
   - variable: NEXT_PUBLIC_FIREBASE_APP_ID
-    value: REEMPLAZA_CON_TU_APP_ID
+    value: 1:152132017968:web:c1df7cdcdb44da1267b2f5
     availability:
       - BUILD
       - RUNTIME
