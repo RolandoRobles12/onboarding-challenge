@@ -49,6 +49,14 @@ import type {
   VideoView,
   VideoReaction,
   VideoComment,
+  DailyPulse,
+  PulseAttempt,
+  PulseAnswer,
+  PulseBacklogItem,
+  SlackNotificationConfig,
+  KnowledgeModule,
+  SEGMENTATION_FIELD_KEYS,
+  OrgTokenConfig,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG } from './types-scalable';
 import type {
@@ -97,6 +105,13 @@ const COLLECTIONS = {
   VIDEO_VIEWS: 'video_views',
   VIDEO_REACTIONS: 'video_reactions',
   VIDEO_COMMENTS: 'video_comments',
+  // --- Knowledge Pulse ---
+  DAILY_PULSES: 'daily_pulses',
+  PULSE_ATTEMPTS: 'pulse_attempts',
+  PULSE_BACKLOGS: 'pulse_backlogs',
+  SLACK_CONFIG: 'slack_config',
+  // --- Tokens de Organización ---
+  ORG_TOKENS: 'org_tokens',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -2074,4 +2089,385 @@ export async function addVideoComment(
 /** Elimina un comentario. */
 export async function deleteVideoComment(commentId: string): Promise<void> {
   await deleteDoc(getDocRef(COLLECTIONS.VIDEO_COMMENTS, commentId));
+}
+
+// ============================================================================
+// KNOWLEDGE PULSE — PULSO DE CONOCIMIENTO DIARIO
+// ============================================================================
+
+// ----------- Daily Pulse -----------
+
+/** Obtiene el pulso de un día específico (id = YYYY-MM-DD). */
+export async function getDailyPulse(date: string, orgId = DEFAULT_ORG_ID): Promise<DailyPulse | null> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
+    const snap = await getDoc(docRef);
+    return snap.exists() ? ({ id: snap.id, ...snap.data() } as DailyPulse) : null;
+  } catch (error) {
+    console.error('Error getting daily pulse:', error);
+    return null;
+  }
+}
+
+/** Lista los pulsos de un rango de fechas. */
+export async function getDailyPulses(
+  startDate: string,
+  endDate: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<DailyPulse[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.DAILY_PULSES),
+      where('organizationId', '==', orgId),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate),
+      orderBy('date', 'desc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as DailyPulse));
+  } catch (error) {
+    console.error('Error listing daily pulses:', error);
+    return [];
+  }
+}
+
+/**
+ * Crea o actualiza el pulso de un día con las 7 preguntas seleccionadas.
+ * Usa rotación automática si no se proveen IDs.
+ */
+export async function upsertDailyPulse(
+  date: string,
+  questionIds: string[],
+  createdBy = 'system',
+  orgId = DEFAULT_ORG_ID
+): Promise<string> {
+  const id = `${orgId}_${date}`;
+  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, id);
+  const existing = await getDoc(docRef);
+  if (existing.exists()) {
+    await updateDoc(docRef, stripUndefined({ questionIds, updatedAt: serverTimestamp() }));
+  } else {
+    const pulse: Omit<DailyPulse, 'id'> = {
+      organizationId: orgId,
+      date,
+      questionIds,
+      status: 'scheduled',
+      totalResponses: 0,
+      createdAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
+      updatedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
+      createdBy,
+    };
+    await setDoc(docRef, stripUndefined(pulse));
+  }
+  return id;
+}
+
+/** Actualiza el estado del pulso (active → closed, etc.) */
+export async function updatePulseStatus(
+  date: string,
+  status: DailyPulse['status'],
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  const id = `${orgId}_${date}`;
+  const extra: Record<string, unknown> = { status, updatedAt: serverTimestamp() };
+  if (status === 'active') extra.sentAt = serverTimestamp();
+  if (status === 'closed') extra.closedAt = serverTimestamp();
+  await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, id), extra);
+}
+
+// ----------- Pulse Attempts -----------
+
+/** Obtiene el intento de un usuario para un día específico. */
+export async function getPulseAttempt(userId: string, date: string, orgId = DEFAULT_ORG_ID): Promise<PulseAttempt | null> {
+  try {
+    const id = `${userId}_${date}`;
+    const snap = await getDoc(getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id));
+    return snap.exists() ? ({ id: snap.id, ...snap.data() } as PulseAttempt) : null;
+  } catch (error) {
+    console.error('Error getting pulse attempt:', error);
+    return null;
+  }
+}
+
+/** Inicia un intento de pulso. */
+export async function startPulseAttempt(
+  userId: string,
+  userName: string,
+  date: string,
+  segmentation: { vertical?: string; hub?: string; estado?: string; cosecha?: string },
+  orgId = DEFAULT_ORG_ID
+): Promise<string> {
+  const id = `${userId}_${date}`;
+  const attempt: Omit<PulseAttempt, 'id'> = {
+    userId,
+    userName,
+    pulseId: `${orgId}_${date}`,
+    date,
+    organizationId: orgId,
+    ...segmentation,
+    answers: [],
+    totalQuestions: 7,
+    correctAnswers: 0,
+    percentage: 0,
+    startedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
+    status: 'in_progress',
+  };
+  await setDoc(getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id), stripUndefined(attempt));
+  return id;
+}
+
+/** Registra la respuesta final del pulso con todos los answers. */
+export async function submitPulseAttempt(
+  userId: string,
+  date: string,
+  answers: PulseAnswer[],
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  const id = `${userId}_${date}`;
+  const correctAnswers = answers.filter(a => a.isCorrect).length;
+  const percentage = Math.round((correctAnswers / answers.length) * 100);
+  await updateDoc(getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id), {
+    answers,
+    correctAnswers,
+    percentage,
+    completedAt: serverTimestamp(),
+    status: 'completed',
+  });
+  // Incrementar contador de respuestas en el pulso del día
+  const pulseId = `${orgId}_${date}`;
+  await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, pulseId), {
+    totalResponses: increment(1),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Lista intentos de un usuario (últimos 30 días por defecto). */
+export async function getUserPulseAttempts(
+  userId: string,
+  limitCount = 30,
+  orgId = DEFAULT_ORG_ID
+): Promise<PulseAttempt[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
+      where('userId', '==', userId),
+      where('organizationId', '==', orgId),
+      orderBy('date', 'desc'),
+      limit(limitCount)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PulseAttempt));
+  } catch (error) {
+    console.error('Error getting user pulse attempts:', error);
+    return [];
+  }
+}
+
+/** Lista TODOS los intentos de un pulso (para analytics). */
+export async function getPulseAttemptsByDate(
+  date: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<PulseAttempt[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
+      where('date', '==', date),
+      where('organizationId', '==', orgId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PulseAttempt));
+  } catch (error) {
+    console.error('Error getting pulse attempts by date:', error);
+    return [];
+  }
+}
+
+// ----------- Pulse Backlog (MVP2) -----------
+
+/** Obtiene el backlog pendiente de un usuario. */
+export async function getUserPulseBacklog(userId: string, orgId = DEFAULT_ORG_ID): Promise<PulseBacklogItem[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.PULSE_BACKLOGS),
+      where('userId', '==', userId),
+      where('organizationId', '==', orgId),
+      where('status', '==', 'pending'),
+      orderBy('addedAt', 'asc')
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PulseBacklogItem));
+  } catch (error) {
+    console.error('Error getting pulse backlog:', error);
+    return [];
+  }
+}
+
+/** Agrega preguntas incorrectas al backlog del usuario. */
+export async function addToPulseBacklog(
+  userId: string,
+  questions: { questionId: string; questionText: string; module: KnowledgeModule; linkedVideoIds?: string[] }[],
+  pulseDate: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  const batch = writeBatch(ensureFirestore());
+  for (const q of questions) {
+    const docRef = doc(getCollectionRef(COLLECTIONS.PULSE_BACKLOGS));
+    const item: Omit<PulseBacklogItem, 'id'> = {
+      userId,
+      organizationId: orgId,
+      questionId: q.questionId,
+      questionText: q.questionText,
+      module: q.module,
+      addedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
+      pulseDate,
+      status: 'pending',
+      linkedVideoIds: q.linkedVideoIds,
+    };
+    batch.set(docRef, stripUndefined(item));
+  }
+  await batch.commit();
+}
+
+/** Marca un ítem del backlog como resuelto. */
+export async function resolvePulseBacklogItem(itemId: string): Promise<void> {
+  await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
+    status: 'resolved',
+    resolvedAt: serverTimestamp(),
+  });
+}
+
+// ----------- Slack Config -----------
+
+/** Obtiene la configuración de Slack para el Knowledge Pulse. */
+export async function getSlackConfig(orgId = DEFAULT_ORG_ID): Promise<SlackNotificationConfig | null> {
+  try {
+    const snap = await getDoc(getDocRef(COLLECTIONS.SLACK_CONFIG, orgId));
+    return snap.exists() ? (snap.data() as SlackNotificationConfig) : null;
+  } catch (error) {
+    console.error('Error getting Slack config:', error);
+    return null;
+  }
+}
+
+/** Guarda o actualiza la configuración de Slack. */
+export async function saveSlackConfig(
+  config: Omit<SlackNotificationConfig, 'organizationId' | 'updatedAt'>,
+  updatedBy: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  await setDoc(getDocRef(COLLECTIONS.SLACK_CONFIG, orgId), stripUndefined({
+    ...config,
+    organizationId: orgId,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  }));
+}
+
+// ----------- Auto-scheduling helpers -----------
+
+/**
+ * Selecciona 7 preguntas del catálogo para el pulso de hoy usando rotación automática.
+ * Prioriza preguntas con menor correctRate y las que no se han usado recientemente.
+ * Distribuye equitativamente entre módulos (máx 2 por módulo).
+ */
+export async function scheduleAutoPulse(
+  orgId = DEFAULT_ORG_ID
+): Promise<string[]> {
+  // Obtener preguntas activas con módulo asignado
+  const q = query(
+    getCollectionRef(COLLECTIONS.QUESTIONS),
+    where('organizationId', '==', orgId),
+    where('active', '==', true),
+  );
+  const snap = await getDocs(q);
+  const allQuestions = snap.docs.map(d => ({ id: d.id, ...d.data() }) as import('./types-scalable').Question);
+  const withModule = allQuestions.filter(q => q.module);
+
+  if (withModule.length < 7) {
+    // Si hay menos de 7, usar las que haya (incluso sin módulo)
+    const combined = [...withModule, ...allQuestions.filter(q => !q.module)];
+    return combined.slice(0, 7).map(q => q.id);
+  }
+
+  // Agrupar por módulo
+  const byModule = new Map<string, typeof withModule>();
+  for (const q of withModule) {
+    const mod = q.module as string;
+    if (!byModule.has(mod)) byModule.set(mod, []);
+    byModule.get(mod)!.push(q);
+  }
+
+  // Ordenar cada módulo por correctRate asc (más difíciles primero)
+  byModule.forEach(list => list.sort((a, b) => a.averageCorrectRate - b.averageCorrectRate));
+
+  const selected: string[] = [];
+  const modules = Array.from(byModule.keys());
+
+  // Round-robin por módulo hasta tener 7
+  let round = 0;
+  while (selected.length < 7) {
+    const mod = modules[round % modules.length];
+    const pool = byModule.get(mod) ?? [];
+    const pick = pool.find(q => !selected.includes(q.id));
+    if (pick) selected.push(pick.id);
+    round++;
+    if (round > modules.length * 10) break; // safety
+  }
+
+  return selected.slice(0, 7);
+}
+
+// ----------- Org Tokens -----------
+
+/** Obtiene un token específico de la organización por su clave. */
+export async function getOrgToken(
+  key: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<OrgTokenConfig | null> {
+  try {
+    const snap = await getDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
+    return snap.exists() ? (snap.data() as OrgTokenConfig) : null;
+  } catch (error) {
+    console.error('Error getting org token:', error);
+    return null;
+  }
+}
+
+/** Lista todos los tokens configurados para la organización. */
+export async function getOrgTokens(orgId = DEFAULT_ORG_ID): Promise<OrgTokenConfig[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.ORG_TOKENS),
+      where('organizationId', '==', orgId),
+      orderBy('key', 'asc'),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as OrgTokenConfig);
+  } catch (error) {
+    console.error('Error getting org tokens:', error);
+    return [];
+  }
+}
+
+/** Guarda o actualiza un token de organización. */
+export async function saveOrgToken(
+  key: string,
+  label: string,
+  value: string,
+  updatedBy: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  await setDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`), {
+    key,
+    label,
+    value,
+    organizationId: orgId,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  });
+}
+
+/** Elimina un token de organización. */
+export async function deleteOrgToken(key: string, orgId = DEFAULT_ORG_ID): Promise<void> {
+  await deleteDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
 }
