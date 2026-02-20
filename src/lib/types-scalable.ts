@@ -32,6 +32,15 @@ export const KNOWLEDGE_MODULE_LABELS: Record<KnowledgeModule, string> = {
   incentivos: 'Incentivos',
 };
 
+export const KNOWLEDGE_MODULES: KnowledgeModule[] = [
+  'banca_conversacional',
+  'pagos_renovacion',
+  'solicitud_credito',
+  'herramientas',
+  'politicas_procesos',
+  'incentivos',
+];
+
 /**
  * Claves estándar para campos de segmentación en onboardingData.
  * Deben coincidir con los fieldKey configurados en /admin/onboarding-fields.
@@ -1128,6 +1137,12 @@ export interface PulseBacklogItem {
 // CONFIGURACIÓN DE NOTIFICACIÓN SLACK
 // ============================================================================
 
+export interface SlackDirectRecipient {
+  id: string;
+  slackUserId: string;  // ID de usuario en Slack (ej: U01234567)
+  displayName: string;  // Nombre legible
+}
+
 export interface SlackChannel {
   id: string;
   channelId: string;   // ID del canal en Slack (ej: C01234567)
@@ -1150,6 +1165,7 @@ export interface SlackNotificationConfig {
   appUrl: string;        // URL base de la app, sin barra final (ej: https://app.avivacredito.com)
   messageTemplate: string; // Plantilla del mensaje. Soporta {date}, {link}
   channels: SlackChannel[];
+  directRecipients?: SlackDirectRecipient[];
   updatedAt: Timestamp;
   updatedBy: string;
 }
@@ -1213,4 +1229,29 @@ export interface OrgTokenConfig {
   organizationId: string;
   updatedAt: Timestamp;
   updatedBy: string;
+}
+
+// ============================================================================
+// PULSO DE CONOCIMIENTO — CONFIGURACIÓN GLOBAL
+// ============================================================================
+
+/**
+ * Configuración global del Pulso de Conocimiento.
+ * Se almacena en `pulse_config/{orgId}`.
+ */
+export interface PulseConfig {
+  id?: string;
+  organizationId: string;
+  /** Número de preguntas por pulso diario. Default: 7. Rango: 3–20 */
+  questionsPerPulse: number;
+  /** Módulos activos (vacío = todos los 6 módulos activos) */
+  activeModules: KnowledgeModule[];
+  /** Hora de cierre de la ventana de respuesta (HH:MM) */
+  closeAt: string;
+  /** Si es true, todos los usuarios reciben el mismo set de preguntas; si false, set aleatorio por usuario */
+  sameQuestionsForAll: boolean;
+  /** Si es true, el orden de las opciones de respuesta se aleatoriza por usuario */
+  randomizeAnswerOrder: boolean;
+  updatedAt?: Timestamp;
+  updatedBy?: string;
 }

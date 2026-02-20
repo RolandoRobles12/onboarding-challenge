@@ -11,15 +11,19 @@ import {
   scheduleAutoPulse,
   getSlackConfig,
   saveSlackConfig,
+  getPulseConfig,
+  savePulseConfig,
   getPulseAttemptsByDate,
 } from '@/lib/firestore-service';
 import type {
   DailyPulse,
   SlackChannel,
+  SlackDirectRecipient,
   PulseAttempt,
+  PulseConfig,
   KnowledgeModule,
 } from '@/lib/types-scalable';
-import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
+import { KNOWLEDGE_MODULE_LABELS, KNOWLEDGE_MODULES } from '@/lib/types-scalable';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -125,21 +129,34 @@ export default function KnowledgePulsePage() {
   const [scheduling, setScheduling] = useState(false);
   const [actioning, setActioning] = useState(false);
 
-  // Slack config
+  // Pulse config (Ajustes tab)
+  const [loadingPulseConfig, setLoadingPulseConfig] = useState(false);
+  const [savingPulseConfig, setSavingPulseConfig] = useState(false);
+  const [pulseConfigForm, setPulseConfigForm] = useState<Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'>>({
+    questionsPerPulse: 7,
+    activeModules: [],
+    closeAt: '12:00',
+    sameQuestionsForAll: true,
+    randomizeAnswerOrder: false,
+  });
+
+  // Slack config (Slack tab)
   const [loadingSlack, setLoadingSlack] = useState(false);
   const [savingSlack, setSavingSlack] = useState(false);
   const [slackForm, setSlackForm] = useState({
     active: false,
     sendAt: '08:00',
-    closeAt: '12:00',
     appUrl: '',
     messageTemplate: '📡 *Pulso de Conocimiento* — {date}\n\nResponde tus 7 preguntas antes de las 12:00 PM:\n{link}',
   });
   const [channels, setChannels] = useState<SlackChannel[]>([]);
+  const [directRecipients, setDirectRecipients] = useState<SlackDirectRecipient[]>([]);
   const [newChannelId, setNewChannelId] = useState('');
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelVertical, setNewChannelVertical] = useState('');
   const [channelVerticalFilter, setChannelVerticalFilter] = useState('todos');
+  const [newDMUserId, setNewDMUserId] = useState('');
+  const [newDMUserName, setNewDMUserName] = useState('');
 
   // Edit dialog
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -179,6 +196,22 @@ export default function KnowledgePulsePage() {
   // Auto-load today on mount and whenever selected date changes
   useEffect(() => { loadSelectedDay(selectedDate); }, [selectedDate, loadSelectedDay]);
 
+  // ── Pulse config (Ajustes tab) ─────────────────────────────────────────
+
+  useEffect(() => {
+    if (mainTab !== 'ajustes') return;
+    setLoadingPulseConfig(true);
+    getPulseConfig().then(cfg => {
+      setPulseConfigForm({
+        questionsPerPulse: cfg.questionsPerPulse,
+        activeModules: cfg.activeModules,
+        closeAt: cfg.closeAt,
+        sameQuestionsForAll: cfg.sameQuestionsForAll,
+        randomizeAnswerOrder: cfg.randomizeAnswerOrder,
+      });
+    }).finally(() => setLoadingPulseConfig(false));
+  }, [mainTab]);
+
   // ── Slack config ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -186,8 +219,9 @@ export default function KnowledgePulsePage() {
     setLoadingSlack(true);
     getSlackConfig().then(cfg => {
       if (cfg) {
-        setSlackForm({ active: cfg.active, sendAt: cfg.sendAt, closeAt: cfg.closeAt, appUrl: cfg.appUrl ?? '', messageTemplate: cfg.messageTemplate });
+        setSlackForm({ active: cfg.active, sendAt: cfg.sendAt, appUrl: cfg.appUrl ?? '', messageTemplate: cfg.messageTemplate });
         setChannels(cfg.channels);
+        setDirectRecipients(cfg.directRecipients ?? []);
       }
     }).finally(() => setLoadingSlack(false));
   }, [mainTab]);
@@ -248,13 +282,27 @@ export default function KnowledgePulsePage() {
     }
   };
 
+  // Pulse config
+  const handleSavePulseConfig = async () => {
+    if (!profile) return;
+    setSavingPulseConfig(true);
+    try {
+      await savePulseConfig(pulseConfigForm, profile.uid);
+      toast({ title: 'Ajustes del pulso guardados' });
+    } catch {
+      toast({ variant: 'destructive', title: 'Error al guardar' });
+    } finally {
+      setSavingPulseConfig(false);
+    }
+  };
+
   // Slack
   const handleSaveSlack = async () => {
     if (!profile) return;
     setSavingSlack(true);
     try {
-      await saveSlackConfig({ ...slackForm, channels }, profile.uid);
-      toast({ title: 'Configuración guardada' });
+      await saveSlackConfig({ ...slackForm, closeAt: '12:00', channels, directRecipients }, profile.uid);
+      toast({ title: 'Configuración de Slack guardada' });
     } catch {
       toast({ variant: 'destructive', title: 'Error al guardar' });
     } finally {
@@ -267,6 +315,13 @@ export default function KnowledgePulsePage() {
     if (!id || !name) return;
     setChannels(prev => [...prev, { id: crypto.randomUUID(), channelId: id, channelName: name, vertical: newChannelVertical.trim() || undefined, active: true }]);
     setNewChannelId(''); setNewChannelName(''); setNewChannelVertical('');
+  };
+
+  const handleAddDM = () => {
+    const uid = newDMUserId.trim(); const name = newDMUserName.trim();
+    if (!uid || !name) return;
+    setDirectRecipients(prev => [...prev, { id: crypto.randomUUID(), slackUserId: uid, displayName: name }]);
+    setNewDMUserId(''); setNewDMUserName('');
   };
 
   const handleSendTestSlack = async () => {
@@ -611,36 +666,147 @@ export default function KnowledgePulsePage() {
 
         {/* ─────────────────── AJUSTES DEL PULSO TAB ──────────────────── */}
         <TabsContent value="ajustes" className="space-y-6 mt-5">
-          {loadingSlack ? (
-            <div className="space-y-4">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
+          {loadingPulseConfig ? (
+            <div className="space-y-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}</div>
           ) : (
-            <div className="max-w-lg space-y-6">
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* Preguntas por pulso */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Ventana de respuesta</CardTitle>
+                  <CardTitle>Preguntas por pulso</CardTitle>
                   <CardDescription>
-                    Define hasta qué hora pueden los promotores responder el pulso del día.
-                    Pasada esa hora el pulso se cierra automáticamente.
+                    Número de preguntas que se incluyen en cada pulso diario.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-1.5 max-w-xs">
-                    <Label>Hora de cierre de ventana</Label>
+                    <Label>Número de preguntas</Label>
+                    <Input
+                      type="number"
+                      min={3}
+                      max={20}
+                      value={pulseConfigForm.questionsPerPulse}
+                      onChange={e => setPulseConfigForm(f => ({ ...f, questionsPerPulse: Math.min(20, Math.max(3, Number(e.target.value))) }))}
+                    />
+                    <p className="text-xs text-muted-foreground">Entre 3 y 20 preguntas. Por defecto: 7.</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Ventana de respuesta */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ventana de respuesta</CardTitle>
+                  <CardDescription>
+                    Hora límite fija en la que se cierra el pulso del día para todos los usuarios.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1.5 max-w-xs">
+                    <Label>Hora de cierre</Label>
                     <Input
                       type="time"
-                      value={slackForm.closeAt}
-                      onChange={e => setSlackForm(f => ({ ...f, closeAt: e.target.value }))}
+                      value={pulseConfigForm.closeAt}
+                      onChange={e => setPulseConfigForm(f => ({ ...f, closeAt: e.target.value }))}
                     />
                     <p className="text-xs text-muted-foreground">
-                      El pulso se marcará como <strong>cerrado</strong> a partir de esta hora.
+                      El pulso se marcará como <strong>cerrado</strong> a esta hora exacta.
                     </p>
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="flex justify-end">
-                <Button onClick={handleSaveSlack} disabled={savingSlack}>
-                  {savingSlack ? 'Guardando...' : 'Guardar ajustes'}
+              {/* Módulos activos */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle>Módulos activos</CardTitle>
+                  <CardDescription>
+                    Selecciona de qué módulos se tomarán las preguntas. Si no seleccionas ninguno, se usan todos.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {KNOWLEDGE_MODULES.map(mod => {
+                      const isChecked = pulseConfigForm.activeModules.includes(mod);
+                      return (
+                        <label
+                          key={mod}
+                          className={cn(
+                            'flex items-center gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all',
+                            isChecked
+                              ? 'border-primary/50 bg-primary/5'
+                              : 'border-border hover:border-muted-foreground/40',
+                            pulseConfigForm.activeModules.length === 0 && 'border-muted-foreground/20 bg-muted/20'
+                          )}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setPulseConfigForm(f => ({ ...f, activeModules: [...f.activeModules, mod] }));
+                              } else {
+                                setPulseConfigForm(f => ({ ...f, activeModules: f.activeModules.filter(m => m !== mod) }));
+                              }
+                            }}
+                            className="h-4 w-4 accent-primary"
+                          />
+                          <span className={cn('text-xs font-medium', MODULE_COLORS[mod].split(' ')[1])}>
+                            {KNOWLEDGE_MODULE_LABELS[mod]}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {pulseConfigForm.activeModules.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-3">
+                      Sin selección = todos los módulos activos.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Opciones de selección y orden */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle>Opciones de preguntas</CardTitle>
+                  <CardDescription>
+                    Controla cómo se seleccionan y presentan las preguntas a los usuarios.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  <div className="flex items-start gap-4 justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Mismas preguntas para todos</Label>
+                      <p className="text-xs text-muted-foreground max-w-sm">
+                        Si está activo, todos los promotores reciben el mismo set de {pulseConfigForm.questionsPerPulse} preguntas.
+                        Si está inactivo, cada usuario recibe una selección aleatoria distinta.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={pulseConfigForm.sameQuestionsForAll}
+                      onCheckedChange={v => setPulseConfigForm(f => ({ ...f, sameQuestionsForAll: v }))}
+                    />
+                  </div>
+                  <div className="border-t pt-5 flex items-start gap-4 justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Orden aleatorio de respuestas</Label>
+                      <p className="text-xs text-muted-foreground max-w-sm">
+                        Si está activo, el orden de las opciones de respuesta se aleatoriza para cada usuario,
+                        reduciendo el efecto de memorizar posiciones.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={pulseConfigForm.randomizeAnswerOrder}
+                      onCheckedChange={v => setPulseConfigForm(f => ({ ...f, randomizeAnswerOrder: v }))}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="lg:col-span-2 flex justify-end">
+                <Button onClick={handleSavePulseConfig} disabled={savingPulseConfig}>
+                  {savingPulseConfig ? 'Guardando...' : 'Guardar ajustes'}
                 </Button>
               </div>
             </div>
@@ -758,6 +924,45 @@ export default function KnowledgePulsePage() {
                     <Input placeholder="Vertical (ej: Aviva Tu Compra) — vacío = todos" value={newChannelVertical} onChange={e => setNewChannelVertical(e.target.value)} />
                     <Button variant="outline" size="sm" className="w-full" onClick={handleAddChannel}>
                       <Plus className="h-4 w-4 mr-1.5" /> Agregar canal
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Direct message recipients */}
+              <Card className="lg:col-span-2">
+                <CardHeader>
+                  <CardTitle>Mensajes directos (DM)</CardTitle>
+                  <CardDescription>
+                    Además de los canales, puedes enviar el mensaje directamente al DM de usuarios específicos.
+                    Usa el Slack User ID (comienza con U, ej: U01234567).
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    {directRecipients.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">Sin destinatarios directos configurados.</p>
+                    )}
+                    {directRecipients.map(r => (
+                      <div key={r.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/40 gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{r.displayName}</p>
+                          <p className="text-xs text-muted-foreground font-mono mt-0.5">{r.slackUserId}</p>
+                        </div>
+                        <button onClick={() => setDirectRecipients(prev => prev.filter(d => d.id !== r.id))} className="text-muted-foreground hover:text-destructive transition-colors p-1">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t pt-4 space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Agregar destinatario</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input placeholder="Slack User ID (ej: U01234567)" value={newDMUserId} onChange={e => setNewDMUserId(e.target.value)} />
+                      <Input placeholder="Nombre (ej: Carlos López)" value={newDMUserName} onChange={e => setNewDMUserName(e.target.value)} />
+                    </div>
+                    <Button variant="outline" size="sm" className="w-full" onClick={handleAddDM}>
+                      <Plus className="h-4 w-4 mr-1.5" /> Agregar destinatario
                     </Button>
                   </div>
                 </CardContent>

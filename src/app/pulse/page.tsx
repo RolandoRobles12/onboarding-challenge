@@ -235,7 +235,7 @@ export default function PulsePage() {
   if (loading) {
     return (
       <PageShell>
-        <div className="max-w-lg mx-auto w-full px-4 pt-10 pb-28 space-y-4">
+        <div className="max-w-xl sm:max-w-2xl mx-auto w-full px-4 sm:px-6 pt-10 pb-28 space-y-4">
           <Skeleton className="h-8 w-48 mx-auto" />
           <Skeleton className="h-6 w-32 mx-auto" />
           <Skeleton className="h-64 rounded-2xl mt-6" />
@@ -251,7 +251,7 @@ export default function PulsePage() {
 
     return (
       <PageShell>
-        <div className="max-w-lg mx-auto w-full px-4 pt-6 pb-28 flex flex-col gap-5">
+        <div className="max-w-xl sm:max-w-2xl mx-auto w-full px-4 sm:px-6 pt-6 pb-28 flex flex-col gap-5">
             {/* Progress */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs text-muted-foreground">
@@ -273,7 +273,7 @@ export default function PulsePage() {
 
             {/* Question card */}
             <Card className="rounded-2xl shadow-sm border-0 bg-card">
-              <CardContent className="p-6 space-y-5">
+              <CardContent className="p-5 sm:p-7 space-y-5">
                 {/* Module badge */}
                 {currentQuestion.module && (
                   <span className={cn(
@@ -285,10 +285,10 @@ export default function PulsePage() {
                 )}
 
                 {/* Question text */}
-                <h2 className="text-lg font-semibold leading-snug">{currentQuestion.text}</h2>
+                <h2 className="text-lg sm:text-xl font-semibold leading-snug">{currentQuestion.text}</h2>
 
                 {/* Options */}
-                <div className="space-y-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   {currentQuestion.options.map(opt => {
                     const isSelected = selectedOption === opt.id;
                     const isCorrect = opt.isCorrect;
@@ -319,7 +319,7 @@ export default function PulsePage() {
                           {revealed && isCorrect && <CheckCircle className="h-3.5 w-3.5 text-white" />}
                           {revealed && isSelected && !isCorrect && <XCircle className="h-3.5 w-3.5 text-white" />}
                         </div>
-                        <span className="font-medium text-sm leading-snug">{opt.text}</span>
+                        <span className="font-medium text-sm sm:text-base leading-snug">{opt.text}</span>
                       </button>
                     );
                   })}
@@ -338,7 +338,7 @@ export default function PulsePage() {
             {/* Action */}
             {!revealed ? (
               <Button
-                className="w-full h-12 rounded-xl font-semibold text-base"
+                className="w-full h-12 sm:h-14 rounded-xl font-semibold text-base sm:text-lg"
                 onClick={handleConfirm}
                 disabled={!selectedOption}
               >
@@ -346,7 +346,7 @@ export default function PulsePage() {
               </Button>
             ) : (
               <Button
-                className="w-full h-12 rounded-xl font-semibold text-base"
+                className="w-full h-12 sm:h-14 rounded-xl font-semibold text-base sm:text-lg"
                 onClick={handleNext}
                 disabled={submitting}
               >
@@ -371,12 +371,12 @@ export default function PulsePage() {
 
     return (
       <PageShell>
-        <div className="max-w-lg mx-auto w-full px-4 pt-6 pb-28 space-y-4">
+        <div className="max-w-xl sm:max-w-2xl mx-auto w-full px-4 sm:px-6 pt-6 pb-28 space-y-4">
             {/* Score card */}
             <Card className="rounded-2xl shadow-sm border-0 overflow-hidden">
               <div className={cn('py-8 px-6 text-center', passed ? 'bg-green-500/8' : 'bg-orange-500/8')}>
                 <div className={cn(
-                  'w-24 h-24 rounded-full flex items-center justify-center mx-auto text-3xl font-extrabold border-4',
+                  'w-24 h-24 sm:w-32 sm:h-32 rounded-full flex items-center justify-center mx-auto text-3xl sm:text-4xl font-extrabold border-4',
                   passed
                     ? 'bg-green-500/10 text-green-700 border-green-500/30'
                     : 'bg-orange-500/10 text-orange-700 border-orange-400/30'
@@ -390,11 +390,12 @@ export default function PulsePage() {
                   {correct} de {total} respuestas correctas
                 </p>
               </div>
-              <CardContent className="py-4 space-y-2">
+              <CardContent className="py-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-0">
                 {attempt.answers.map((ans, idx) => {
                   const q = questions.find(q => q.id === ans.questionId);
                   return (
-                    <div key={ans.questionId} className="flex items-start gap-2.5 py-1.5 border-b last:border-0">
+                    <div key={ans.questionId} className="flex items-start gap-2.5 py-1.5 border-b last:border-0 sm:odd:border-r sm:odd:pr-3 sm:even:pl-3">
                       {ans.isCorrect
                         ? <CheckCircle className="h-4 w-4 text-green-500 shrink-0 mt-0.5" />
                         : <XCircle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
@@ -403,6 +404,7 @@ export default function PulsePage() {
                     </div>
                   );
                 })}
+                </div>
               </CardContent>
             </Card>
 
@@ -443,7 +445,7 @@ export default function PulsePage() {
 
   return (
     <PageShell>
-      <div className="max-w-lg mx-auto w-full px-4 pt-6 pb-28 space-y-4">
+      <div className="max-w-xl sm:max-w-2xl mx-auto w-full px-4 sm:px-6 pt-6 pb-28 space-y-4">
           {/* Date header */}
           <p className="text-sm text-muted-foreground capitalize text-center">
             {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
@@ -507,7 +509,7 @@ export default function PulsePage() {
                 </div>
 
                 <Button
-                  className="w-full h-12 rounded-xl font-semibold text-base"
+                  className="w-full h-12 sm:h-14 rounded-xl font-semibold text-base sm:text-lg"
                   size="lg"
                   onClick={handleStart}
                   disabled={submitting}
