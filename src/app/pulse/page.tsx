@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import { toast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { getDoc, doc, collection, getDocs, query, where } from 'firebase/firestore';
