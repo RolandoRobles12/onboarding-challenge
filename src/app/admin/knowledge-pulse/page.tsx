@@ -38,7 +38,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Radio, Settings, Zap, ChevronLeft, ChevronRight,
   Plus, Trash2, Send, RefreshCw, Users, CheckCircle, Clock,
-  BarChart2, ListChecks, Edit3,
+  BarChart2, ListChecks, Edit3, AlertTriangle, Globe,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -219,10 +219,20 @@ export default function KnowledgePulsePage() {
     if (mainTab !== 'slack') return;
     setLoadingSlack(true);
     getSlackConfig().then(cfg => {
+      // Auto-detect current app URL as default when not configured yet
+      const detectedUrl = typeof window !== 'undefined' ? window.location.origin : '';
       if (cfg) {
-        setSlackForm({ active: cfg.active, sendAt: cfg.sendAt, appUrl: cfg.appUrl ?? '', messageTemplate: cfg.messageTemplate });
+        setSlackForm({
+          active: cfg.active,
+          sendAt: cfg.sendAt,
+          appUrl: cfg.appUrl || detectedUrl,
+          messageTemplate: cfg.messageTemplate,
+        });
         setChannels(cfg.channels);
         setDirectRecipients(cfg.directRecipients ?? []);
+      } else {
+        // First time — pre-fill the URL
+        setSlackForm(f => ({ ...f, appUrl: detectedUrl }));
       }
     }).finally(() => setLoadingSlack(false));
   }, [mainTab]);
@@ -881,9 +891,39 @@ export default function KnowledgePulsePage() {
                     <p className="text-xs text-muted-foreground">Hora a la que el bot publicará el mensaje en Slack.</p>
                   </div>
                   <div className="space-y-1.5">
-                    <Label>URL de la app</Label>
-                    <Input placeholder="https://app.avivacredito.com" value={slackForm.appUrl} onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))} />
-                    <p className="text-xs text-muted-foreground">URL base usada en el botón <strong>📚 Responder el Pulso →</strong> que se adjunta al mensaje.</p>
+                    <Label className="flex items-center gap-1.5">
+                      URL de la app
+                      {!slackForm.appUrl && (
+                        <span className="inline-flex items-center gap-1 text-xs font-normal text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
+                          <AlertTriangle className="h-3 w-3" /> Requerida para el botón
+                        </span>
+                      )}
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="https://app.avivacredito.com"
+                        value={slackForm.appUrl}
+                        onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))}
+                        className={!slackForm.appUrl ? 'border-amber-300 focus-visible:ring-amber-400' : ''}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        title="Usar URL actual del navegador"
+                        onClick={() => {
+                          if (typeof window !== 'undefined') {
+                            setSlackForm(f => ({ ...f, appUrl: window.location.origin }));
+                          }
+                        }}
+                      >
+                        <Globe className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      URL base para el botón <strong>📚 Responder el Pulso →</strong> del mensaje de Slack.
+                      El ícono <Globe className="inline h-3 w-3" /> auto-rellena con la URL del navegador actual.
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label>Plantilla del mensaje</Label>
