@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   getDailyPulse,
   getPulseAttempt,
+  getPulseConfig,
   startPulseAttempt,
   submitPulseAttempt,
   addToPulseBacklog,
@@ -16,6 +17,7 @@ import type {
   PulseAttempt,
   PulseAnswer,
   PulseBacklogItem,
+  PulseConfig,
   Question,
   KnowledgeModule,
 } from '@/lib/types-scalable';
@@ -91,6 +93,7 @@ export default function PulsePage() {
   const [loading, setLoading] = useState(true);
   const [pulse, setPulse] = useState<DailyPulse | null>(null);
   const [attempt, setAttempt] = useState<PulseAttempt | null>(null);
+  const [pulseConfig, setPulseConfig] = useState<PulseConfig | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [backlog, setBacklog] = useState<PulseBacklogItem[]>([]);
   const [showBacklog, setShowBacklog] = useState(false);
@@ -114,19 +117,23 @@ export default function PulsePage() {
     if (!profile) return;
     setLoading(true);
     try {
-      const [pulseData, attemptData, backlogData] = await Promise.all([
+      const [pulseData, attemptData, backlogData, cfg] = await Promise.all([
         getDailyPulse(today),
         getPulseAttempt(profile.uid, today),
         getUserPulseBacklog(profile.uid),
+        getPulseConfig(),
       ]);
 
       setPulse(pulseData);
       setAttempt(attemptData);
       setBacklog(backlogData);
+      setPulseConfig(cfg);
 
       if (pulseData && pulseData.questionIds.length > 0) {
+        // Use the user's personal question IDs if already assigned, otherwise use pool
+        const qIds = attemptData?.questionIds ?? pulseData.questionIds;
         const qs: Question[] = [];
-        for (const qId of pulseData.questionIds) {
+        for (const qId of qIds) {
           const snap = await getDoc(doc(db!, 'questions', qId));
           if (snap.exists()) qs.push({ id: snap.id, ...snap.data() } as Question);
         }
@@ -152,9 +159,34 @@ export default function PulsePage() {
         estado: od[SEGMENTATION_FIELD_KEYS.estado],
         cosecha: od[SEGMENTATION_FIELD_KEYS.fechaIngreso],
       };
-      await startPulseAttempt(profile.uid, profile.nombre, today, seg);
+
+      // If sameQuestionsForAll=false, pick a random subset of questionsPerPulse from the pool
+      let assignedIds: string[] | undefined;
+      if (!pulseConfig?.sameQuestionsForAll && pulse.questionIds.length > 0) {
+        const n = pulseConfig?.questionsPerPulse ?? 7;
+        const pool = [...pulse.questionIds];
+        // Fisher-Yates shuffle
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        assignedIds = pool.slice(0, n);
+      }
+
+      await startPulseAttempt(profile.uid, profile.nombre, today, seg, assignedIds);
       const newAttempt = await getPulseAttempt(profile.uid, today);
       setAttempt(newAttempt);
+
+      // If the user was assigned a specific subset, load those questions now
+      if (assignedIds && assignedIds.length > 0) {
+        const qs: Question[] = [];
+        for (const qId of assignedIds) {
+          const snap = await getDoc(doc(db!, 'questions', qId));
+          if (snap.exists()) qs.push({ id: snap.id, ...snap.data() } as Question);
+        }
+        setQuestions(qs);
+      }
+
       setCurrentIndex(0);
       setAnswers([]);
       setSelectedOption(null);
@@ -500,7 +532,7 @@ export default function PulsePage() {
                 </div>
 
                 <div className="space-y-1">
-                  <p className="font-bold text-2xl">7 preguntas de hoy</p>
+                  <p className="font-bold text-2xl">{pulseConfig?.questionsPerPulse ?? 7} preguntas de hoy</p>
                   {!windowOpen && (
                     <p className="text-xs text-orange-600 flex items-center gap-1.5">
                       <Clock className="h-3.5 w-3.5" /> Responde antes de las 12:00 PM

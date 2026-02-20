@@ -1062,14 +1062,16 @@ export interface VideoComment {
 // ============================================================================
 
 /**
- * Pulso diario: conjunto de 7 preguntas para un día específico.
- * El id usa el formato YYYY-MM-DD.
+ * Pulso diario: pool de preguntas disponibles para un día específico.
+ * Si sameQuestionsForAll=false, cada usuario recibe questionsPerPulse (default 7)
+ * elegidas al azar de este pool. Si true, todos reciben las primeras 7.
+ * El id usa el formato {orgId}_{YYYY-MM-DD}.
  */
 export interface DailyPulse {
-  id: string;            // YYYY-MM-DD
+  id: string;            // {orgId}_{YYYY-MM-DD}
   organizationId: string;
   date: string;          // YYYY-MM-DD
-  questionIds: string[]; // exactamente 7 preguntas
+  questionIds: string[]; // pool de preguntas disponibles (puede ser > questionsPerPulse)
   status: 'scheduled' | 'active' | 'closed';
   sentAt?: Timestamp;    // cuándo se envió la notificación de Slack
   closedAt?: Timestamp;  // cuándo cerró la ventana de respuesta
@@ -1105,6 +1107,10 @@ export interface PulseAttempt {
   hub?: string;
   estado?: string;
   cosecha?: string; // valor de fecha_ingreso
+
+  /** IDs de las preguntas asignadas a este usuario (subconjunto del pool del DailyPulse).
+   *  Presente cuando sameQuestionsForAll=false; si ausente, usar pulso.questionIds directamente. */
+  questionIds?: string[];
 
   answers: PulseAnswer[];
   totalQuestions: number;
