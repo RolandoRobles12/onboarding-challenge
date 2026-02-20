@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
 import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine } from 'lucide-react';
-import type { QuestionFormData, QuizDifficulty, QuestionType, QuestionOption } from '@/lib/types-scalable';
+import type { QuestionFormData, QuizDifficulty, QuestionType, QuestionOption, KnowledgeModule } from '@/lib/types-scalable';
+import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 
@@ -25,6 +26,7 @@ export default function QuestionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterProduct, setFilterProduct] = useState<string>('all');
   const [filterDifficulty, setFilterDifficulty] = useState<string>('all');
+  const [filterModule, setFilterModule] = useState<string>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<any>(null);
   const [saving, setSaving] = useState(false);
@@ -40,6 +42,7 @@ export default function QuestionsPage() {
     ],
     tags: [],
     category: '',
+    module: undefined,
     isTricky: false,
     trickyHint: '',
     validAnswers: [],
@@ -93,8 +96,9 @@ export default function QuestionsPage() {
 
       const matchesProduct = filterProduct === 'all' || question.productId === filterProduct;
       const matchesDifficulty = filterDifficulty === 'all' || question.difficulty === filterDifficulty;
+      const matchesModule = filterModule === 'all' || question.module === filterModule || (filterModule === 'none' && !question.module);
 
-      return matchesSearch && matchesProduct && matchesDifficulty;
+      return matchesSearch && matchesProduct && matchesDifficulty && matchesModule;
     });
   }, [questions, searchQuery, filterProduct, filterDifficulty]);
 
@@ -109,6 +113,7 @@ export default function QuestionsPage() {
         options: question.options,
         tags: question.tags || [],
         category: question.category || '',
+        module: question.module || undefined,
         isTricky: question.isTricky,
         trickyHint: question.trickyHint || '',
         validAnswers: question.validAnswers || [],
@@ -131,6 +136,7 @@ export default function QuestionsPage() {
         ],
         tags: [],
         category: '',
+        module: undefined,
         isTricky: false,
         trickyHint: '',
         validAnswers: [],
@@ -658,6 +664,26 @@ export default function QuestionsPage() {
                   />
                 </div>
 
+                {/* Módulo Knowledge Pulse */}
+                <div className="space-y-2">
+                  <Label>Módulo de Conocimiento (Pulso Diario)</Label>
+                  <Select
+                    value={formData.module || 'none'}
+                    onValueChange={(v) => setFormData({ ...formData, module: v === 'none' ? undefined : v as KnowledgeModule })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Sin módulo asignado" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin módulo</SelectItem>
+                      {(Object.entries(KNOWLEDGE_MODULE_LABELS) as [KnowledgeModule, string][]).map(([val, label]) => (
+                        <SelectItem key={val} value={val}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Asigna un módulo para incluir esta pregunta en el Pulso de Conocimiento diario.</p>
+                </div>
+
                 {/* Categoría y Tags */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -698,7 +724,7 @@ export default function QuestionsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-6">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -732,6 +758,19 @@ export default function QuestionsPage() {
                 <SelectItem value="easy">Fácil</SelectItem>
                 <SelectItem value="medium">Medio</SelectItem>
                 <SelectItem value="hard">Difícil</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filterModule} onValueChange={setFilterModule}>
+              <SelectTrigger>
+                <SelectValue placeholder="Filtrar por módulo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los módulos</SelectItem>
+                <SelectItem value="none">Sin módulo</SelectItem>
+                {(Object.entries(KNOWLEDGE_MODULE_LABELS) as [KnowledgeModule, string][]).map(([val, label]) => (
+                  <SelectItem key={val} value={val}>{label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -784,11 +823,11 @@ export default function QuestionsPage() {
           <CardContent className="py-12 text-center">
             <HelpCircle className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
             <p className="text-muted-foreground">
-              {searchQuery || filterProduct !== 'all' || filterDifficulty !== 'all'
+              {searchQuery || filterProduct !== 'all' || filterDifficulty !== 'all' || filterModule !== 'all'
                 ? 'No se encontraron preguntas con los filtros seleccionados'
                 : 'No hay preguntas aún'}
             </p>
-            {!searchQuery && filterProduct === 'all' && filterDifficulty === 'all' && (
+            {!searchQuery && filterProduct === 'all' && filterDifficulty === 'all' && filterModule === 'all' && (
               <Button className="mt-4" onClick={() => handleOpenDialog()}>
                 <Plus className="mr-2 h-4 w-4" />
                 Crear Primera Pregunta
@@ -880,6 +919,11 @@ export default function QuestionsPage() {
                       {(question.isTricky || question.type === 'tricky') && (
                         <span className="text-xs px-2 py-1 rounded-full bg-purple-500 text-white">
                           ⚡ Tricky
+                        </span>
+                      )}
+                      {question.module && (
+                        <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-medium">
+                          📡 {KNOWLEDGE_MODULE_LABELS[question.module as KnowledgeModule] ?? question.module}
                         </span>
                       )}
                       {question.category && (

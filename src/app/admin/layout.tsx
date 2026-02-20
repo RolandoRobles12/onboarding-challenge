@@ -25,6 +25,7 @@ import {
   FileText,
   Layers,
   Clapperboard,
+  Radio,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -62,6 +63,12 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Niveles XP', href: '/admin/levels', icon: Layers },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
       { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },
+    ],
+  },
+  {
+    section: 'Pulso de Conocimiento',
+    items: [
+      { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
     ],
   },
   {

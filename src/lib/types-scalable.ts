@@ -11,6 +11,38 @@ import { Timestamp } from 'firebase/firestore';
 
 export type UserRole = 'super_admin' | 'admin' | 'trainer' | 'seller';
 
+// ============================================================================
+// MÓDULOS DE CONOCIMIENTO (Knowledge Pulse)
+// ============================================================================
+
+export type KnowledgeModule =
+  | 'banca_conversacional'
+  | 'pagos_renovacion'
+  | 'solicitud_credito'
+  | 'herramientas'
+  | 'politicas_procesos'
+  | 'incentivos';
+
+export const KNOWLEDGE_MODULE_LABELS: Record<KnowledgeModule, string> = {
+  banca_conversacional: 'Banca Conversacional',
+  pagos_renovacion: 'Pagos y Renovación',
+  solicitud_credito: 'Solicitud de Crédito',
+  herramientas: 'Herramientas',
+  politicas_procesos: 'Políticas y Procesos',
+  incentivos: 'Incentivos',
+};
+
+/**
+ * Claves estándar para campos de segmentación en onboardingData.
+ * Deben coincidir con los fieldKey configurados en /admin/onboarding-fields.
+ */
+export const SEGMENTATION_FIELD_KEYS = {
+  vertical: 'vertical',
+  hub: 'hub',
+  estado: 'estado',
+  fechaIngreso: 'fecha_ingreso', // para agrupar por cosecha (semana/mes/año)
+} as const;
+
 export type QuizDifficulty = 'easy' | 'medium' | 'hard';
 
 export type QuestionType =
@@ -184,6 +216,7 @@ export interface Question {
   difficulty: QuizDifficulty;
   tags: string[];
   category?: string;
+  module?: KnowledgeModule; // Módulo de conocimiento (Knowledge Pulse)
 
   // Metadata
   active: boolean;
@@ -789,6 +822,7 @@ export interface QuestionFormData {
   options: Omit<QuestionOption, 'id'>[];
   tags: string[];
   category?: string;
+  module?: KnowledgeModule; // Módulo de conocimiento (Knowledge Pulse)
   isTricky: boolean;
   trickyHint?: string;
   validAnswers?: string[]; // para fill_in_the_blank y open_text: palabras/conceptos clave
@@ -1002,4 +1036,149 @@ export interface VideoComment {
   trainerName: string;
   text: string;
   createdAt: Timestamp;
+}
+
+// ============================================================================
+// KNOWLEDGE PULSE — PULSO DE CONOCIMIENTO DIARIO
+// ============================================================================
+
+/**
+ * Pulso diario: conjunto de 7 preguntas para un día específico.
+ * El id usa el formato YYYY-MM-DD.
+ */
+export interface DailyPulse {
+  id: string;            // YYYY-MM-DD
+  organizationId: string;
+  date: string;          // YYYY-MM-DD
+  questionIds: string[]; // exactamente 7 preguntas
+  status: 'scheduled' | 'active' | 'closed';
+  sentAt?: Timestamp;    // cuándo se envió la notificación de Slack
+  closedAt?: Timestamp;  // cuándo cerró la ventana de respuesta
+  totalResponses: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;     // 'system' o userId del admin
+}
+
+/** Respuesta individual de una pregunta dentro del pulso */
+export interface PulseAnswer {
+  questionId: string;
+  selectedOptionIds: string[];
+  isCorrect: boolean;
+  timeSpent: number; // segundos
+}
+
+/**
+ * Intento de un usuario al pulso diario.
+ * El id usa el formato {userId}_{YYYY-MM-DD}.
+ * Incluye snapshot de segmentación al momento de responder.
+ */
+export interface PulseAttempt {
+  id: string;            // {userId}_{date}
+  userId: string;
+  userName: string;      // denormalizado
+  pulseId: string;       // YYYY-MM-DD
+  date: string;          // YYYY-MM-DD
+  organizationId: string;
+
+  // Segmentación (snapshot de onboardingData al momento del intento)
+  vertical?: string;
+  hub?: string;
+  estado?: string;
+  cosecha?: string; // valor de fecha_ingreso
+
+  answers: PulseAnswer[];
+  totalQuestions: number;
+  correctAnswers: number;
+  percentage: number;
+
+  startedAt: Timestamp;
+  completedAt?: Timestamp;
+  status: 'in_progress' | 'completed' | 'expired';
+}
+
+/**
+ * Ítem en el backlog de un usuario (MVP2).
+ * Se crea cuando un usuario responde incorrectamente una pregunta del pulso.
+ */
+export interface PulseBacklogItem {
+  id: string;
+  userId: string;
+  organizationId: string;
+  questionId: string;
+  questionText: string;  // denormalizado para mostrar sin join
+  module: KnowledgeModule;
+  addedAt: Timestamp;
+  pulseDate: string;     // de qué pulso proviene
+  status: 'pending' | 'resolved';
+  resolvedAt?: Timestamp;
+  linkedVideoIds?: string[]; // videos de remediación sugeridos
+}
+
+// ============================================================================
+// CONFIGURACIÓN DE NOTIFICACIÓN SLACK
+// ============================================================================
+
+export interface SlackChannel {
+  id: string;
+  channelId: string;   // ID del canal en Slack (ej: C01234567)
+  channelName: string; // Nombre visible (ej: #conocimiento-diario)
+  description?: string;
+  active: boolean;
+}
+
+/**
+ * Configuración global del bot de Slack para el Knowledge Pulse.
+ * El bot token se guarda en variables de entorno (SLACK_BOT_TOKEN).
+ */
+export interface SlackNotificationConfig {
+  organizationId: string;
+  active: boolean;
+  sendAt: string;        // HH:MM en horario local del equipo (ej: "08:00")
+  closeAt: string;       // HH:MM límite para responder (ej: "12:00")
+  messageTemplate: string; // Plantilla del mensaje. Soporta {date}, {link}
+  channels: SlackChannel[];
+  updatedAt: Timestamp;
+  updatedBy: string;
+}
+
+// ============================================================================
+// ANALYTICS DEL PULSO
+// ============================================================================
+
+export interface PulseSegmentMetric {
+  segmentKey: string;   // valor del segmento (ej: "Norte", "Hub CDMX")
+  totalAttempts: number;
+  totalCorrect: number;
+  percentage: number;   // % de aciertos
+  participationRate: number; // % de usuarios que respondieron
+}
+
+export interface PulseQuestionMetric {
+  questionId: string;
+  questionText: string;
+  module: KnowledgeModule;
+  timesAsked: number;
+  timesCorrect: number;
+  correctRate: number;  // 0–100
+}
+
+export interface PulseAnalyticsReport {
+  periodStart: string;  // YYYY-MM-DD
+  periodEnd: string;    // YYYY-MM-DD
+  totalPulses: number;
+  totalAttempts: number;
+  overallCorrectRate: number;
+  participationRate: number;
+
+  byVertical: PulseSegmentMetric[];
+  byHub: PulseSegmentMetric[];
+  byEstado: PulseSegmentMetric[];
+  byCosecha: PulseSegmentMetric[];
+
+  // Preguntas más falladas (ordenadas por correctRate asc)
+  difficultQuestions: PulseQuestionMetric[];
+
+  // Por módulo
+  byModule: (PulseSegmentMetric & { module: KnowledgeModule })[];
 }
