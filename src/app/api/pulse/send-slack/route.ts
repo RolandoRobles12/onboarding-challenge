@@ -49,12 +49,40 @@ export async function POST(req: NextRequest) {
       weekday: 'long', day: 'numeric', month: 'long',
     });
 
-    const text = cfg.messageTemplate
+    // Build the text body — {link} is now rendered as a Block Kit button, not inline text
+    const textBody = cfg.messageTemplate
       .replace('{date}', displayDate)
-      .replace('{link}', pulseLink);
+      .replace(/\{link\}/g, '')
+      .trim();
 
     const testPrefix = test ? '🧪 *[PRUEBA]* ' : '';
-    const finalText = testPrefix + text;
+    const finalText = testPrefix + textBody;
+
+    // Slack Block Kit: section with message text + primary button for the link
+    const blocks = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: finalText,
+        },
+      },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: '📚 Responder el Pulso →',
+              emoji: true,
+            },
+            style: 'primary',
+            url: pulseLink,
+          },
+        ],
+      },
+    ];
 
     const results: { channel: string; ok: boolean; error?: string }[] = [];
 
@@ -67,7 +95,8 @@ export async function POST(req: NextRequest) {
         },
         body: JSON.stringify({
           channel: ch.channelId,
-          text: finalText,
+          text: `${finalText} ${pulseLink}`, // fallback text for notifications/accessibility
+          blocks,
           unfurl_links: false,
         }),
       });
