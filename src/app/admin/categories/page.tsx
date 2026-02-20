@@ -28,6 +28,7 @@ import {
   Plus,
   Save,
   X,
+  DatabaseZap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PulseCategory } from '@/lib/types-scalable';
@@ -112,6 +113,8 @@ export default function CategoriesPage() {
   const [catLoading, setCatLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<string | null>(null);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -206,6 +209,21 @@ export default function CategoriesPage() {
     }
   }
 
+  // Seed base questions
+  async function handleSeedQuestions() {
+    setSeeding(true);
+    setSeedResult(null);
+    try {
+      const res = await fetch('/api/pulse/seed-questions', { method: 'POST' });
+      const data = await res.json() as { message?: string; error?: string };
+      setSeedResult(data.message ?? data.error ?? 'Listo');
+    } catch {
+      setSeedResult('Error al cargar preguntas');
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   // Stats per category
   const loading = catLoading || questionsLoading;
 
@@ -237,7 +255,11 @@ export default function CategoriesPage() {
             que el sistema mezcla automáticamente en el Pulso de Conocimiento.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 flex-wrap">
+          <Button variant="outline" onClick={handleSeedQuestions} disabled={seeding}>
+            <DatabaseZap className="h-4 w-4 mr-2" />
+            {seeding ? 'Cargando...' : 'Cargar preguntas base'}
+          </Button>
           <Button asChild variant="outline">
             <Link href="/admin/import">
               <Upload className="h-4 w-4 mr-2" /> Importar preguntas
@@ -248,6 +270,17 @@ export default function CategoriesPage() {
           </Button>
         </div>
       </div>
+
+      {/* Seed result banner */}
+      {seedResult && (
+        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
+          <DatabaseZap className="h-4 w-4 shrink-0" />
+          <span>{seedResult}</span>
+          <button onClick={() => setSeedResult(null)} className="ml-auto text-green-600 hover:text-green-800">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Summary strip */}
       {loading ? (

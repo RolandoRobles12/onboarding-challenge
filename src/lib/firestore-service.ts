@@ -2521,7 +2521,14 @@ export async function getPulseCategories(): Promise<PulseCategory[]> {
     query(collection(firestore, COLLECTIONS.PULSE_CATEGORIES), orderBy('order', 'asc'))
   );
   if (snap.empty) return [];
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as PulseCategory);
+  const all = snap.docs.map(d => ({ id: d.id, ...d.data() }) as PulseCategory);
+  // Deduplicate by key — keep only the first occurrence of each key
+  const seen = new Set<string>();
+  return all.filter(cat => {
+    if (seen.has(cat.key)) return false;
+    seen.add(cat.key);
+    return true;
+  });
 }
 
 export async function savePulseCategory(
@@ -2544,9 +2551,10 @@ export async function seedDefaultCategoriesIfEmpty(): Promise<void> {
   const firestore = ensureFirestore();
   const existing = await getPulseCategories();
   if (existing.length > 0) return;
+  // Use the category key as the document ID to ensure idempotent seeding
   const batch = writeBatch(firestore);
   DEFAULT_PULSE_CATEGORIES.forEach((cat, i) => {
-    const ref = doc(collection(firestore, COLLECTIONS.PULSE_CATEGORIES));
+    const ref = doc(firestore, COLLECTIONS.PULSE_CATEGORIES, cat.key);
     batch.set(ref, { ...cat, order: i });
   });
   await batch.commit();

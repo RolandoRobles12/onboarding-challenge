@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSlackConfig, getOrgToken } from '@/lib/firestore-service';
+import { getSlackConfig, getOrgToken, getAllUsers } from '@/lib/firestore-service';
 
 export async function POST(req: NextRequest) {
   try {
@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
 
     const results: { channel: string; ok: boolean; error?: string }[] = [];
 
+    // Send to channels
     for (const ch of activeChannels) {
       const res = await fetch('https://slack.com/api/chat.postMessage', {
         method: 'POST',
@@ -103,6 +104,28 @@ export async function POST(req: NextRequest) {
 
       const data = await res.json() as { ok: boolean; error?: string };
       results.push({ channel: ch.channelName, ok: data.ok, error: data.error });
+    }
+
+    // Send DMs to users with slackId configured
+    const allUsers = await getAllUsers();
+    const usersWithSlack = allUsers.filter(u => u.slackId && u.slackId.trim().length > 0);
+
+    for (const user of usersWithSlack) {
+      const res = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          channel: user.slackId!.trim(),
+          text: `${finalText} ${pulseLink}`,
+          blocks,
+          unfurl_links: false,
+        }),
+      });
+      const data = await res.json() as { ok: boolean; error?: string };
+      results.push({ channel: `DM:${user.nombre || user.email}`, ok: data.ok, error: data.error });
     }
 
     const failed = results.filter(r => !r.ok);
