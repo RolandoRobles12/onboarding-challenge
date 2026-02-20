@@ -315,8 +315,11 @@ export default function KnowledgePulsePage() {
           <TabsTrigger value="pulsos">
             <BarChart2 className="h-4 w-4 mr-1.5" /> Pulsos
           </TabsTrigger>
+          <TabsTrigger value="ajustes">
+            <Settings className="h-4 w-4 mr-1.5" /> Ajustes
+          </TabsTrigger>
           <TabsTrigger value="slack">
-            <Settings className="h-4 w-4 mr-1.5" /> Config Slack
+            <Send className="h-4 w-4 mr-1.5" /> Slack
           </TabsTrigger>
         </TabsList>
 
@@ -606,6 +609,44 @@ export default function KnowledgePulsePage() {
           )}
         </TabsContent>
 
+        {/* ─────────────────── AJUSTES DEL PULSO TAB ──────────────────── */}
+        <TabsContent value="ajustes" className="space-y-6 mt-5">
+          {loadingSlack ? (
+            <div className="space-y-4">{[...Array(2)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
+          ) : (
+            <div className="max-w-lg space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Ventana de respuesta</CardTitle>
+                  <CardDescription>
+                    Define hasta qué hora pueden los promotores responder el pulso del día.
+                    Pasada esa hora el pulso se cierra automáticamente.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-1.5 max-w-xs">
+                    <Label>Hora de cierre de ventana</Label>
+                    <Input
+                      type="time"
+                      value={slackForm.closeAt}
+                      onChange={e => setSlackForm(f => ({ ...f, closeAt: e.target.value }))}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      El pulso se marcará como <strong>cerrado</strong> a partir de esta hora.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex justify-end">
+                <Button onClick={handleSaveSlack} disabled={savingSlack}>
+                  {savingSlack ? 'Guardando...' : 'Guardar ajustes'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
         {/* ─────────────────── SLACK CONFIG TAB ───────────────────────── */}
         <TabsContent value="slack" className="space-y-6 mt-5">
           {loadingSlack ? (
@@ -626,15 +667,10 @@ export default function KnowledgePulsePage() {
                     <Switch checked={slackForm.active} onCheckedChange={v => setSlackForm(f => ({ ...f, active: v }))} />
                     <Label>Notificaciones activas</Label>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>Hora de envío</Label>
-                      <Input type="time" value={slackForm.sendAt} onChange={e => setSlackForm(f => ({ ...f, sendAt: e.target.value }))} />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Cierre de ventana</Label>
-                      <Input type="time" value={slackForm.closeAt} onChange={e => setSlackForm(f => ({ ...f, closeAt: e.target.value }))} />
-                    </div>
+                  <div className="space-y-1.5 max-w-xs">
+                    <Label>Hora de envío de notificación</Label>
+                    <Input type="time" value={slackForm.sendAt} onChange={e => setSlackForm(f => ({ ...f, sendAt: e.target.value }))} />
+                    <p className="text-xs text-muted-foreground">Hora a la que el bot publicará el mensaje en Slack.</p>
                   </div>
                   <div className="space-y-1.5">
                     <Label>URL de la app</Label>

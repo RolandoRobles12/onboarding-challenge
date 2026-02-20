@@ -28,11 +28,13 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import { toast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { getDoc, doc } from 'firebase/firestore';
+import Link from 'next/link';
 import {
   Radio, CheckCircle, XCircle, Clock, ListTodo, Play, ChevronRight,
-  Award, AlertCircle, ChevronDown, ChevronUp,
+  Award, AlertCircle, ChevronDown, ChevronUp, ArrowLeft,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { BottomNav } from '@/components/BottomNav';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,34 @@ const MODULE_COLORS: Record<KnowledgeModule, string> = {
   politicas_procesos: 'bg-red-500/10 text-red-700 border-red-200',
   incentivos: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
 };
+
+// ── Page shell (header + bottom nav) ───────────────────────────────────────
+
+function PageShell({ children }: { children: React.ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background flex flex-col">
+        {/* Sticky top bar */}
+        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 h-14 flex items-center gap-3">
+          <Link href="/" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+            <ArrowLeft className="h-5 w-5" />
+          </Link>
+          <div className="flex items-center gap-2 font-bold text-base">
+            <Radio className="h-4 w-4 text-primary" /> Pulso de Conocimiento
+          </div>
+        </header>
+
+        {/* Scrollable content */}
+        <div className="flex-1">
+          {children}
+        </div>
+
+        {/* Bottom nav */}
+        <BottomNav isAdmin={false} />
+      </div>
+    </ProtectedRoute>
+  );
+}
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -204,15 +234,13 @@ export default function PulsePage() {
 
   if (loading) {
     return (
-      <ProtectedRoute>
-        <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background flex flex-col">
-          <div className="max-w-lg mx-auto w-full px-4 pt-12 space-y-4">
-            <Skeleton className="h-8 w-48 mx-auto" />
-            <Skeleton className="h-6 w-32 mx-auto" />
-            <Skeleton className="h-64 rounded-2xl mt-6" />
-          </div>
+      <PageShell>
+        <div className="max-w-lg mx-auto w-full px-4 pt-10 pb-28 space-y-4">
+          <Skeleton className="h-8 w-48 mx-auto" />
+          <Skeleton className="h-6 w-32 mx-auto" />
+          <Skeleton className="h-64 rounded-2xl mt-6" />
         </div>
-      </ProtectedRoute>
+      </PageShell>
     );
   }
 
@@ -222,9 +250,8 @@ export default function PulsePage() {
     const isLast = currentIndex >= questions.length - 1;
 
     return (
-      <ProtectedRoute>
-        <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background flex flex-col">
-          <div className="max-w-lg mx-auto w-full px-4 pt-8 pb-12 flex flex-col gap-5">
+      <PageShell>
+        <div className="max-w-lg mx-auto w-full px-4 pt-6 pb-28 flex flex-col gap-5">
             {/* Progress */}
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs text-muted-foreground">
@@ -330,8 +357,7 @@ export default function PulsePage() {
               </Button>
             )}
           </div>
-        </div>
-      </ProtectedRoute>
+      </PageShell>
     );
   }
 
@@ -344,9 +370,8 @@ export default function PulsePage() {
     const passed = pct >= 70;
 
     return (
-      <ProtectedRoute>
-        <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background flex flex-col">
-          <div className="max-w-lg mx-auto w-full px-4 pt-10 pb-12 space-y-4">
+      <PageShell>
+        <div className="max-w-lg mx-auto w-full px-4 pt-6 pb-28 space-y-4">
             {/* Score card */}
             <Card className="rounded-2xl shadow-sm border-0 overflow-hidden">
               <div className={cn('py-8 px-6 text-center', passed ? 'bg-green-500/8' : 'bg-orange-500/8')}>
@@ -403,9 +428,8 @@ export default function PulsePage() {
                 )}
               </div>
             )}
-          </div>
         </div>
-      </ProtectedRoute>
+      </PageShell>
     );
   }
 
@@ -418,18 +442,12 @@ export default function PulsePage() {
   }, {});
 
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background flex flex-col">
-        <div className="max-w-lg mx-auto w-full px-4 pt-10 pb-12 space-y-4">
-          {/* Header */}
-          <div className="text-center space-y-1">
-            <div className="flex items-center justify-center gap-2 text-primary font-bold text-xl">
-              <Radio className="h-5 w-5" /> Pulso de Conocimiento
-            </div>
-            <p className="text-sm text-muted-foreground capitalize">
-              {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </p>
-          </div>
+    <PageShell>
+      <div className="max-w-lg mx-auto w-full px-4 pt-6 pb-28 space-y-4">
+          {/* Date header */}
+          <p className="text-sm text-muted-foreground capitalize text-center">
+            {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })}
+          </p>
 
           {/* Main card */}
           {!pulse ? (
@@ -524,9 +542,8 @@ export default function PulsePage() {
               )}
             </div>
           )}
-        </div>
       </div>
-    </ProtectedRoute>
+    </PageShell>
   );
 }
 
