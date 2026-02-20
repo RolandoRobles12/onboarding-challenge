@@ -2194,12 +2194,17 @@ export async function getPulseAttempt(userId: string, date: string, orgId = DEFA
   }
 }
 
-/** Inicia un intento de pulso. */
+/** Inicia un intento de pulso.
+ *  @param questionIds  IDs de las preguntas asignadas a este usuario (subconjunto del pool).
+ *                      Si se pasan, se almacenan en el documento para que el usuario siempre
+ *                      vea las mismas preguntas aunque recargue antes de terminar.
+ */
 export async function startPulseAttempt(
   userId: string,
   userName: string,
   date: string,
   segmentation: { vertical?: string; hub?: string; estado?: string; cosecha?: string },
+  questionIds?: string[],
   orgId = DEFAULT_ORG_ID
 ): Promise<string> {
   const id = `${userId}_${date}`;
@@ -2210,8 +2215,9 @@ export async function startPulseAttempt(
     date,
     organizationId: orgId,
     ...segmentation,
+    ...(questionIds ? { questionIds } : {}),
     answers: [],
-    totalQuestions: 7,
+    totalQuestions: questionIds?.length ?? 7,
     correctAnswers: 0,
     percentage: 0,
     startedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
@@ -2407,14 +2413,14 @@ export async function savePulseConfig(
 // ----------- Auto-scheduling helpers -----------
 
 /**
- * Selecciona 7 preguntas del catálogo para el pulso de hoy usando rotación automática.
- * Prioriza preguntas con menor correctRate y las que no se han usado recientemente.
- * Distribuye equitativamente entre módulos (máx 2 por módulo).
+ * Retorna TODAS las preguntas activas del catálogo ordenadas por correctRate asc
+ * (las más difíciles primero) para usarlas como pool del DailyPulse.
+ * Cuando sameQuestionsForAll=false, cada usuario elige aleatoriamente
+ * questionsPerPulse (7) de este pool al iniciar.
  */
 export async function scheduleAutoPulse(
   orgId = DEFAULT_ORG_ID
 ): Promise<string[]> {
-  // Obtener preguntas activas con módulo asignado
   const q = query(
     getCollectionRef(COLLECTIONS.QUESTIONS),
     where('organizationId', '==', orgId),
@@ -2422,40 +2428,11 @@ export async function scheduleAutoPulse(
   );
   const snap = await getDocs(q);
   const allQuestions = snap.docs.map(d => ({ id: d.id, ...d.data() }) as import('./types-scalable').Question);
-  const withModule = allQuestions.filter(q => q.module);
 
-  if (withModule.length < 7) {
-    // Si hay menos de 7, usar las que haya (incluso sin módulo)
-    const combined = [...withModule, ...allQuestions.filter(q => !q.module)];
-    return combined.slice(0, 7).map(q => q.id);
-  }
+  // Ordenar por correctRate asc (más difíciles primero) para priorizar refuerzo
+  allQuestions.sort((a, b) => a.averageCorrectRate - b.averageCorrectRate);
 
-  // Agrupar por módulo
-  const byModule = new Map<string, typeof withModule>();
-  for (const q of withModule) {
-    const mod = q.module as string;
-    if (!byModule.has(mod)) byModule.set(mod, []);
-    byModule.get(mod)!.push(q);
-  }
-
-  // Ordenar cada módulo por correctRate asc (más difíciles primero)
-  byModule.forEach(list => list.sort((a, b) => a.averageCorrectRate - b.averageCorrectRate));
-
-  const selected: string[] = [];
-  const modules = Array.from(byModule.keys());
-
-  // Round-robin por módulo hasta tener 7
-  let round = 0;
-  while (selected.length < 7) {
-    const mod = modules[round % modules.length];
-    const pool = byModule.get(mod) ?? [];
-    const pick = pool.find(q => !selected.includes(q.id));
-    if (pick) selected.push(pick.id);
-    round++;
-    if (round > modules.length * 10) break; // safety
-  }
-
-  return selected.slice(0, 7);
+  return allQuestions.map(q => q.id);
 }
 
 // ----------- Org Tokens -----------

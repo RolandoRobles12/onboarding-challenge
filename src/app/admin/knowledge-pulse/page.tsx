@@ -243,12 +243,12 @@ export default function KnowledgePulsePage() {
     setScheduling(true);
     try {
       const qIds = await scheduleAutoPulse();
-      if (qIds.length < 7) {
-        toast({ variant: 'destructive', title: 'Pocas preguntas', description: `Solo hay ${qIds.length} preguntas con módulo. Asigna módulos en el banco.` });
+      if (qIds.length === 0) {
+        toast({ variant: 'destructive', title: 'Sin preguntas', description: 'No hay preguntas activas. Agrega preguntas en el banco.' });
         return;
       }
       await upsertDailyPulse(date, qIds, profile?.uid || 'admin');
-      toast({ title: 'Pulso creado', description: `7 preguntas programadas para ${formatDateShort(date)}` });
+      toast({ title: 'Pulso creado', description: `Pool de ${qIds.length} preguntas disponibles para ${formatDateShort(date)}` });
       await Promise.all([loadPulses(), loadSelectedDay(date)]);
     } finally {
       setScheduling(false);
@@ -1069,21 +1069,35 @@ export default function KnowledgePulsePage() {
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Seleccionar preguntas del pulso</DialogTitle>
+            <DialogTitle>Seleccionar pool de preguntas</DialogTitle>
             <DialogDescription>
-              Elige exactamente 7 preguntas con módulo asignado para {editingPulse ? formatDateShort(editingPulse.date) : ''}.
+              Elige las preguntas disponibles para {editingPulse ? formatDateShort(editingPulse.date) : ''}.
+              Con <strong>preguntas aleatorias</strong> activado, cada usuario recibe 7 al azar de este pool.
+              Selecciona todas las que quieras incluir.
             </DialogDescription>
           </DialogHeader>
           {editingPulse && (
             <div className="space-y-3 py-2">
-              {/* Progress indicator */}
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  {[...Array(7)].map((_, i) => (
-                    <div key={i} className={cn('h-2 w-6 rounded-full transition-all', i < editingPulse.questionIds.length ? 'bg-primary' : 'bg-muted')} />
-                  ))}
+              {/* Counter */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">
+                  {editingPulse.questionIds.length} de {questions.filter(q => q.module).length} preguntas seleccionadas
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    className="text-xs text-primary hover:underline"
+                    onClick={() => setEditingPulse(prev => prev ? { ...prev, questionIds: questions.filter(q => q.module).map(q => q.id) } : prev)}
+                  >
+                    Seleccionar todas
+                  </button>
+                  <span className="text-muted-foreground">·</span>
+                  <button
+                    className="text-xs text-muted-foreground hover:underline"
+                    onClick={() => setEditingPulse(prev => prev ? { ...prev, questionIds: [] } : prev)}
+                  >
+                    Limpiar
+                  </button>
                 </div>
-                <span className="text-sm text-muted-foreground">{editingPulse.questionIds.length}/7</span>
               </div>
               <div className="space-y-2 max-h-[50vh] overflow-y-auto">
                 {questions.filter(q => q.module).map(q => {
@@ -1095,7 +1109,7 @@ export default function KnowledgePulsePage() {
                         if (!prev) return prev;
                         const ids = prev.questionIds.includes(q.id)
                           ? prev.questionIds.filter(id => id !== q.id)
-                          : prev.questionIds.length < 7 ? [...prev.questionIds, q.id] : prev.questionIds;
+                          : [...prev.questionIds, q.id];
                         return { ...prev, questionIds: ids };
                       })}
                       className={cn(
@@ -1115,8 +1129,8 @@ export default function KnowledgePulsePage() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveEditedPulse} disabled={editingPulse?.questionIds.length !== 7}>
-              Guardar {editingPulse?.questionIds.length}/7
+            <Button onClick={handleSaveEditedPulse} disabled={!editingPulse || editingPulse.questionIds.length === 0}>
+              Guardar pool ({editingPulse?.questionIds.length ?? 0} preguntas)
             </Button>
           </DialogFooter>
         </DialogContent>
