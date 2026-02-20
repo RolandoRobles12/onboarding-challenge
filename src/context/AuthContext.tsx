@@ -144,6 +144,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } as UserProfile;
       }
 
+      // Bloquear acceso si el usuario está desactivado
+      if (userProfile?.active === false) {
+        await signOut(auth);
+        toast({
+          variant: 'destructive',
+          title: 'Cuenta desactivada',
+          description: 'Tu acceso ha sido desactivado. Contacta al administrador.',
+        });
+        setProfile(null);
+        return;
+      }
+
       setProfile(userProfile);
     } catch (error) {
       console.error('Error loading/creating user profile:', error);
