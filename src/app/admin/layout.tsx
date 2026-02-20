@@ -50,6 +50,13 @@ const navigation: (NavItem | NavSection)[] = [
     ],
   },
   {
+    section: 'Pulso de Conocimiento',
+    items: [
+      { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
+      { name: 'Categorías', href: '/admin/categories', icon: FolderKanban },
+    ],
+  },
+  {
     section: 'Rutas de Capacitación',
     items: [
       { name: 'Rutas del Jaguar Aviva', href: '/admin/journey', icon: Route },
@@ -65,13 +72,6 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Niveles XP', href: '/admin/levels', icon: Layers },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
       { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },
-    ],
-  },
-  {
-    section: 'Pulso de Conocimiento',
-    items: [
-      { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
-      { name: 'Categorías', href: '/admin/categories', icon: FolderKanban },
     ],
   },
   {
