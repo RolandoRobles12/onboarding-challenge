@@ -41,7 +41,8 @@ import { BottomNav } from '@/components/BottomNav';
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function todayStr() {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function currentHour() {
@@ -510,6 +511,14 @@ export default function PulsePage() {
                     {attempt.correctAnswers}/{attempt.totalQuestions} correctas · {attempt.percentage}%
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+          ) : pulse.questionIds.length === 0 ? (
+            <Card className="rounded-2xl shadow-sm border-0">
+              <CardContent className="py-14 text-center space-y-3">
+                <Clock className="h-10 w-10 mx-auto text-muted-foreground" />
+                <p className="font-semibold">El pulso se está preparando</p>
+                <p className="text-sm text-muted-foreground">Las preguntas de hoy estarán listas pronto. Vuelve en unos minutos.</p>
               </CardContent>
             </Card>
           ) : (
