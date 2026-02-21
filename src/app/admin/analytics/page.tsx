@@ -35,6 +35,17 @@ const MODULE_COLORS: Record<string, string> = {
   pagos_renovacion: 'bg-green-500/10 text-green-700 border-green-200',
   solicitud_credito: 'bg-purple-500/10 text-purple-700 border-purple-200',
   herramientas: 'bg-orange-500/10 text-orange-700 border-orange-200',
+  politicas_procesos: 'bg-red-500/10 text-red-700 border-red-200',
+  incentivos: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
+};
+
+const MODULE_BAR_COLORS: Record<string, string> = {
+  banca_conversacional: 'bg-blue-500',
+  pagos_renovacion: 'bg-green-500',
+  solicitud_credito: 'bg-purple-500',
+  herramientas: 'bg-orange-500',
+  politicas_procesos: 'bg-red-500',
+  incentivos: 'bg-yellow-500',
 };
 
 type OptFilter = 'dimension' | 'cosechaGranularity' | 'cosechaFrom' | 'cosechaTo';
@@ -89,6 +100,31 @@ function buildSegmentMetrics(
   return Object.entries(map)
     .map(([key, { count, totalPct }]) => ({ key, totalAttempts: count, avgPct: Math.round(totalPct / count) }))
     .sort((a, b) => b.avgPct - a.avgPct);
+}
+
+function buildModuleMetrics(
+  attempts: PulseAttempt[],
+  questionMap: Record<string, Question>,
+): { module: KnowledgeModule; label: string; totalAnswers: number; correctAnswers: number; correctRate: number }[] {
+  const map: Record<string, { totalAnswers: number; correctAnswers: number }> = {};
+  for (const a of attempts) {
+    for (const ans of a.answers) {
+      const q = questionMap[ans.questionId];
+      if (!q?.module) continue;
+      if (!map[q.module]) map[q.module] = { totalAnswers: 0, correctAnswers: 0 };
+      map[q.module].totalAnswers++;
+      if (ans.isCorrect) map[q.module].correctAnswers++;
+    }
+  }
+  return Object.entries(map)
+    .map(([mod, { totalAnswers, correctAnswers }]) => ({
+      module: mod as KnowledgeModule,
+      label: KNOWLEDGE_MODULE_LABELS[mod as KnowledgeModule] ?? mod,
+      totalAnswers,
+      correctAnswers,
+      correctRate: totalAnswers > 0 ? Math.round((correctAnswers / totalAnswers) * 100) : 0,
+    }))
+    .sort((a, b) => a.correctRate - b.correctRate);
 }
 
 function buildQuestionMetrics(
@@ -321,6 +357,7 @@ export default function AnalyticsPage() {
     : [];
   const maxSegPct = segmentMetrics[0]?.avgPct ?? 100;
   const questionMetrics = buildQuestionMetrics(filteredAttempts);
+  const moduleMetrics = buildModuleMetrics(filteredAttempts, questionMap);
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -554,6 +591,56 @@ export default function AnalyticsPage() {
                   color={participationRate >= 70 ? 'text-green-500' : participationRate >= 40 ? 'text-orange-500' : 'text-purple-500'}
                 />
               </div>
+
+              {/* Module performance */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BookOpen className="h-4 w-4" /> Desempeño por Módulo
+                  </CardTitle>
+                  <CardDescription>% de aciertos por módulo de conocimiento (de menor a mayor)</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {moduleMetrics.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-6">
+                      No hay datos de módulos para este período. Asegúrate de que las preguntas tengan módulo asignado.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {moduleMetrics.map(({ module, label, totalAnswers, correctAnswers, correctRate }) => (
+                        <div key={module} className="space-y-1">
+                          <div className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                'text-[10px] px-2 py-0.5 rounded-full border font-medium',
+                                MODULE_COLORS[module] ?? 'bg-muted text-muted-foreground border-border'
+                              )}>
+                                {label}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs text-muted-foreground">{correctAnswers}/{totalAnswers} resp.</span>
+                              <span className={cn(
+                                'font-semibold text-sm w-10 text-right',
+                                correctRate >= 70 ? 'text-green-600' : correctRate >= 50 ? 'text-orange-500' : 'text-red-500'
+                              )}>{correctRate}%</span>
+                            </div>
+                          </div>
+                          <div className="h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={cn(
+                                'h-full rounded-full transition-all duration-500',
+                                MODULE_BAR_COLORS[module] ?? 'bg-primary'
+                              )}
+                              style={{ width: `${correctRate}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
               {/* Segment chart */}
               {activeOptFilters.has('dimension') && (
