@@ -53,8 +53,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Notificaciones de Slack desactivadas' }, { status: 400 });
     }
 
-    // Build message text and blocks
-    const pulseLink = cfg.appUrl ? `${cfg.appUrl.replace(/\/$/, '')}/pulse` : '';
+    // Build pulse link — prefer stored appUrl, fall back to the request host so the
+    // button is always present even when appUrl hasn't been saved in Firestore yet.
+    const proto = req.headers.get('x-forwarded-proto') || 'https';
+    const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
+    const baseUrl = cfg.appUrl?.trim()
+      ? cfg.appUrl.replace(/\/$/, '')
+      : host ? `${proto}://${host}` : '';
+    const pulseLink = baseUrl ? `${baseUrl}/pulse` : '';
 
     const [y, m, d] = date.split('-').map(Number);
     const displayDate = new Date(y, m - 1, d).toLocaleDateString('es-MX', {
