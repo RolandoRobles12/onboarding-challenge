@@ -392,7 +392,7 @@ export default function KnowledgePulsePage() {
   const getPulseForDate = (d: string) => pulses.find(p => p.date === d) ?? null;
 
   const pulseQuestions = selectedPulse
-    ? questions.filter(q => selectedPulse.questionIds.includes(q.id))
+    ? questions.filter(q => (selectedPulse.questionIds ?? []).includes(q.id))
     : [];
 
   const avgCorrect = pulseAttempts.length > 0
@@ -507,7 +507,7 @@ export default function KnowledgePulsePage() {
                     </div>
                     <div className="bg-white/60 rounded-xl p-3 col-span-2 sm:col-span-1">
                       <p className="text-xs text-muted-foreground mb-0.5">Preguntas</p>
-                      <p className="text-2xl font-bold">{selectedPulse.questionIds.length}</p>
+                      <p className="text-2xl font-bold">{(selectedPulse.questionIds ?? []).length}</p>
                     </div>
                   </div>
 
@@ -527,7 +527,7 @@ export default function KnowledgePulsePage() {
                     )}
                     {selectedPulse.status !== 'closed' && (
                       <Button variant="ghost" size="sm" onClick={() => {
-                        setEditingPulse({ date: selectedPulse.date, questionIds: [...selectedPulse.questionIds] });
+                        setEditingPulse({ date: selectedPulse.date, questionIds: [...(selectedPulse.questionIds ?? [])] });
                         setEditDialogOpen(true);
                       }}>
                         <Edit3 className="h-4 w-4 mr-1.5" /> Editar preguntas
