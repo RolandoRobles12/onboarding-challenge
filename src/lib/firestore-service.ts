@@ -2427,12 +2427,15 @@ export async function scheduleAutoPulse(
     where('active', '==', true),
   );
   const snap = await getDocs(q);
-  const allQuestions = snap.docs.map(d => ({ id: d.id, ...d.data() }) as import('./types-scalable').Question);
+  const allQuestions = snap.docs
+    .map(d => ({ id: d.id, ...d.data() }) as import('./types-scalable').Question)
+    // Solo preguntas con módulo asignado (preguntas del pulso, no de quizzes)
+    .filter(question => !!question.module);
 
   // Ordenar por correctRate asc (más difíciles primero) para priorizar refuerzo
   allQuestions.sort((a, b) => a.averageCorrectRate - b.averageCorrectRate);
 
-  return allQuestions.map(q => q.id);
+  return allQuestions.map(question => question.id);
 }
 
 // ----------- Org Tokens -----------
