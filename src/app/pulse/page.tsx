@@ -470,12 +470,6 @@ export default function PulsePage() {
 
   // ── Render: main (idle) ────────────────────────────────────────────────
 
-  const moduleBreakdown = questions.reduce<Record<string, number>>((acc, q) => {
-    const mod = q.module ?? 'otro';
-    acc[mod] = (acc[mod] ?? 0) + 1;
-    return acc;
-  }, {});
-
   return (
     <PageShell>
       <div className="max-w-xl sm:max-w-2xl mx-auto w-full px-4 sm:px-6 pt-6 pb-28 space-y-4">
@@ -524,22 +518,6 @@ export default function PulsePage() {
           ) : (
             <Card className="rounded-2xl shadow-sm border-0">
               <CardContent className="p-6 space-y-5">
-                {/* Modules */}
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(moduleBreakdown).map(([mod, count]) => (
-                    <span
-                      key={mod}
-                      className={cn(
-                        'text-xs px-2.5 py-1 rounded-full border font-medium flex items-center gap-1',
-                        MODULE_COLORS[mod as KnowledgeModule] ?? 'bg-muted text-muted-foreground border-border'
-                      )}
-                    >
-                      {KNOWLEDGE_MODULE_LABELS[mod as KnowledgeModule] ?? mod}
-                      <span className="opacity-60">·{count}</span>
-                    </span>
-                  ))}
-                </div>
-
                 <div className="space-y-1">
                   <p className="font-bold text-2xl">{pulseConfig?.questionsPerPulse ?? 7} preguntas de hoy</p>
                   {!windowOpen && (
