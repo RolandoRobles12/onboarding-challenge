@@ -517,7 +517,7 @@ export default function KnowledgePulsePage() {
 
                   {/* Actions */}
                   <div className="flex flex-wrap gap-2">
-                    {selectedPulse.status === 'scheduled' && (
+                    {(selectedPulse.status === 'scheduled' || !selectedPulse.status) && (
                       <Button onClick={() => handleActivate(selectedDate)} disabled={actioning} size="sm" className="font-semibold">
                         <Radio className="h-4 w-4 mr-1.5" />
                         {actioning ? 'Activando...' : 'Activar ahora'}
