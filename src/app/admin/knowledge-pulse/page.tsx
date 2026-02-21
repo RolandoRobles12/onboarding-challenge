@@ -523,6 +523,12 @@ export default function KnowledgePulsePage() {
                         {actioning ? 'Activando...' : 'Activar ahora'}
                       </Button>
                     )}
+                    {(selectedPulse.status === 'scheduled' || !selectedPulse.status) && (selectedPulse.questionIds ?? []).length === 0 && (
+                      <Button onClick={() => handleAutoSchedule(selectedDate)} disabled={scheduling} size="sm" variant="outline">
+                        <Zap className="h-4 w-4 mr-1.5" />
+                        {scheduling ? 'Asignando...' : 'Auto-asignar preguntas'}
+                      </Button>
+                    )}
                     {selectedPulse.status === 'active' && (
                       <Button onClick={() => handleClose(selectedDate)} disabled={actioning} size="sm" variant="outline" className="font-semibold border-green-300 text-green-700 hover:bg-green-50">
                         <CheckCircle className="h-4 w-4 mr-1.5" />
@@ -644,7 +650,21 @@ export default function KnowledgePulsePage() {
                     {loadingQ ? (
                       <div className="space-y-3">{[...Array(7)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
                     ) : pulseQuestions.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-6">No se encontraron las preguntas en el banco.</p>
+                      <div className="text-center py-6 space-y-2">
+                        {(selectedPulse?.questionIds ?? []).length === 0 ? (
+                          <>
+                            <AlertTriangle className="h-6 w-6 mx-auto text-yellow-500" />
+                            <p className="text-sm font-medium">Este pulso no tiene preguntas asignadas.</p>
+                            <p className="text-xs text-muted-foreground">Usa &quot;Auto-asignar preguntas&quot; o &quot;Editar preguntas&quot; para agregar preguntas al pool.</p>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle className="h-6 w-6 mx-auto text-orange-500" />
+                            <p className="text-sm font-medium">No se encontraron las preguntas en el banco activo.</p>
+                            <p className="text-xs text-muted-foreground">Las preguntas de este pulso pueden haber sido desactivadas. Verifica el banco de preguntas.</p>
+                          </>
+                        )}
+                      </div>
                     ) : (
                       <div className="space-y-2">
                         {pulseQuestions.map((q, idx) => (
