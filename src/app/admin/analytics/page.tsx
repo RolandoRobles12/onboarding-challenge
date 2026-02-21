@@ -41,10 +41,13 @@ type OptFilter = 'dimension' | 'cosechaGranularity' | 'cosechaFrom' | 'cosechaTo
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function todayStr() { return new Date().toISOString().split('T')[0]; }
+function dateToStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function todayStr() { return dateToStr(new Date()); }
 function addDays(dateStr: string, n: number) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d + n).toISOString().split('T')[0];
+  return dateToStr(new Date(y, m - 1, d + n));
 }
 
 function getCosechaGroup(cosecha: string | undefined, granularity: CosechaGranularity = 'mes'): string {

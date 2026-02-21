@@ -44,8 +44,12 @@ import { cn } from '@/lib/utils';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+function dateToStr(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function todayStr() {
-  return new Date().toISOString().split('T')[0];
+  return dateToStr(new Date());
 }
 
 function formatDateLong(dateStr: string) {
@@ -62,7 +66,7 @@ function formatDateShort(dateStr: string) {
 
 function addDays(dateStr: string, n: number) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d + n).toISOString().split('T')[0];
+  return dateToStr(new Date(y, m - 1, d + n));
 }
 
 function getWeekDays(anchor: string): string[] {
@@ -73,7 +77,7 @@ function getWeekDays(anchor: string): string[] {
   const day = date.getDay(); // 0=Sun
   const monday = new Date(y, m - 1, d - ((day === 0 ? 7 : day) - 1));
   for (let i = 0; i < 7; i++) {
-    days.push(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i).toISOString().split('T')[0]);
+    days.push(dateToStr(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
   }
   return days;
 }
@@ -471,7 +475,7 @@ export default function KnowledgePulsePage() {
           ) : (
             /* Has pulse */
             (() => {
-              const meta = STATUS_META[selectedPulse.status];
+              const meta = STATUS_META[selectedPulse.status] ?? STATUS_META['scheduled'];
               const StatusIcon = meta.icon;
               return (
                 <div className={cn('rounded-2xl border bg-gradient-to-br p-6 space-y-4', meta.hero)}>
@@ -583,7 +587,7 @@ export default function KnowledgePulsePage() {
                         </span>
                         <div className="mt-1.5 h-2 flex items-center justify-center">
                           {pulse ? (
-                            <span className={cn('h-2 w-2 rounded-full', STATUS_META[pulse.status].dot)} />
+                            <span className={cn('h-2 w-2 rounded-full', (STATUS_META[pulse.status] ?? STATUS_META['scheduled']).dot)} />
                           ) : (
                             <span className="h-1 w-4 rounded-full bg-muted" />
                           )}
