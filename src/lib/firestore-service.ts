@@ -2150,7 +2150,12 @@ export async function upsertDailyPulse(
   const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, id);
   const existing = await getDoc(docRef);
   if (existing.exists()) {
-    await updateDoc(docRef, stripUndefined({ questionIds, updatedAt: serverTimestamp() }));
+    const currentStatus = existing.data()?.status as string | undefined;
+    // Normalizar status a 'scheduled' si está ausente o tiene un valor desconocido
+    const statusPatch = (!currentStatus || (currentStatus !== 'active' && currentStatus !== 'closed'))
+      ? { status: 'scheduled' }
+      : {};
+    await updateDoc(docRef, { questionIds, updatedAt: serverTimestamp(), ...statusPatch });
   } else {
     const pulse: Omit<DailyPulse, 'id'> = {
       organizationId: orgId,
