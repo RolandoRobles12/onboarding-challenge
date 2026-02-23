@@ -2298,6 +2298,28 @@ export async function getPulseAttemptsByDate(
   }
 }
 
+/** Lista TODOS los intentos completados en un rango de fechas (para analytics). */
+export async function getPulseAttemptsByDateRange(
+  startDate: string,
+  endDate: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<PulseAttempt[]> {
+  try {
+    const q = query(
+      getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate),
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as PulseAttempt))
+      .filter(a => a.organizationId === orgId);
+  } catch (error) {
+    console.error('Error getting pulse attempts by date range:', error);
+    return [];
+  }
+}
+
 // ----------- Pulse Backlog (MVP2) -----------
 
 /** Obtiene el backlog pendiente de un usuario. */
