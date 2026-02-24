@@ -456,7 +456,7 @@ export default function CategoriesPage() {
             <div className="space-y-1">
               <p className="font-medium text-foreground">Como funciona el Pulso?</p>
               <p>Cada día el sistema mezcla 7 preguntas automáticamente, distribuyéndolas entre todos los módulos disponibles. Cuantas más preguntas tenga cada categoría, más variado será el cuestionario diario y menos repetición verá el equipo.</p>
-              <p className="mt-1">Se priorizan las preguntas con menor porcentaje de aciertos para reforzar los temas más difíciles.</p>
+              <p className="mt-1">Se priorizan las preguntas con menor porcentaje de aciertos para reforzar los temas con más errores.</p>
             </div>
           </div>
         </CardContent>

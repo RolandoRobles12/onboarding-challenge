@@ -469,7 +469,7 @@ export default function KnowledgePulsePage() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-4">
-                La creación automática selecciona 7 preguntas priorizando las más difíciles y distribuyendo por módulo.
+                La creación automática selecciona 7 preguntas priorizando las de menor tasa de aciertos y distribuyendo por módulo.
               </p>
             </div>
           ) : (
