@@ -7,10 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   BarChart3, TrendingUp, Users, Target, Clock, Zap, Radio,
   BookOpen, X, Plus, Timer, AlertTriangle, CheckCircle2, Circle,
+  ChevronDown, ChevronRight, Search, ArrowUpDown,
 } from 'lucide-react';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
 import { getDailyPulses, getPulseAttemptsByDateRange, getQuestions, getAllUsers } from '@/lib/firestore-service';
-import type { PulseAttempt, DailyPulse, Question, KnowledgeModule } from '@/lib/types-scalable';
+import type { PulseAttempt, DailyPulse, Question, KnowledgeModule, UserProfile } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { cn } from '@/lib/utils';
 
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils';
 
 type SegmentDimension = 'vertical' | 'hub' | 'estado' | 'cosecha';
 type CosechaGranularity = 'semana' | 'mes' | 'trimestre' | 'año';
+type UserSortKey = 'avgPct' | 'nombre' | 'lastActivity';
 
 const DIMENSION_LABELS: Record<SegmentDimension, string> = {
   vertical: 'Vertical',
@@ -51,7 +53,6 @@ const MODULE_BAR_COLORS: Record<string, string> = {
   incentivos: 'bg-yellow-500',
 };
 
-// OptFilter now includes 'filterValue' for dimension-value filtering
 type OptFilter = 'dimension' | 'filterValue' | 'cosechaGranularity' | 'cosechaFrom' | 'cosechaTo';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -73,6 +74,22 @@ function shortDate(dateStr: string): string {
   const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   const [, m, d] = dateStr.split('-').map(Number);
   return `${d} ${months[m - 1]}`;
+}
+function pctColor(rate: number): string {
+  if (rate >= 70) return 'text-green-600';
+  if (rate >= 50) return 'text-orange-500';
+  return 'text-red-500';
+}
+function barColor(rate: number): string {
+  if (rate >= 70) return 'bg-green-500';
+  if (rate >= 50) return 'bg-orange-400';
+  return 'bg-red-500';
+}
+function cellBg(rate: number | null): string {
+  if (rate === null) return 'bg-muted/30 text-muted-foreground';
+  if (rate >= 70) return 'bg-green-100 text-green-800';
+  if (rate >= 50) return 'bg-orange-100 text-orange-800';
+  return 'bg-red-100 text-red-800';
 }
 
 function getCosechaGroup(cosecha: string | undefined, granularity: CosechaGranularity = 'mes'): string {
@@ -97,28 +114,12 @@ function getCosechaGroup(cosecha: string | undefined, granularity: CosechaGranul
   }
 }
 
-/** Returns the display value of a dimension field from an attempt. */
 function getDimensionValue(a: PulseAttempt, dim: SegmentDimension, granularity: CosechaGranularity = 'mes'): string {
   if (dim === 'cosecha') return getCosechaGroup(a.cosecha, granularity);
   return (a[dim] as string) || 'Sin datos';
 }
 
-function buildSegmentMetrics(
-  attempts: PulseAttempt[],
-  dimension: SegmentDimension,
-  granularity: CosechaGranularity,
-): { key: string; totalAttempts: number; avgPct: number }[] {
-  const map: Record<string, { count: number; totalPct: number }> = {};
-  for (const a of attempts) {
-    const key = getDimensionValue(a, dimension, granularity);
-    if (!map[key]) map[key] = { count: 0, totalPct: 0 };
-    map[key].count++;
-    map[key].totalPct += a.percentage;
-  }
-  return Object.entries(map)
-    .map(([key, { count, totalPct }]) => ({ key, totalAttempts: count, avgPct: Math.round(totalPct / count) }))
-    .sort((a, b) => b.avgPct - a.avgPct);
-}
+// ── Metric builders ────────────────────────────────────────────────────────
 
 interface QuestionMetric {
   questionId: string;
@@ -149,7 +150,7 @@ function buildQuestionMetrics(attempts: PulseAttempt[]): QuestionMetric[] {
       correctRate: timesAsked > 0 ? Math.round((timesCorrect / timesAsked) * 100) : 0,
       avgTime: timedCount > 0 ? Math.round(totalTime / timedCount) : 0,
     }))
-    .sort((a, b) => a.correctRate - b.correctRate);
+    .sort((a, b) => a.correctRate - b.correctRate); // lowest rate first
 }
 
 interface EnrichedModuleMetric {
@@ -158,13 +159,9 @@ interface EnrichedModuleMetric {
   totalAnswers: number;
   correctAnswers: number;
   correctRate: number;
-  /** Users with >70% correct in this module. */
   domina: number;
-  /** Users with 50–70% correct. */
   enProceso: number;
-  /** Users with <50% correct. */
   necesitaApoyo: number;
-  /** Top hardest questions in this module (sorted by correctRate asc). */
   hardestQuestions: QuestionMetric[];
 }
 
@@ -173,9 +170,7 @@ function buildEnrichedModuleMetrics(
   questionMap: Record<string, Question>,
   allQuestionMetrics: QuestionMetric[],
 ): EnrichedModuleMetric[] {
-  // Overall correct/total per module
   const overall: Record<string, { totalAnswers: number; correctAnswers: number }> = {};
-  // Per-user per-module correct/total (to compute distribution)
   const perUser: Record<string, Record<string, { correct: number; total: number }>> = {};
 
   for (const a of attempts) {
@@ -184,18 +179,15 @@ function buildEnrichedModuleMetrics(
       const q = questionMap[ans.questionId];
       if (!q?.module) continue;
       const mod = q.module;
-      // overall
       if (!overall[mod]) overall[mod] = { totalAnswers: 0, correctAnswers: 0 };
       overall[mod].totalAnswers++;
       if (ans.isCorrect) overall[mod].correctAnswers++;
-      // per-user
       if (!perUser[a.userId][mod]) perUser[a.userId][mod] = { correct: 0, total: 0 };
       perUser[a.userId][mod].total++;
       if (ans.isCorrect) perUser[a.userId][mod].correct++;
     }
   }
 
-  // Compute user distribution per module
   const dist: Record<string, { domina: number; enProceso: number; necesitaApoyo: number }> = {};
   for (const modules of Object.values(perUser)) {
     for (const [mod, { correct, total }] of Object.entries(modules)) {
@@ -208,13 +200,12 @@ function buildEnrichedModuleMetrics(
     }
   }
 
-  // Build question-per-module index from already-sorted allQuestionMetrics
   const qByModule: Record<string, QuestionMetric[]> = {};
   for (const qm of allQuestionMetrics) {
     const mod = questionMap[qm.questionId]?.module;
     if (!mod) continue;
     if (!qByModule[mod]) qByModule[mod] = [];
-    if (qByModule[mod].length < 3) qByModule[mod].push(qm); // top 3 hardest (already sorted asc)
+    if (qByModule[mod].length < 3) qByModule[mod].push(qm);
   }
 
   return Object.entries(overall)
@@ -244,7 +235,234 @@ function buildTrendMetrics(attempts: PulseAttempt[]): { date: string; count: num
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
-// ── Stat Card ──────────────────────────────────────────────────────────────
+// ── User detail metrics ────────────────────────────────────────────────────
+
+interface ModuleRate {
+  module: KnowledgeModule;
+  label: string;
+  correct: number;
+  total: number;
+  rate: number;
+}
+
+interface UserDetailMetric {
+  userId: string;
+  userName: string;
+  hub: string;
+  vertical: string;
+  estado: string;
+  totalAttempts: number;
+  avgPct: number;
+  totalCorrect: number;
+  totalQuestions: number;
+  lastActivity: string;
+  moduleRates: ModuleRate[];
+  worstModuleLabel: string;
+}
+
+function buildUserDetailMetrics(
+  attempts: PulseAttempt[],
+  questionMap: Record<string, Question>,
+): UserDetailMetric[] {
+  const users: Record<string, {
+    userName: string; hub: string; vertical: string; estado: string;
+    attempts: number; totalPct: number; correct: number; questions: number;
+    lastActivity: string;
+    moduleMap: Record<string, { correct: number; total: number }>;
+  }> = {};
+
+  for (const a of attempts) {
+    if (!users[a.userId]) {
+      users[a.userId] = {
+        userName: a.userName || a.userId,
+        hub: a.hub || '-', vertical: a.vertical || '-', estado: a.estado || '-',
+        attempts: 0, totalPct: 0, correct: 0, questions: 0,
+        lastActivity: a.date, moduleMap: {},
+      };
+    }
+    const u = users[a.userId];
+    u.attempts++;
+    u.totalPct += a.percentage;
+    u.correct += a.correctAnswers;
+    u.questions += a.totalQuestions;
+    if (a.date > u.lastActivity) u.lastActivity = a.date;
+
+    for (const ans of a.answers) {
+      const q = questionMap[ans.questionId];
+      if (!q?.module) continue;
+      if (!u.moduleMap[q.module]) u.moduleMap[q.module] = { correct: 0, total: 0 };
+      u.moduleMap[q.module].total++;
+      if (ans.isCorrect) u.moduleMap[q.module].correct++;
+    }
+  }
+
+  return Object.entries(users)
+    .map(([userId, u]) => {
+      const moduleRates: ModuleRate[] = Object.entries(u.moduleMap).map(([mod, { correct, total }]) => ({
+        module: mod as KnowledgeModule,
+        label: KNOWLEDGE_MODULE_LABELS[mod as KnowledgeModule] ?? mod,
+        correct, total,
+        rate: total > 0 ? Math.round((correct / total) * 100) : 0,
+      })).sort((a, b) => a.rate - b.rate);
+
+      const worst = moduleRates[0];
+      return {
+        userId,
+        userName: u.userName,
+        hub: u.hub, vertical: u.vertical, estado: u.estado,
+        totalAttempts: u.attempts,
+        avgPct: u.attempts > 0 ? Math.round(u.totalPct / u.attempts) : 0,
+        totalCorrect: u.correct,
+        totalQuestions: u.questions,
+        lastActivity: u.lastActivity,
+        moduleRates,
+        worstModuleLabel: worst ? `${worst.label} (${worst.rate}%)` : '-',
+      };
+    })
+    .sort((a, b) => a.avgPct - b.avgPct); // worst performers first
+}
+
+// ── Cross-tab: segment × module ────────────────────────────────────────────
+
+interface CrossTabData {
+  rowKeys: string[];
+  colKeys: KnowledgeModule[];
+  colLabels: Record<string, string>;
+  cells: Record<string, Record<string, { correct: number; total: number; rate: number } | null>>;
+  rowTotals: Record<string, { correct: number; total: number; rate: number }>;
+}
+
+function buildCrossTab(
+  attempts: PulseAttempt[],
+  questionMap: Record<string, Question>,
+  segmentDim: SegmentDimension,
+  granularity: CosechaGranularity,
+): CrossTabData {
+  const cells: Record<string, Record<string, { correct: number; total: number }>> = {};
+  const rowTotalsRaw: Record<string, { correct: number; total: number }> = {};
+  const colKeySet = new Set<KnowledgeModule>();
+
+  for (const a of attempts) {
+    const rowKey = getDimensionValue(a, segmentDim, granularity);
+    if (!cells[rowKey]) cells[rowKey] = {};
+    if (!rowTotalsRaw[rowKey]) rowTotalsRaw[rowKey] = { correct: 0, total: 0 };
+    for (const ans of a.answers) {
+      const q = questionMap[ans.questionId];
+      if (!q?.module) continue;
+      const mod = q.module;
+      colKeySet.add(mod);
+      if (!cells[rowKey][mod]) cells[rowKey][mod] = { correct: 0, total: 0 };
+      cells[rowKey][mod].total++;
+      rowTotalsRaw[rowKey].total++;
+      if (ans.isCorrect) {
+        cells[rowKey][mod].correct++;
+        rowTotalsRaw[rowKey].correct++;
+      }
+    }
+  }
+
+  const rowKeys = Object.keys(cells).sort();
+  const colKeys = Array.from(colKeySet) as KnowledgeModule[];
+  const colLabels: Record<string, string> = {};
+  for (const k of colKeys) colLabels[k] = KNOWLEDGE_MODULE_LABELS[k] ?? k;
+
+  const filledCells: CrossTabData['cells'] = {};
+  for (const rk of rowKeys) {
+    filledCells[rk] = {};
+    for (const ck of colKeys) {
+      const c = cells[rk][ck];
+      filledCells[rk][ck] = c
+        ? { correct: c.correct, total: c.total, rate: Math.round((c.correct / c.total) * 100) }
+        : null;
+    }
+  }
+
+  const rowTotals: CrossTabData['rowTotals'] = {};
+  for (const [rk, { correct, total }] of Object.entries(rowTotalsRaw)) {
+    rowTotals[rk] = { correct, total, rate: total > 0 ? Math.round((correct / total) * 100) : 0 };
+  }
+
+  return { rowKeys, colKeys, colLabels, cells: filledCells, rowTotals };
+}
+
+// ── Product metrics ────────────────────────────────────────────────────────
+
+interface ProductMetric {
+  productId: string;
+  productName: string;
+  productColor: string;
+  totalAnswers: number;
+  correctAnswers: number;
+  correctRate: number;
+  moduleRates: Array<{ module: KnowledgeModule; label: string; rate: number; total: number }>;
+}
+
+function buildProductMetrics(
+  attempts: PulseAttempt[],
+  questionMap: Record<string, Question>,
+  productList: { id: string; name: string; color: string }[],
+): ProductMetric[] {
+  const prod: Record<string, { total: number; correct: number; moduleMap: Record<string, { correct: number; total: number }> }> = {};
+
+  for (const a of attempts) {
+    for (const ans of a.answers) {
+      const q = questionMap[ans.questionId];
+      if (!q?.productId) continue;
+      if (!prod[q.productId]) prod[q.productId] = { total: 0, correct: 0, moduleMap: {} };
+      prod[q.productId].total++;
+      if (ans.isCorrect) prod[q.productId].correct++;
+      if (q.module) {
+        if (!prod[q.productId].moduleMap[q.module]) prod[q.productId].moduleMap[q.module] = { correct: 0, total: 0 };
+        prod[q.productId].moduleMap[q.module].total++;
+        if (ans.isCorrect) prod[q.productId].moduleMap[q.module].correct++;
+      }
+    }
+  }
+
+  return Object.entries(prod)
+    .map(([productId, { total, correct, moduleMap }]) => {
+      const found = productList.find(p => p.id === productId);
+      const moduleRates = Object.entries(moduleMap).map(([mod, { correct: c, total: t }]) => ({
+        module: mod as KnowledgeModule,
+        label: KNOWLEDGE_MODULE_LABELS[mod as KnowledgeModule] ?? mod,
+        rate: t > 0 ? Math.round((c / t) * 100) : 0,
+        total: t,
+      })).sort((a, b) => a.rate - b.rate);
+
+      return {
+        productId,
+        productName: found?.name ?? productId,
+        productColor: found?.color ?? '#94a3b8',
+        totalAnswers: total,
+        correctAnswers: correct,
+        correctRate: total > 0 ? Math.round((correct / total) * 100) : 0,
+        moduleRates,
+      };
+    })
+    .filter(p => p.totalAnswers > 0)
+    .sort((a, b) => a.correctRate - b.correctRate);
+}
+
+// ── Segment chart ──────────────────────────────────────────────────────────
+
+function buildSegmentMetrics(
+  attempts: PulseAttempt[],
+  dimension: SegmentDimension,
+  granularity: CosechaGranularity,
+): { key: string; totalAttempts: number; avgPct: number }[] {
+  const map: Record<string, { count: number; totalPct: number }> = {};
+  for (const a of attempts) {
+    const key = getDimensionValue(a, dimension, granularity);
+    if (!map[key]) map[key] = { count: 0, totalPct: 0 };
+    map[key].count++;
+    map[key].totalPct += a.percentage;
+  }
+  return Object.entries(map)
+    .map(([key, { count, totalPct }]) => ({ key, totalAttempts: count, avgPct: Math.round(totalPct / count) }))
+    .sort((a, b) => b.avgPct - a.avgPct);
+}
+
+// ── Components ─────────────────────────────────────────────────────────────
 
 function StatCard({ title, value, description, icon: Icon, color }: {
   title: string; value: string | number; description?: string;
@@ -263,8 +481,6 @@ function StatCard({ title, value, description, icon: Icon, color }: {
     </Card>
   );
 }
-
-// ── Filter chip ────────────────────────────────────────────────────────────
 
 function FilterChip({
   label, value, options, onChange, onRemove, removable = true,
@@ -311,18 +527,19 @@ function DateFilterChip({ label, value, onChange, onRemove }: {
   );
 }
 
-// ── Component ──────────────────────────────────────────────────────────────
+// ── Main page ──────────────────────────────────────────────────────────────
 
 export default function AnalyticsPage() {
   const { products, loading: loadingProducts } = useProducts();
   const { quizzes, loading: loadingQuizzes } = useQuizzes();
 
   const [activeTab, setActiveTab] = useState('platform');
+  const [pulseSubTab, setPulseSubTab] = useState('resumen');
   const [loadingPulse, setLoadingPulse] = useState(false);
   const [pulseAttempts, setPulseAttempts] = useState<PulseAttempt[]>([]);
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
   const [questionMap, setQuestionMap] = useState<Record<string, Question>>({});
-  const [totalUsers, setTotalUsers] = useState(0);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
 
   // Filter state
   const [periodDays, setPeriodDays] = useState('30');
@@ -334,6 +551,14 @@ export default function AnalyticsPage() {
   const [activeOptFilters, setActiveOptFilters] = useState<Set<OptFilter>>(new Set(['dimension']));
   const [addFilterOpen, setAddFilterOpen] = useState(false);
   const addFilterRef = useRef<HTMLDivElement>(null);
+
+  // Users sub-tab state
+  const [userSearch, setUserSearch] = useState('');
+  const [userSort, setUserSort] = useState<UserSortKey>('avgPct');
+  const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
+
+  // Comparison sub-tab state
+  const [compDim, setCompDim] = useState<SegmentDimension>('hub');
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -367,7 +592,7 @@ export default function AnalyticsPage() {
     if (key === 'cosechaTo') setCosechaTo('');
   };
 
-  // ── Load pulse data ────────────────────────────────────────────────────
+  // ── Load pulse data ──────────────────────────────────────────────────────
 
   useEffect(() => {
     if (activeTab !== 'pulse') return;
@@ -379,9 +604,9 @@ export default function AnalyticsPage() {
       getQuestions(undefined, false),
       getAllUsers(),
       getPulseAttemptsByDateRange(startDate, endDate),
-    ]).then(([pulseList, allQs, allUsersList, allAttempts]) => {
+    ]).then(([pulseList, allQs, userList, allAttempts]) => {
       setPulses(pulseList);
-      setTotalUsers(allUsersList.filter(u => (u as { active?: boolean }).active !== false).length);
+      setAllUsers(userList.filter(u => u.active !== false));
       const map: Record<string, Question> = {};
       for (const q of allQs) map[q.id] = q;
       setQuestionMap(map);
@@ -389,8 +614,10 @@ export default function AnalyticsPage() {
     }).finally(() => setLoadingPulse(false));
   }, [activeTab, periodDays]);
 
-  // ── Base attempts: completed + cosecha filters ────────────────────────
-  // Computed BEFORE filterValue so we can build the dimension value dropdown
+  const totalUsers = allUsers.length;
+
+  // ── Base attempts (cosecha filters only) ────────────────────────────────
+
   const baseAttempts = useMemo(() => {
     let result = pulseAttempts.filter(a => a.status === 'completed');
     if (cosechaFrom && activeOptFilters.has('cosechaFrom')) {
@@ -402,7 +629,6 @@ export default function AnalyticsPage() {
     return result;
   }, [pulseAttempts, cosechaFrom, cosechaTo, activeOptFilters]);
 
-  // Available values for the current dimension (from base, before filterValue)
   const dimensionValues = useMemo(() => {
     const set = new Set<string>();
     for (const a of baseAttempts) {
@@ -412,18 +638,16 @@ export default function AnalyticsPage() {
     return Array.from(set).sort();
   }, [baseAttempts, dimension, cosechaGranularity]);
 
-  // ── filteredAttempts: base + filterValue ───────────────────────────────
+  // ── Filtered attempts (base + filterValue) ───────────────────────────────
+
   const filteredAttempts = useMemo(() => {
     if (filterValue && activeOptFilters.has('filterValue')) {
-      return baseAttempts.filter(
-        a => getDimensionValue(a, dimension, cosechaGranularity) === filterValue
-      );
+      return baseAttempts.filter(a => getDimensionValue(a, dimension, cosechaGranularity) === filterValue);
     }
     return baseAttempts;
   }, [baseAttempts, filterValue, activeOptFilters, dimension, cosechaGranularity]);
 
-  // Available optional filters to add
-  const availableToAdd: { key: OptFilter; label: string }[] = useMemo(() => {
+  const availableToAdd = useMemo((): { key: OptFilter; label: string }[] => {
     const out: { key: OptFilter; label: string }[] = [];
     if (!activeOptFilters.has('dimension')) out.push({ key: 'dimension', label: 'Segmento' });
     if (activeOptFilters.has('dimension')) {
@@ -440,55 +664,50 @@ export default function AnalyticsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOptFilters, dimension]);
 
-  // ── KPI metrics ────────────────────────────────────────────────────────
+  // ── KPIs ─────────────────────────────────────────────────────────────────
 
   const overallPct = filteredAttempts.length > 0
     ? Math.round(filteredAttempts.reduce((s, a) => s + a.percentage, 0) / filteredAttempts.length)
     : 0;
 
   const avgTotalTime = filteredAttempts.length > 0
-    ? Math.round(
-        filteredAttempts.reduce((s, a) => s + a.answers.reduce((t, ans) => t + (ans.timeSpent ?? 0), 0), 0)
-        / filteredAttempts.length
-      )
+    ? Math.round(filteredAttempts.reduce((s, a) => s + a.answers.reduce((t, ans) => t + (ans.timeSpent ?? 0), 0), 0) / filteredAttempts.length)
     : 0;
 
   const uniqueRespondents = new Set(filteredAttempts.map(a => a.userId)).size;
   const participationRate = totalUsers > 0 ? Math.round((uniqueRespondents / totalUsers) * 100) : 0;
 
-  // ── Derived metrics ────────────────────────────────────────────────────
+  // ── Derived metrics ───────────────────────────────────────────────────────
 
   const questionMetrics = useMemo(() => buildQuestionMetrics(filteredAttempts), [filteredAttempts]);
-
-  const moduleMetrics = useMemo(
-    () => buildEnrichedModuleMetrics(filteredAttempts, questionMap, questionMetrics),
-    [filteredAttempts, questionMap, questionMetrics]
-  );
-
+  const moduleMetrics = useMemo(() => buildEnrichedModuleMetrics(filteredAttempts, questionMap, questionMetrics), [filteredAttempts, questionMap, questionMetrics]);
   const trendMetrics = useMemo(() => buildTrendMetrics(filteredAttempts), [filteredAttempts]);
   const maxTrendCount = Math.max(...trendMetrics.map(t => t.count), 1);
-
   const segmentMetrics = useMemo(
-    () => activeOptFilters.has('dimension')
-      ? buildSegmentMetrics(filteredAttempts, dimension, cosechaGranularity)
-      : [],
-    [filteredAttempts, dimension, cosechaGranularity, activeOptFilters]
+    () => activeOptFilters.has('dimension') ? buildSegmentMetrics(filteredAttempts, dimension, cosechaGranularity) : [],
+    [filteredAttempts, dimension, cosechaGranularity, activeOptFilters],
   );
   const maxSegPct = segmentMetrics[0]?.avgPct ?? 100;
 
-  // ── Diagnóstico: summary insights ─────────────────────────────────────
+  const userDetailMetrics = useMemo(() => buildUserDetailMetrics(filteredAttempts, questionMap), [filteredAttempts, questionMap]);
+
+  const crossTabData = useMemo(
+    () => buildCrossTab(filteredAttempts, questionMap, compDim, cosechaGranularity),
+    [filteredAttempts, questionMap, compDim, cosechaGranularity],
+  );
+
+  const productMetrics = useMemo(
+    () => buildProductMetrics(filteredAttempts, questionMap, products),
+    [filteredAttempts, questionMap, products],
+  );
+
+  // ── Diagnóstico ───────────────────────────────────────────────────────────
 
   const needsHelp = moduleMetrics.filter(m => m.correctRate < 50);
   const inProgress = moduleMetrics.filter(m => m.correctRate >= 50 && m.correctRate < 70);
   const mastered = moduleMetrics.filter(m => m.correctRate >= 70);
-
-  // Hardest question with enough data (≥5 times asked)
   const hardestQ = questionMetrics.find(q => q.timesAsked >= 5);
-  // Slowest question with enough data
-  const slowestQ = [...questionMetrics]
-    .filter(q => q.avgTime > 0 && q.timesAsked >= 5)
-    .sort((a, b) => b.avgTime - a.avgTime)[0];
-  // Total users needing help across all modules (unique users with avg < 50%)
+  const slowestQ = [...questionMetrics].filter(q => q.avgTime > 0 && q.timesAsked >= 5).sort((a, b) => b.avgTime - a.avgTime)[0];
   const atRiskUserIds = useMemo(() => {
     const map: Record<string, { correct: number; total: number }> = {};
     for (const a of filteredAttempts) {
@@ -496,14 +715,40 @@ export default function AnalyticsPage() {
       map[a.userId].correct += a.correctAnswers;
       map[a.userId].total += a.totalQuestions;
     }
-    return Object.entries(map)
-      .filter(([, { correct, total }]) => total > 0 && (correct / total) < 0.5)
-      .map(([uid]) => uid);
+    return Object.entries(map).filter(([, { correct, total }]) => total > 0 && (correct / total) < 0.5).map(([uid]) => uid);
   }, [filteredAttempts]);
 
-  const hasDiagnostico = moduleMetrics.length > 0;
+  // ── Users table helpers ───────────────────────────────────────────────────
 
-  // ── Render ─────────────────────────────────────────────────────────────
+  const filteredSortedUsers = useMemo(() => {
+    let list = [...userDetailMetrics];
+    if (userSearch) {
+      const q = userSearch.toLowerCase();
+      list = list.filter(u =>
+        u.userName.toLowerCase().includes(q) ||
+        u.hub.toLowerCase().includes(q) ||
+        u.vertical.toLowerCase().includes(q),
+      );
+    }
+    list.sort((a, b) => {
+      if (userSort === 'avgPct') return a.avgPct - b.avgPct;
+      if (userSort === 'nombre') return a.userName.localeCompare(b.userName);
+      if (userSort === 'lastActivity') return b.lastActivity.localeCompare(a.lastActivity);
+      return 0;
+    });
+    return list;
+  }, [userDetailMetrics, userSearch, userSort]);
+
+  function toggleUserExpand(uid: string) {
+    setExpandedUsers(prev => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
@@ -514,15 +759,11 @@ export default function AnalyticsPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="platform">
-            <BarChart3 className="h-4 w-4 mr-1.5" /> Plataforma
-          </TabsTrigger>
-          <TabsTrigger value="pulse">
-            <Radio className="h-4 w-4 mr-1.5" /> Pulso de Conocimiento
-          </TabsTrigger>
+          <TabsTrigger value="platform"><BarChart3 className="h-4 w-4 mr-1.5" />Plataforma</TabsTrigger>
+          <TabsTrigger value="pulse"><Radio className="h-4 w-4 mr-1.5" />Pulso de Conocimiento</TabsTrigger>
         </TabsList>
 
-        {/* ── PLATFORM TAB ────────────────────────────────────────────── */}
+        {/* ── PLATFORM TAB ────────────────────────────────────────────────── */}
         <TabsContent value="platform" className="mt-4 space-y-6">
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {loadingProducts || loadingQuizzes ? (
@@ -539,7 +780,7 @@ export default function AnalyticsPage() {
           <div className="grid gap-6 md:grid-cols-2">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" /> Quizzes por Producto</CardTitle>
+                <CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" />Quizzes por Producto</CardTitle>
               </CardHeader>
               <CardContent>
                 {loadingProducts || loadingQuizzes ? (
@@ -561,8 +802,7 @@ export default function AnalyticsPage() {
                             <span className="text-muted-foreground">{pqs.length} quizzes</span>
                           </div>
                           <div className="h-2 bg-muted rounded-full overflow-hidden">
-                            <div className="h-full rounded-full transition-all duration-500"
-                              style={{ width: `${(pqs.length / maxCount) * 100}%`, backgroundColor: product.color }} />
+                            <div className="h-full rounded-full transition-all" style={{ width: `${(pqs.length / maxCount) * 100}%`, backgroundColor: product.color }} />
                           </div>
                         </div>
                       );
@@ -573,17 +813,13 @@ export default function AnalyticsPage() {
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4" /> Resumen de Contenido</CardTitle>
+                <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4" />Resumen de Contenido</CardTitle>
                 <CardDescription>Estado actual de los quizzes</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {['Publicados', 'Borradores', 'Desactivados'].map((label, i) => {
-                    const counts = [
-                      quizzes.filter(q => q.published && q.active).length,
-                      quizzes.filter(q => !q.published && q.active).length,
-                      quizzes.filter(q => !q.active).length,
-                    ];
+                  {(['Publicados', 'Borradores', 'Desactivados'] as const).map((label, i) => {
+                    const counts = [quizzes.filter(q => q.published && q.active).length, quizzes.filter(q => !q.published && q.active).length, quizzes.filter(q => !q.active).length];
                     const colors = ['bg-green-500', 'bg-yellow-500', 'bg-gray-400'];
                     return (
                       <div key={label} className="flex items-center justify-between">
@@ -605,32 +841,23 @@ export default function AnalyticsPage() {
           </div>
         </TabsContent>
 
-        {/* ── PULSE TAB ───────────────────────────────────────────────── */}
-        <TabsContent value="pulse" className="mt-4 space-y-6">
+        {/* ── PULSE TAB ────────────────────────────────────────────────────── */}
+        <TabsContent value="pulse" className="mt-4 space-y-4">
 
-          {/* ── Filter bar ───────────────────────────────────────────── */}
+          {/* Filter bar */}
           <div className="flex flex-wrap items-center gap-2">
-            {/* Period — always visible */}
             <FilterChip
-              label="Período"
-              value={periodDays}
-              removable={false}
+              label="Período" value={periodDays} removable={false}
               options={[
-                { value: '7', label: 'Últimos 7 días' },
-                { value: '14', label: 'Últimos 14 días' },
-                { value: '30', label: 'Últimos 30 días' },
-                { value: '90', label: 'Últimos 90 días' },
-                { value: '180', label: 'Últimos 6 meses' },
-                { value: '365', label: 'Último año' },
+                { value: '7', label: 'Últimos 7 días' }, { value: '14', label: 'Últimos 14 días' },
+                { value: '30', label: 'Últimos 30 días' }, { value: '90', label: 'Últimos 90 días' },
+                { value: '180', label: 'Últimos 6 meses' }, { value: '365', label: 'Último año' },
               ]}
               onChange={v => setPeriodDays(v)}
             />
-
-            {/* Dimension */}
             {activeOptFilters.has('dimension') && (
               <FilterChip
-                label="Segmento"
-                value={dimension}
+                label="Segmento" value={dimension}
                 options={(Object.entries(DIMENSION_LABELS) as [SegmentDimension, string][]).map(([v, l]) => ({ value: v, label: l }))}
                 onChange={v => {
                   setDimension(v as SegmentDimension);
@@ -638,80 +865,51 @@ export default function AnalyticsPage() {
                   setActiveOptFilters(prev => {
                     const next = new Set(prev);
                     next.delete('filterValue');
-                    if (v !== 'cosecha') {
-                      next.delete('cosechaGranularity');
-                      next.delete('cosechaFrom');
-                      next.delete('cosechaTo');
-                    }
+                    if (v !== 'cosecha') { next.delete('cosechaGranularity'); next.delete('cosechaFrom'); next.delete('cosechaTo'); }
                     return next;
                   });
                 }}
                 onRemove={() => removeFilter('dimension')}
               />
             )}
-
-            {/* Dimension value filter — filters ALL data to that value */}
             {activeOptFilters.has('filterValue') && activeOptFilters.has('dimension') && dimension !== 'cosecha' && (
               <FilterChip
-                label={DIMENSION_LABELS[dimension]}
-                value={filterValue}
-                options={[
-                  { value: '', label: `Todos los ${DIMENSION_LABELS[dimension].toLowerCase()}s` },
-                  ...dimensionValues.map(v => ({ value: v, label: v })),
-                ]}
+                label={DIMENSION_LABELS[dimension]} value={filterValue}
+                options={[{ value: '', label: `Todos` }, ...dimensionValues.map(v => ({ value: v, label: v }))]}
                 onChange={v => setFilterValue(v)}
                 onRemove={() => removeFilter('filterValue')}
               />
             )}
-
-            {/* Cosecha granularity */}
             {activeOptFilters.has('dimension') && dimension === 'cosecha' && activeOptFilters.has('cosechaGranularity') && (
               <FilterChip
-                label="Agrupar cosecha"
-                value={cosechaGranularity}
+                label="Agrupar cosecha" value={cosechaGranularity}
                 options={(Object.entries(GRANULARITY_LABELS) as [CosechaGranularity, string][]).map(([v, l]) => ({ value: v, label: l }))}
                 onChange={v => setCosechaGranularity(v as CosechaGranularity)}
                 onRemove={() => removeFilter('cosechaGranularity')}
               />
             )}
-
-            {/* Cosecha from */}
             {activeOptFilters.has('cosechaFrom') && (
               <DateFilterChip label="Cosecha desde" value={cosechaFrom} onChange={setCosechaFrom} onRemove={() => removeFilter('cosechaFrom')} />
             )}
-
-            {/* Cosecha to */}
             {activeOptFilters.has('cosechaTo') && (
               <DateFilterChip label="Cosecha hasta" value={cosechaTo} onChange={setCosechaTo} onRemove={() => removeFilter('cosechaTo')} />
             )}
-
-            {/* Add filter button */}
             {availableToAdd.length > 0 && (
               <div className="relative" ref={addFilterRef}>
-                <button
-                  onClick={() => setAddFilterOpen(v => !v)}
-                  className="flex items-center gap-1.5 h-8 border border-dashed rounded-full px-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Agregar filtro
+                <button onClick={() => setAddFilterOpen(v => !v)}
+                  className="flex items-center gap-1.5 h-8 border border-dashed rounded-full px-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
+                  <Plus className="h-3.5 w-3.5" /> Agregar filtro
                 </button>
                 {addFilterOpen && (
                   <div className="absolute top-10 left-0 z-50 bg-background border rounded-xl shadow-lg py-1 min-w-[200px]">
                     {availableToAdd.map(f => (
-                      <button
-                        key={f.key}
-                        onClick={() => addFilter(f.key)}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-muted/60 transition-colors"
-                      >
-                        {f.label}
-                      </button>
+                      <button key={f.key} onClick={() => addFilter(f.key)}
+                        className="w-full text-left px-4 py-2 text-sm hover:bg-muted/60 transition-colors">{f.label}</button>
                     ))}
                   </div>
                 )}
               </div>
             )}
-
-            {/* Active filter indicator */}
             {filterValue && (
               <span className="text-xs text-muted-foreground italic">
                 Mostrando solo: <strong>{filterValue}</strong>
@@ -719,453 +917,560 @@ export default function AnalyticsPage() {
             )}
           </div>
 
-          {/* ── Content ──────────────────────────────────────────────── */}
-          {loadingPulse ? (
-            <div className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}
-              </div>
-              <Skeleton className="h-40" />
-              <Skeleton className="h-80" />
-              <Skeleton className="h-80" />
-            </div>
-          ) : (
-            <>
-              {/* ── KPIs ─────────────────────────────────────────────── */}
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatCard
-                  title="Pulsos enviados"
-                  value={pulses.length}
-                  description={`en los últimos ${periodDays} días`}
-                  icon={Radio}
-                  color="text-primary"
-                />
-                <StatCard
-                  title="Respuestas totales"
-                  value={filteredAttempts.length}
-                  description={`${uniqueRespondents} participantes únicos`}
-                  icon={Users}
-                  color="text-blue-500"
-                />
-                <StatCard
-                  title="% Aciertos promedio"
-                  value={`${overallPct}%`}
-                  description={avgTotalTime > 0 ? `Tiempo prom. por pulso: ${formatSeconds(avgTotalTime)}` : 'sobre todas las respuestas'}
-                  icon={Target}
-                  color={overallPct >= 70 ? 'text-green-500' : 'text-orange-500'}
-                />
-                <StatCard
-                  title="Tasa de participación"
-                  value={`${participationRate}%`}
-                  description={`${uniqueRespondents} de ${totalUsers} usuarios activos`}
-                  icon={TrendingUp}
-                  color={participationRate >= 70 ? 'text-green-500' : participationRate >= 40 ? 'text-orange-500' : 'text-purple-500'}
-                />
-              </div>
+          {/* Sub-tabs */}
+          <Tabs value={pulseSubTab} onValueChange={setPulseSubTab}>
+            <TabsList className="h-9">
+              <TabsTrigger value="resumen" className="text-xs">Resumen</TabsTrigger>
+              <TabsTrigger value="usuarios" className="text-xs">
+                <Users className="h-3.5 w-3.5 mr-1" />Usuarios
+              </TabsTrigger>
+              <TabsTrigger value="comparacion" className="text-xs">
+                <ArrowUpDown className="h-3.5 w-3.5 mr-1" />Comparación
+              </TabsTrigger>
+            </TabsList>
 
-              {/* ── Diagnóstico del período ───────────────────────────── */}
-              {hasDiagnostico && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4" /> Diagnóstico del período
-                    </CardTitle>
-                    <CardDescription>
-                      Resumen de salud por módulo · identifica áreas de acción inmediata
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {/* Module tiers */}
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      {/* Needs help */}
-                      <div className="rounded-xl border border-red-200 bg-red-50/50 p-3 space-y-1.5">
-                        <p className="text-xs font-semibold text-red-700 uppercase tracking-wide flex items-center gap-1.5">
-                          <Circle className="h-3 w-3 fill-red-500 text-red-500" />
-                          Necesitan refuerzo &lt;50%
-                        </p>
-                        {needsHelp.length === 0 ? (
-                          <p className="text-xs text-muted-foreground italic">Ninguno</p>
-                        ) : needsHelp.map(m => (
-                          <div key={m.module} className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-red-800">{m.label}</span>
-                            <span className="text-xs font-bold text-red-600">{m.correctRate}%</span>
+            {/* ── RESUMEN ──────────────────────────────────────────────────── */}
+            <TabsContent value="resumen" className="mt-4 space-y-6">
+              {loadingPulse ? (
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}</div>
+                  <Skeleton className="h-40" /><Skeleton className="h-80" /><Skeleton className="h-80" />
+                </div>
+              ) : (
+                <>
+                  {/* KPIs */}
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <StatCard title="Pulsos enviados" value={pulses.length} description={`en los últimos ${periodDays} días`} icon={Radio} color="text-primary" />
+                    <StatCard title="Respuestas totales" value={filteredAttempts.length} description={`${uniqueRespondents} participantes únicos`} icon={Users} color="text-blue-500" />
+                    <StatCard title="% Aciertos promedio" value={`${overallPct}%`}
+                      description={avgTotalTime > 0 ? `Tiempo prom. por pulso: ${formatSeconds(avgTotalTime)}` : 'sobre todas las respuestas'}
+                      icon={Target} color={overallPct >= 70 ? 'text-green-500' : 'text-orange-500'} />
+                    <StatCard title="Tasa de participación" value={`${participationRate}%`}
+                      description={`${uniqueRespondents} de ${totalUsers} usuarios activos`}
+                      icon={TrendingUp} color={participationRate >= 70 ? 'text-green-500' : participationRate >= 40 ? 'text-orange-500' : 'text-purple-500'} />
+                  </div>
+
+                  {/* Diagnóstico */}
+                  {moduleMetrics.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Diagnóstico del período</CardTitle>
+                        <CardDescription>Resumen de salud por módulo · identifica áreas de acción inmediata</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div className="rounded-xl border border-red-200 bg-red-50/50 p-3 space-y-1.5">
+                            <p className="text-xs font-semibold text-red-700 uppercase tracking-wide flex items-center gap-1.5">
+                              <Circle className="h-3 w-3 fill-red-500 text-red-500" />Necesitan refuerzo &lt;50%
+                            </p>
+                            {needsHelp.length === 0 ? <p className="text-xs text-muted-foreground italic">Ninguno</p>
+                              : needsHelp.map(m => (
+                                <div key={m.module} className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-red-800">{m.label}</span>
+                                  <span className="text-xs font-bold text-red-600">{m.correctRate}%</span>
+                                </div>
+                              ))}
                           </div>
-                        ))}
-                      </div>
-
-                      {/* In progress */}
-                      <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-3 space-y-1.5">
-                        <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide flex items-center gap-1.5">
-                          <Circle className="h-3 w-3 fill-orange-400 text-orange-400" />
-                          En desarrollo 50–70%
-                        </p>
-                        {inProgress.length === 0 ? (
-                          <p className="text-xs text-muted-foreground italic">Ninguno</p>
-                        ) : inProgress.map(m => (
-                          <div key={m.module} className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-orange-800">{m.label}</span>
-                            <span className="text-xs font-bold text-orange-600">{m.correctRate}%</span>
+                          <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-3 space-y-1.5">
+                            <p className="text-xs font-semibold text-orange-700 uppercase tracking-wide flex items-center gap-1.5">
+                              <Circle className="h-3 w-3 fill-orange-400 text-orange-400" />En desarrollo 50–70%
+                            </p>
+                            {inProgress.length === 0 ? <p className="text-xs text-muted-foreground italic">Ninguno</p>
+                              : inProgress.map(m => (
+                                <div key={m.module} className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-orange-800">{m.label}</span>
+                                  <span className="text-xs font-bold text-orange-600">{m.correctRate}%</span>
+                                </div>
+                              ))}
                           </div>
-                        ))}
-                      </div>
-
-                      {/* Mastered */}
-                      <div className="rounded-xl border border-green-200 bg-green-50/50 p-3 space-y-1.5">
-                        <p className="text-xs font-semibold text-green-700 uppercase tracking-wide flex items-center gap-1.5">
-                          <CheckCircle2 className="h-3 w-3 text-green-500" />
-                          Bien dominados &gt;70%
-                        </p>
-                        {mastered.length === 0 ? (
-                          <p className="text-xs text-muted-foreground italic">Ninguno aún</p>
-                        ) : mastered.map(m => (
-                          <div key={m.module} className="flex items-center justify-between">
-                            <span className="text-xs font-medium text-green-800">{m.label}</span>
-                            <span className="text-xs font-bold text-green-600">{m.correctRate}%</span>
+                          <div className="rounded-xl border border-green-200 bg-green-50/50 p-3 space-y-1.5">
+                            <p className="text-xs font-semibold text-green-700 uppercase tracking-wide flex items-center gap-1.5">
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />Bien dominados &gt;70%
+                            </p>
+                            {mastered.length === 0 ? <p className="text-xs text-muted-foreground italic">Ninguno aún</p>
+                              : mastered.map(m => (
+                                <div key={m.module} className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-green-800">{m.label}</span>
+                                  <span className="text-xs font-bold text-green-600">{m.correctRate}%</span>
+                                </div>
+                              ))}
                           </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Insight pills */}
-                    <div className="flex flex-wrap gap-2 pt-1 border-t">
-                      {atRiskUserIds.length > 0 && (
-                        <span className="inline-flex items-center gap-1.5 text-xs bg-red-100 text-red-700 border border-red-200 rounded-full px-3 py-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          <strong>{atRiskUserIds.length}</strong> usuarios con menos del 50% general
-                        </span>
-                      )}
-                      {hardestQ && (
-                        <span className="inline-flex items-center gap-1.5 text-xs bg-orange-100 text-orange-700 border border-orange-200 rounded-full px-3 py-1">
-                          <Target className="h-3 w-3" />
-                          Pregunta más fallada: <strong>{hardestQ.correctRate}%</strong> aciertos
-                          {questionMap[hardestQ.questionId]?.text && (
-                            <span className="italic truncate max-w-[180px]">
-                              · &ldquo;{questionMap[hardestQ.questionId].text.slice(0, 60)}{questionMap[hardestQ.questionId].text.length > 60 ? '…' : ''}&rdquo;
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1 border-t">
+                          {atRiskUserIds.length > 0 && (
+                            <span className="inline-flex items-center gap-1.5 text-xs bg-red-100 text-red-700 border border-red-200 rounded-full px-3 py-1">
+                              <AlertTriangle className="h-3 w-3" /><strong>{atRiskUserIds.length}</strong> usuarios con menos del 50% general
                             </span>
                           )}
-                        </span>
-                      )}
-                      {slowestQ && slowestQ.questionId !== hardestQ?.questionId && (
-                        <span className="inline-flex items-center gap-1.5 text-xs bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-3 py-1">
-                          <Timer className="h-3 w-3" />
-                          Pregunta más lenta: <strong>{formatSeconds(slowestQ.avgTime)}</strong> promedio
-                          {questionMap[slowestQ.questionId]?.text && (
-                            <span className="italic truncate max-w-[180px]">
-                              · &ldquo;{questionMap[slowestQ.questionId].text.slice(0, 50)}{questionMap[slowestQ.questionId].text.length > 50 ? '…' : ''}&rdquo;
+                          {hardestQ && (
+                            <span className="inline-flex items-center gap-1.5 text-xs bg-orange-100 text-orange-700 border border-orange-200 rounded-full px-3 py-1">
+                              <Target className="h-3 w-3" />Pregunta con más errores: <strong>{hardestQ.correctRate}%</strong> aciertos
+                              {questionMap[hardestQ.questionId]?.text && (
+                                <span className="italic truncate max-w-[180px]">
+                                  · &ldquo;{questionMap[hardestQ.questionId].text.slice(0, 60)}{questionMap[hardestQ.questionId].text.length > 60 ? '…' : ''}&rdquo;
+                                </span>
+                              )}
                             </span>
                           )}
-                        </span>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                          {slowestQ && slowestQ.questionId !== hardestQ?.questionId && (
+                            <span className="inline-flex items-center gap-1.5 text-xs bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-3 py-1">
+                              <Timer className="h-3 w-3" />Pregunta más lenta: <strong>{formatSeconds(slowestQ.avgTime)}</strong> promedio
+                            </span>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
-              {/* ── Tendencia diaria ─────────────────────────────────── */}
-              {trendMetrics.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4" /> Tendencia diaria
-                    </CardTitle>
-                    <CardDescription>
-                      Respuestas por día · altura = participación · color = % aciertos (verde ≥70 · naranja 50–70 · rojo &lt;50)
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="overflow-x-auto pb-1">
-                      <div
-                        className="flex items-end gap-2"
-                        style={{ minWidth: `${Math.max(trendMetrics.length * 44, 300)}px`, height: '120px' }}
-                      >
-                        {trendMetrics.map(({ date, count, avgPct }) => {
-                          const barH = Math.max(Math.round((count / maxTrendCount) * 72), 4);
-                          const barColor = avgPct >= 70 ? 'bg-green-500' : avgPct >= 50 ? 'bg-orange-400' : 'bg-red-400';
-                          return (
-                            <div key={date} className="flex flex-col items-center gap-1 flex-1 min-w-0">
-                              <span className="text-[10px] text-muted-foreground font-medium leading-none">{avgPct}%</span>
-                              <div className="w-full flex items-end" style={{ height: '72px' }}>
-                                <div className={cn('w-full rounded-t-sm transition-all duration-500', barColor)} style={{ height: `${barH}px` }} />
-                              </div>
-                              <span className="text-[10px] text-muted-foreground leading-none whitespace-nowrap">{shortDate(date)}</span>
-                              <span className="text-[10px] font-semibold leading-none">{count}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                  {/* Tendencia diaria */}
+                  {trendMetrics.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2"><TrendingUp className="h-4 w-4" />Tendencia diaria</CardTitle>
+                        <CardDescription>Respuestas por día · altura = participación · color = % aciertos</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="overflow-x-auto pb-1">
+                          <div className="flex items-end gap-2" style={{ minWidth: `${Math.max(trendMetrics.length * 44, 300)}px`, height: '120px' }}>
+                            {trendMetrics.map(({ date, count, avgPct }) => {
+                              const h = Math.max(Math.round((count / maxTrendCount) * 72), 4);
+                              return (
+                                <div key={date} className="flex flex-col items-center gap-1 flex-1 min-w-0">
+                                  <span className="text-[10px] text-muted-foreground font-medium leading-none">{avgPct}%</span>
+                                  <div className="w-full flex items-end" style={{ height: '72px' }}>
+                                    <div className={cn('w-full rounded-t-sm', barColor(avgPct))} style={{ height: `${h}px` }} />
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground leading-none whitespace-nowrap">{shortDate(date)}</span>
+                                  <span className="text-[10px] font-semibold leading-none">{count}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
-              {/* ── Módulos en profundidad ───────────────────────────── */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BookOpen className="h-4 w-4" /> Módulos en profundidad
-                  </CardTitle>
-                  <CardDescription>
-                    Por módulo: distribución de usuarios y preguntas más difíciles · ordenado de mayor a menor dificultad
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {moduleMetrics.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      Sin datos de módulos. Asegúrate de que las preguntas tengan módulo asignado.
-                    </p>
-                  ) : (
-                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                      {moduleMetrics.map(({
-                        module, label, totalAnswers, correctAnswers, correctRate,
-                        domina, enProceso, necesitaApoyo, hardestQuestions,
-                      }) => {
-                        const totalUsers = domina + enProceso + necesitaApoyo;
-                        return (
-                          <div
-                            key={module}
-                            className="rounded-xl border p-4 space-y-3 bg-card hover:shadow-sm transition-shadow"
-                          >
-                            {/* Header */}
-                            <div className="flex items-start justify-between gap-2">
-                              <span className={cn(
-                                'text-[11px] px-2 py-1 rounded-full border font-medium leading-none',
-                                MODULE_COLORS[module] ?? 'bg-muted text-muted-foreground border-border'
-                              )}>
-                                {label}
-                              </span>
-                              <span className={cn(
-                                'text-xl font-bold shrink-0',
-                                correctRate >= 70 ? 'text-green-600' : correctRate >= 50 ? 'text-orange-500' : 'text-red-500'
-                              )}>
-                                {correctRate}%
-                              </span>
-                            </div>
-
-                            {/* Progress bar */}
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className={cn('h-full rounded-full transition-all duration-500',
-                                  MODULE_BAR_COLORS[module] ?? 'bg-primary'
+                  {/* Módulos en profundidad */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2"><BookOpen className="h-4 w-4" />Módulos en profundidad</CardTitle>
+                      <CardDescription>Distribución de usuarios y preguntas con mayor % de error · ordenados de mayor a menor tasa de error</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {moduleMetrics.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sin datos de módulos. Asegúrate de que las preguntas tengan módulo asignado.</p>
+                      ) : (
+                        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                          {moduleMetrics.map(({ module, label, totalAnswers, correctAnswers, correctRate, domina, enProceso, necesitaApoyo, hardestQuestions }) => {
+                            const tot = domina + enProceso + necesitaApoyo;
+                            return (
+                              <div key={module} className="rounded-xl border p-4 space-y-3 bg-card hover:shadow-sm transition-shadow">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className={cn('text-[11px] px-2 py-1 rounded-full border font-medium leading-none', MODULE_COLORS[module] ?? 'bg-muted text-muted-foreground border-border')}>{label}</span>
+                                  <span className={cn('text-xl font-bold shrink-0', pctColor(correctRate))}>{correctRate}%</span>
+                                </div>
+                                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                  <div className={cn('h-full rounded-full', MODULE_BAR_COLORS[module] ?? 'bg-primary')} style={{ width: `${correctRate}%` }} />
+                                </div>
+                                <div className="text-xs text-muted-foreground">{correctAnswers}/{totalAnswers} respuestas correctas</div>
+                                {tot > 0 && (
+                                  <div className="space-y-1">
+                                    <p className="text-[10px] text-muted-foreground uppercase font-medium tracking-wide">Distribución de usuarios</p>
+                                    <div className="flex rounded-full overflow-hidden h-2">
+                                      {domina > 0 && <div className="bg-green-500" style={{ width: `${(domina / tot) * 100}%` }} />}
+                                      {enProceso > 0 && <div className="bg-orange-400" style={{ width: `${(enProceso / tot) * 100}%` }} />}
+                                      {necesitaApoyo > 0 && <div className="bg-red-400" style={{ width: `${(necesitaApoyo / tot) * 100}%` }} />}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 text-[10px]">
+                                      {domina > 0 && <span className="text-green-700"><strong>{domina}</strong> dominan</span>}
+                                      {enProceso > 0 && <span className="text-orange-600"><strong>{enProceso}</strong> en proceso</span>}
+                                      {necesitaApoyo > 0 && <span className="text-red-600"><strong>{necesitaApoyo}</strong> necesitan apoyo</span>}
+                                    </div>
+                                  </div>
                                 )}
-                                style={{ width: `${correctRate}%` }}
-                              />
-                            </div>
-
-                            {/* Stats row */}
-                            <div className="flex items-center justify-between text-xs text-muted-foreground">
-                              <span>{correctAnswers}/{totalAnswers} respuestas correctas</span>
-                            </div>
-
-                            {/* User distribution */}
-                            {totalUsers > 0 && (
-                              <div className="space-y-1">
-                                <p className="text-[10px] text-muted-foreground uppercase font-medium tracking-wide">
-                                  Distribución de usuarios
-                                </p>
-                                <div className="flex gap-0 rounded-full overflow-hidden h-2">
-                                  {domina > 0 && (
-                                    <div className="bg-green-500" style={{ width: `${(domina / totalUsers) * 100}%` }} title={`Domina: ${domina}`} />
-                                  )}
-                                  {enProceso > 0 && (
-                                    <div className="bg-orange-400" style={{ width: `${(enProceso / totalUsers) * 100}%` }} title={`En proceso: ${enProceso}`} />
-                                  )}
-                                  {necesitaApoyo > 0 && (
-                                    <div className="bg-red-400" style={{ width: `${(necesitaApoyo / totalUsers) * 100}%` }} title={`Necesita apoyo: ${necesitaApoyo}`} />
-                                  )}
-                                </div>
-                                <div className="flex flex-wrap gap-2 text-[10px]">
-                                  {domina > 0 && (
-                                    <span className="text-green-700">
-                                      <strong>{domina}</strong> dominan
-                                    </span>
-                                  )}
-                                  {enProceso > 0 && (
-                                    <span className="text-orange-600">
-                                      <strong>{enProceso}</strong> en proceso
-                                    </span>
-                                  )}
-                                  {necesitaApoyo > 0 && (
-                                    <span className="text-red-600">
-                                      <strong>{necesitaApoyo}</strong> necesitan apoyo
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Hardest questions in this module */}
-                            {hardestQuestions.length > 0 && (
-                              <div className="space-y-1.5 border-t pt-2">
-                                <p className="text-[10px] text-muted-foreground uppercase font-medium tracking-wide">
-                                  Preguntas más difíciles
-                                </p>
-                                {hardestQuestions.map(qm => {
-                                  const q = questionMap[qm.questionId];
-                                  return (
-                                    <div key={qm.questionId} className="flex items-start gap-2">
-                                      <span className={cn(
-                                        'text-[10px] font-bold shrink-0 mt-0.5 w-7 text-right',
-                                        qm.correctRate >= 70 ? 'text-green-600' : qm.correctRate >= 40 ? 'text-orange-500' : 'text-red-500'
-                                      )}>
-                                        {qm.correctRate}%
-                                      </span>
-                                      <div className="min-w-0 flex-1">
-                                        <p className="text-[11px] text-foreground leading-snug line-clamp-2">
-                                          {q?.text ?? <span className="font-mono text-muted-foreground">{qm.questionId.slice(-8)}</span>}
-                                        </p>
-                                        <div className="flex items-center gap-2 mt-0.5">
-                                          {qm.avgTime > 0 && (
-                                            <span className="text-[10px] text-muted-foreground">
-                                              {formatSeconds(qm.avgTime)} prom.
-                                            </span>
-                                          )}
-                                          <span className="text-[10px] text-muted-foreground">
-                                            {qm.timesAsked}× preguntada
-                                          </span>
+                                {hardestQuestions.length > 0 && (
+                                  <div className="space-y-1.5 border-t pt-2">
+                                    <p className="text-[10px] text-muted-foreground uppercase font-medium tracking-wide">Mayor % de error</p>
+                                    {hardestQuestions.map(qm => (
+                                      <div key={qm.questionId} className="flex items-start gap-2">
+                                        <span className={cn('text-[10px] font-bold shrink-0 mt-0.5 w-7 text-right', pctColor(qm.correctRate))}>{qm.correctRate}%</span>
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-[11px] leading-snug line-clamp-2">{questionMap[qm.questionId]?.text ?? qm.questionId.slice(-8)}</p>
+                                          <div className="flex gap-2 mt-0.5 text-[10px] text-muted-foreground">
+                                            {qm.avgTime > 0 && <span>{formatSeconds(qm.avgTime)} prom.</span>}
+                                            <span>{qm.timesAsked}× respondida</span>
+                                          </div>
                                         </div>
                                       </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Análisis de preguntas */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2"><Timer className="h-4 w-4" />Preguntas con mayor % de error</CardTitle>
+                      <CardDescription>Top 15 ordenadas por menor tasa de aciertos · incluye tiempo promedio de respuesta</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {questionMetrics.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-6">Sin datos disponibles.</p>
+                      ) : (
+                        <div className="space-y-1">
+                          <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[10px] text-muted-foreground uppercase font-medium px-2 pb-1">
+                            <span>Pregunta</span>
+                            <span className="text-right w-16">Aciertos</span>
+                            <span className="text-right w-16">Tiempo</span>
+                            <span className="text-right w-12">Veces</span>
+                          </div>
+                          {questionMetrics.slice(0, 15).map((qm, idx) => {
+                            const q = questionMap[qm.questionId];
+                            return (
+                              <div key={qm.questionId} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 items-start p-2 rounded-lg hover:bg-muted/40">
+                                <div className="min-w-0">
+                                  <div className="flex items-start gap-2">
+                                    <span className="text-muted-foreground text-xs font-bold shrink-0 mt-0.5">{idx + 1}</span>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium leading-snug line-clamp-2">
+                                        {q?.text ?? <span className="font-mono text-xs text-muted-foreground">{qm.questionId.slice(-8)}</span>}
+                                      </p>
+                                      {q?.module && (
+                                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border font-medium mt-1 inline-block', MODULE_COLORS[q.module] ?? 'bg-muted text-muted-foreground border-border')}>
+                                          {KNOWLEDGE_MODULE_LABELS[q.module as KnowledgeModule] ?? q.module}
+                                        </span>
+                                      )}
+                                      <div className="h-1.5 bg-muted rounded-full mt-1.5 overflow-hidden">
+                                        <div className={cn('h-full rounded-full', barColor(qm.correctRate))} style={{ width: `${qm.correctRate}%` }} />
+                                      </div>
                                     </div>
-                                  );
-                                })}
+                                  </div>
+                                </div>
+                                <span className={cn('text-sm font-bold w-16 text-right shrink-0', pctColor(qm.correctRate))}>{qm.correctRate}%</span>
+                                <span className="text-xs text-muted-foreground w-16 text-right shrink-0 font-medium">{formatSeconds(qm.avgTime)}</span>
+                                <span className="text-xs text-muted-foreground w-12 text-right shrink-0">{qm.timesAsked}×</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Segmento */}
+                  {activeOptFilters.has('dimension') && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <BarChart3 className="h-4 w-4" />% Aciertos por {DIMENSION_LABELS[dimension]}
+                        </CardTitle>
+                        <CardDescription>
+                          {filterValue ? `Filtrado a: ${filterValue}` : `Comparación de rendimiento entre ${DIMENSION_LABELS[dimension].toLowerCase()}s`}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {segmentMetrics.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-6">
+                            Sin datos de segmentación. Verifica que los usuarios tengan el campo <code className="text-xs bg-muted px-1 rounded">{dimension}</code> en su perfil.
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
+                            {segmentMetrics.map(({ key, totalAttempts, avgPct }) => (
+                              <div key={key} className="space-y-1">
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="font-medium">{key}</span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xs text-muted-foreground">{totalAttempts} resp.</span>
+                                    <span className={cn('font-semibold text-sm', pctColor(avgPct))}>{avgPct}%</span>
+                                  </div>
+                                </div>
+                                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                  <div className={cn('h-full rounded-full', barColor(avgPct))} style={{ width: `${(avgPct / Math.max(maxSegPct, 1)) * 100}%` }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
+              )}
+            </TabsContent>
+
+            {/* ── USUARIOS ─────────────────────────────────────────────────── */}
+            <TabsContent value="usuarios" className="mt-4 space-y-4">
+              {loadingPulse ? (
+                <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
+              ) : userDetailMetrics.length === 0 ? (
+                <Card><CardContent className="py-12 text-center text-muted-foreground text-sm">Sin respuestas de pulso en el período seleccionado.</CardContent></Card>
+              ) : (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" />Desempeño por usuario</CardTitle>
+                    <CardDescription>
+                      {userDetailMetrics.length} usuarios con respuestas · ordenados por menor % de aciertos · click para ver detalle por módulo
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {/* Controls */}
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <div className="relative flex-1 min-w-[200px] max-w-xs">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Buscar por nombre, hub…"
+                          value={userSearch}
+                          onChange={e => setUserSearch(e.target.value)}
+                          className="h-8 w-full pl-8 pr-3 rounded-full border text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        />
+                      </div>
+                      <FilterChip
+                        label="Ordenar" value={userSort} removable={false}
+                        options={[
+                          { value: 'avgPct', label: '% Aciertos (menor primero)' },
+                          { value: 'nombre', label: 'Nombre A–Z' },
+                          { value: 'lastActivity', label: 'Actividad reciente' },
+                        ]}
+                        onChange={v => setUserSort(v as UserSortKey)}
+                      />
+                    </div>
+
+                    {/* Table header */}
+                    <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3 text-[10px] text-muted-foreground uppercase font-medium px-3 py-1.5 border rounded-lg bg-muted/30">
+                      <span />
+                      <span>Nombre</span>
+                      <span className="text-center w-14">Aciertos</span>
+                      <span className="text-center w-16">Respuestas</span>
+                      <span className="text-center w-20 hidden sm:block">Última act.</span>
+                      <span className="text-right w-28 hidden md:block">Módulo más débil</span>
+                    </div>
+
+                    {/* Rows */}
+                    <div className="space-y-1">
+                      {filteredSortedUsers.map(u => {
+                        const expanded = expandedUsers.has(u.userId);
+                        return (
+                          <div key={u.userId} className="border rounded-xl overflow-hidden">
+                            {/* Main row */}
+                            <button
+                              onClick={() => toggleUserExpand(u.userId)}
+                              className="w-full grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3 items-center px-3 py-2.5 hover:bg-muted/30 transition-colors text-left"
+                            >
+                              <span className="text-muted-foreground">
+                                {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{u.userName}</p>
+                                <p className="text-[11px] text-muted-foreground truncate">
+                                  {[u.hub !== '-' && u.hub, u.vertical !== '-' && u.vertical].filter(Boolean).join(' · ') || 'Sin segmento'}
+                                </p>
+                              </div>
+                              <span className={cn('text-sm font-bold w-14 text-center', pctColor(u.avgPct))}>{u.avgPct}%</span>
+                              <span className="text-xs text-muted-foreground w-16 text-center">{u.totalAttempts} pulso{u.totalAttempts !== 1 ? 's' : ''}</span>
+                              <span className="text-xs text-muted-foreground w-20 text-center hidden sm:block">{shortDate(u.lastActivity)}</span>
+                              <span className="text-[11px] text-muted-foreground w-28 text-right hidden md:block truncate">{u.worstModuleLabel}</span>
+                            </button>
+
+                            {/* Expanded detail */}
+                            {expanded && (
+                              <div className="border-t bg-muted/20 px-4 py-3 space-y-3">
+                                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                                  <span><strong className="text-foreground">{u.totalCorrect}</strong>/{u.totalQuestions} correctas en total</span>
+                                  <span>· <strong className="text-foreground">{u.totalAttempts}</strong> pulsos completados</span>
+                                  {u.estado !== '-' && <span>· Estado: <strong className="text-foreground">{u.estado}</strong></span>}
+                                </div>
+                                {u.moduleRates.length > 0 ? (
+                                  <div className="grid gap-2 sm:grid-cols-2">
+                                    {u.moduleRates.map(mr => (
+                                      <div key={mr.module} className="space-y-0.5">
+                                        <div className="flex items-center justify-between text-xs">
+                                          <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border font-medium', MODULE_COLORS[mr.module] ?? 'bg-muted text-muted-foreground border-border')}>{mr.label}</span>
+                                          <span className={cn('font-bold text-xs', pctColor(mr.rate))}>{mr.rate}% <span className="font-normal text-muted-foreground">({mr.correct}/{mr.total})</span></span>
+                                        </div>
+                                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                          <div className={cn('h-full rounded-full', barColor(mr.rate))} style={{ width: `${mr.rate}%` }} />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground italic">Sin datos de módulos (las preguntas no tienen módulo asignado).</p>
+                                )}
                               </div>
                             )}
                           </div>
                         );
                       })}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
 
-              {/* ── Análisis de preguntas ────────────────────────────── */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Timer className="h-4 w-4" /> Análisis de preguntas
-                  </CardTitle>
-                  <CardDescription>
-                    Top 15 más difíciles · % de aciertos + tiempo promedio de respuesta · ordenadas de mayor a menor dificultad
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {questionMetrics.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-6">Sin datos disponibles.</p>
-                  ) : (
-                    <div className="space-y-1">
-                      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[10px] text-muted-foreground uppercase font-medium px-2 pb-1">
-                        <span>Pregunta</span>
-                        <span className="text-right w-16">Aciertos</span>
-                        <span className="text-right w-16">Tiempo</span>
-                        <span className="text-right w-12">Veces</span>
-                      </div>
-                      {questionMetrics.slice(0, 15).map((qm, idx) => {
-                        const q = questionMap[qm.questionId];
-                        return (
-                          <div
-                            key={qm.questionId}
-                            className="grid grid-cols-[1fr_auto_auto_auto] gap-3 items-start p-2 rounded-lg hover:bg-muted/40"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-start gap-2">
-                                <span className="text-muted-foreground text-xs font-bold shrink-0 mt-0.5">{idx + 1}</span>
-                                <div className="min-w-0">
-                                  <p className="text-sm font-medium leading-snug line-clamp-2">
-                                    {q?.text ?? <span className="font-mono text-xs text-muted-foreground">{qm.questionId.slice(-8)}</span>}
-                                  </p>
-                                  {q?.module && (
-                                    <span className={cn(
-                                      'text-[10px] px-1.5 py-0.5 rounded-full border font-medium mt-1 inline-block',
-                                      MODULE_COLORS[q.module] ?? 'bg-muted text-muted-foreground border-border'
-                                    )}>
-                                      {KNOWLEDGE_MODULE_LABELS[q.module as KnowledgeModule] ?? q.module}
-                                    </span>
-                                  )}
-                                  <div className="h-1.5 bg-muted rounded-full mt-1.5 overflow-hidden">
-                                    <div
-                                      className={cn('h-full rounded-full',
-                                        qm.correctRate >= 70 ? 'bg-green-500' : qm.correctRate >= 40 ? 'bg-orange-400' : 'bg-red-500'
-                                      )}
-                                      style={{ width: `${qm.correctRate}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                            <span className={cn(
-                              'text-sm font-bold w-16 text-right shrink-0',
-                              qm.correctRate >= 70 ? 'text-green-600' : qm.correctRate >= 40 ? 'text-orange-500' : 'text-red-500'
-                            )}>{qm.correctRate}%</span>
-                            <span className="text-xs text-muted-foreground w-16 text-right shrink-0 font-medium">
-                              {formatSeconds(qm.avgTime)}
-                            </span>
-                            <span className="text-xs text-muted-foreground w-12 text-right shrink-0">
-                              {qm.timesAsked}×
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* ── Segmento ─────────────────────────────────────────── */}
-              {activeOptFilters.has('dimension') && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <BarChart3 className="h-4 w-4" />
-                      % Aciertos por {DIMENSION_LABELS[dimension]}
-                      {dimension === 'cosecha' && activeOptFilters.has('cosechaGranularity') && (
-                        <span className="text-xs font-normal text-muted-foreground">
-                          · {GRANULARITY_LABELS[cosechaGranularity]}
-                        </span>
-                      )}
-                    </CardTitle>
-                    <CardDescription>
-                      {filterValue
-                        ? `Filtrado a: ${filterValue} · comparación entre todos los valores de ${DIMENSION_LABELS[dimension]}`
-                        : `Comparación de rendimiento entre ${DIMENSION_LABELS[dimension].toLowerCase()}s`}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {segmentMetrics.length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-6">
-                        Sin datos de segmentación. Verifica que los usuarios tengan el campo{' '}
-                        <code className="text-xs bg-muted px-1 rounded">{dimension}</code> en su perfil.
+                    {filteredSortedUsers.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-6 italic">
+                        Ningún usuario coincide con &ldquo;{userSearch}&rdquo;
                       </p>
-                    ) : (
-                      <div className="space-y-3">
-                        {segmentMetrics.map(({ key, totalAttempts, avgPct }) => (
-                          <div key={key} className="space-y-1">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="font-medium">{key}</span>
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs text-muted-foreground">{totalAttempts} resp.</span>
-                                <span className={cn(
-                                  'font-semibold text-sm',
-                                  avgPct >= 70 ? 'text-green-600' : avgPct >= 50 ? 'text-orange-500' : 'text-red-500'
-                                )}>{avgPct}%</span>
-                              </div>
-                            </div>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full rounded-full transition-all duration-500',
-                                  avgPct >= 70 ? 'bg-green-500' : avgPct >= 50 ? 'bg-orange-400' : 'bg-red-500'
-                                )}
-                                style={{ width: `${(avgPct / Math.max(maxSegPct, 1)) * 100}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
                     )}
                   </CardContent>
                 </Card>
               )}
-            </>
-          )}
+            </TabsContent>
+
+            {/* ── COMPARACIÓN ──────────────────────────────────────────────── */}
+            <TabsContent value="comparacion" className="mt-4 space-y-6">
+              {loadingPulse ? (
+                <div className="space-y-4"><Skeleton className="h-60" /><Skeleton className="h-60" /></div>
+              ) : (
+                <>
+                  {/* Hub × Módulo cross-tab */}
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-start justify-between gap-4 flex-wrap">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <ArrowUpDown className="h-4 w-4" />Matriz {DIMENSION_LABELS[compDim]} × Módulo
+                          </CardTitle>
+                          <CardDescription>% de aciertos por combinación de {DIMENSION_LABELS[compDim].toLowerCase()} y módulo</CardDescription>
+                        </div>
+                        <FilterChip
+                          label="Comparar por" value={compDim} removable={false}
+                          options={(Object.entries(DIMENSION_LABELS) as [SegmentDimension, string][]).filter(([k]) => k !== 'cosecha').map(([v, l]) => ({ value: v, label: l }))}
+                          onChange={v => setCompDim(v as SegmentDimension)}
+                        />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {crossTabData.rowKeys.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          Sin datos. Verifica que los usuarios tengan el campo <code className="text-xs bg-muted px-1 rounded">{compDim}</code> en su perfil y que las preguntas tengan módulo asignado.
+                        </p>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr>
+                                <th className="text-left text-xs font-medium text-muted-foreground pb-2 pr-4 min-w-[120px]">
+                                  {DIMENSION_LABELS[compDim]}
+                                </th>
+                                {crossTabData.colKeys.map(col => (
+                                  <th key={col} className="text-center text-[10px] font-medium text-muted-foreground pb-2 px-1 min-w-[80px]">
+                                    {crossTabData.colLabels[col]}
+                                  </th>
+                                ))}
+                                <th className="text-center text-[10px] font-medium text-muted-foreground pb-2 px-2 min-w-[60px]">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody className="space-y-1">
+                              {crossTabData.rowKeys.map(rk => (
+                                <tr key={rk} className="border-t">
+                                  <td className="py-2 pr-4 font-medium text-sm">{rk}</td>
+                                  {crossTabData.colKeys.map(col => {
+                                    const cell = crossTabData.cells[rk][col];
+                                    return (
+                                      <td key={col} className="px-1 py-1.5 text-center">
+                                        {cell ? (
+                                          <span className={cn('inline-block rounded-lg px-2 py-1 text-xs font-bold min-w-[48px]', cellBg(cell.rate))}>
+                                            {cell.rate}%
+                                          </span>
+                                        ) : (
+                                          <span className="inline-block rounded-lg px-2 py-1 text-xs text-muted-foreground bg-muted/30 min-w-[48px]">—</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                  <td className="px-2 py-1.5 text-center">
+                                    <span className={cn('inline-block rounded-lg px-2 py-1 text-xs font-bold min-w-[48px]', cellBg(crossTabData.rowTotals[rk].rate))}>
+                                      {crossTabData.rowTotals[rk].rate}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                            <tfoot>
+                              <tr className="border-t bg-muted/20">
+                                <td className="py-2 pr-4 text-xs font-medium text-muted-foreground">Promedio</td>
+                                {crossTabData.colKeys.map(col => {
+                                  const vals = crossTabData.rowKeys.map(rk => crossTabData.cells[rk][col]?.rate).filter((v): v is number => v !== undefined && v !== null);
+                                  const avg = vals.length > 0 ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+                                  return (
+                                    <td key={col} className="px-1 py-1.5 text-center">
+                                      {avg !== null ? (
+                                        <span className={cn('inline-block rounded-lg px-2 py-1 text-xs font-bold min-w-[48px]', cellBg(avg))}>{avg}%</span>
+                                      ) : (
+                                        <span className="text-muted-foreground text-xs">—</span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                                <td />
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Product comparison */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2"><Target className="h-4 w-4" />Desempeño por producto</CardTitle>
+                      <CardDescription>% de aciertos en preguntas de cada producto · incluye desglose por módulo</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {productMetrics.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">
+                          Sin datos por producto. Verifica que las preguntas del pulso tengan <code className="text-xs bg-muted px-1 rounded">productId</code> asignado.
+                        </p>
+                      ) : (
+                        <div className="space-y-6">
+                          {productMetrics.map(pm => (
+                            <div key={pm.productId} className="space-y-3">
+                              {/* Product header */}
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: pm.productColor }} />
+                                  <span className="font-semibold text-sm">{pm.productName}</span>
+                                  <span className="text-xs text-muted-foreground">· {pm.totalAnswers} respuestas</span>
+                                </div>
+                                <span className={cn('text-xl font-bold', pctColor(pm.correctRate))}>{pm.correctRate}%</span>
+                              </div>
+                              {/* Product progress bar */}
+                              <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                                <div className={cn('h-full rounded-full', barColor(pm.correctRate))} style={{ width: `${pm.correctRate}%` }} />
+                              </div>
+                              {/* Module breakdown for this product */}
+                              {pm.moduleRates.length > 0 && (
+                                <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3 pl-4">
+                                  {pm.moduleRates.map(mr => (
+                                    <div key={mr.module} className="space-y-0.5">
+                                      <div className="flex items-center justify-between text-xs">
+                                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border font-medium', MODULE_COLORS[mr.module] ?? 'bg-muted text-muted-foreground border-border')}>{mr.label}</span>
+                                        <span className={cn('font-bold', pctColor(mr.rate))}>{mr.rate}%</span>
+                                      </div>
+                                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                        <div className={cn('h-full rounded-full', MODULE_BAR_COLORS[mr.module] ?? 'bg-primary')} style={{ width: `${mr.rate}%` }} />
+                                      </div>
+                                      <p className="text-[10px] text-muted-foreground">{mr.total} respuestas</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </TabsContent>
+          </Tabs>
         </TabsContent>
       </Tabs>
     </div>
