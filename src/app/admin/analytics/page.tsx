@@ -5,9 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  BarChart3, TrendingUp, Users, Target, Clock, Zap, Radio,
+  BarChart3, TrendingUp, TrendingDown, Users, Target, Clock, Zap, Radio,
   BookOpen, X, Plus, Timer, AlertTriangle, CheckCircle2, Circle,
-  ChevronDown, ChevronRight, Search, ArrowUpDown,
+  ChevronDown, ChevronRight, Search, ArrowUpDown, Download,
 } from 'lucide-react';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
 import { getDailyPulses, getPulseAttemptsByDateRange, getQuestions, getAllUsers } from '@/lib/firestore-service';
@@ -367,6 +367,50 @@ function buildEnrichedUserRows(
   });
 }
 
+// ── User timeline ──────────────────────────────────────────────────────────
+
+interface UserTimelinePoint {
+  date: string;
+  pct: number;
+  correct: number;
+  total: number;
+}
+
+function buildUserTimeline(attempts: PulseAttempt[], userId: string): UserTimelinePoint[] {
+  return attempts
+    .filter(a => a.userId === userId && a.status === 'completed')
+    .map(a => ({ date: a.date, pct: a.percentage, correct: a.correctAnswers, total: a.totalQuestions }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ── CSV export ─────────────────────────────────────────────────────────────
+
+function exportUsersCSV(rows: EnrichedUserRow[]) {
+  const headers = [
+    'Nombre', 'Email', 'Hub', 'Vertical', 'Estado',
+    '% Aciertos', 'Pulsos completados', 'Correctas', 'Total preguntas',
+    'Última actividad', 'Módulo más débil',
+  ];
+  const escape = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+  const lines = rows.map(r => [
+    r.nombre, r.email, r.hub, r.vertical, r.estado,
+    r.hasResponded ? r.avgPct : '',
+    r.totalAttempts || '',
+    r.totalCorrect || '',
+    r.totalQuestions || '',
+    r.lastActivity || '',
+    r.worstModuleLabel !== '-' ? r.worstModuleLabel : '',
+  ].map(escape).join(','));
+  const csv = '\uFEFF' + [headers.join(','), ...lines].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `usuarios-pulso-${dateToStr(new Date())}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // ── Cross-tab: segment × module ────────────────────────────────────────────
 
 interface CrossTabData {
@@ -509,9 +553,10 @@ function buildSegmentMetrics(
 
 // ── Components ─────────────────────────────────────────────────────────────
 
-function StatCard({ title, value, description, icon: Icon, color }: {
+function StatCard({ title, value, description, icon: Icon, color, delta }: {
   title: string; value: string | number; description?: string;
   icon: React.ElementType; color: string;
+  delta?: { value: number; positive: boolean } | null;
 }) {
   return (
     <Card>
@@ -520,8 +565,17 @@ function StatCard({ title, value, description, icon: Icon, color }: {
         <Icon className={`h-4 w-4 ${color}`} />
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="flex items-end gap-2">
+          <div className="text-2xl font-bold">{value}</div>
+          {delta && (
+            <span className={cn('inline-flex items-center gap-0.5 text-xs font-semibold mb-1', delta.positive ? 'text-green-600' : 'text-red-500')}>
+              {delta.positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+              {delta.value > 0 ? `${delta.positive ? '+' : '-'}${delta.value}` : '='}
+            </span>
+          )}
+        </div>
         {description && <p className="text-xs text-muted-foreground mt-1">{description}</p>}
+        {delta && <p className="text-[10px] text-muted-foreground">vs período anterior</p>}
       </CardContent>
     </Card>
   );
@@ -585,6 +639,7 @@ export default function AnalyticsPage() {
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
   const [questionMap, setQuestionMap] = useState<Record<string, Question>>({});
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [prevPulseAttempts, setPrevPulseAttempts] = useState<PulseAttempt[]>([]);
 
   // Filter state
   const [periodDays, setPeriodDays] = useState('30');
@@ -639,23 +694,46 @@ export default function AnalyticsPage() {
 
   // ── Load pulse data ──────────────────────────────────────────────────────
 
+  // Persist key filters to localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('analytics_filters');
+      if (saved) {
+        const f = JSON.parse(saved);
+        if (f.periodDays) setPeriodDays(f.periodDays);
+        if (f.dimension) setDimension(f.dimension);
+        if (f.cosechaGranularity) setCosechaGranularity(f.cosechaGranularity);
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('analytics_filters', JSON.stringify({ periodDays, dimension, cosechaGranularity }));
+    } catch { /* ignore */ }
+  }, [periodDays, dimension, cosechaGranularity]);
+
   useEffect(() => {
     if (activeTab !== 'pulse') return;
     setLoadingPulse(true);
     const endDate = todayStr();
     const startDate = addDays(endDate, -parseInt(periodDays));
+    const prevStartDate = addDays(startDate, -parseInt(periodDays));
     Promise.all([
       getDailyPulses(startDate, endDate),
       getQuestions(undefined, false),
       getAllUsers(),
       getPulseAttemptsByDateRange(startDate, endDate),
-    ]).then(([pulseList, allQs, userList, allAttempts]) => {
+      getPulseAttemptsByDateRange(prevStartDate, startDate),
+    ]).then(([pulseList, allQs, userList, allAttempts, prevAttempts]) => {
       setPulses(pulseList);
       setAllUsers(userList.filter(u => u.active !== false));
       const map: Record<string, Question> = {};
       for (const q of allQs) map[q.id] = q;
       setQuestionMap(map);
       setPulseAttempts(allAttempts);
+      setPrevPulseAttempts(prevAttempts);
     }).finally(() => setLoadingPulse(false));
   }, [activeTab, periodDays]);
 
@@ -722,6 +800,28 @@ export default function AnalyticsPage() {
   const uniqueRespondents = new Set(filteredAttempts.map(a => a.userId)).size;
   const participationRate = totalUsers > 0 ? Math.round((uniqueRespondents / totalUsers) * 100) : 0;
 
+  // ── Previous period KPIs (for delta comparison) ───────────────────────────
+
+  const prevFilteredAttempts = useMemo(() => {
+    let result = prevPulseAttempts.filter(a => a.status === 'completed');
+    if (filterValue && activeOptFilters.has('filterValue')) {
+      result = result.filter(a => getDimensionValue(a, dimension, cosechaGranularity) === filterValue);
+    }
+    return result;
+  }, [prevPulseAttempts, filterValue, activeOptFilters, dimension, cosechaGranularity]);
+
+  const prevOverallPct = prevFilteredAttempts.length > 0
+    ? Math.round(prevFilteredAttempts.reduce((s, a) => s + a.percentage, 0) / prevFilteredAttempts.length)
+    : null;
+  const prevUniqueRespondents = new Set(prevFilteredAttempts.map(a => a.userId)).size;
+  const prevParticipationRate = totalUsers > 0 ? Math.round((prevUniqueRespondents / totalUsers) * 100) : null;
+
+  function delta(current: number, prev: number | null): { value: number; positive: boolean } | null {
+    if (prev === null || prev === 0) return null;
+    const d = current - prev;
+    return { value: Math.abs(d), positive: d >= 0 };
+  }
+
   // ── Derived metrics ───────────────────────────────────────────────────────
 
   const questionMetrics = useMemo(() => buildQuestionMetrics(filteredAttempts), [filteredAttempts]);
@@ -757,8 +857,8 @@ export default function AnalyticsPage() {
   const needsHelp = moduleMetrics.filter(m => m.correctRate < 50);
   const inProgress = moduleMetrics.filter(m => m.correctRate >= 50 && m.correctRate < 70);
   const mastered = moduleMetrics.filter(m => m.correctRate >= 70);
-  const hardestQ = questionMetrics.find(q => q.timesAsked >= 5);
-  const slowestQ = [...questionMetrics].filter(q => q.avgTime > 0 && q.timesAsked >= 5).sort((a, b) => b.avgTime - a.avgTime)[0];
+  const hardestQ = questionMetrics.find(q => q.timesAsked >= 2);
+  const slowestQ = [...questionMetrics].filter(q => q.avgTime > 0 && q.timesAsked >= 2).sort((a, b) => b.avgTime - a.avgTime)[0];
   const atRiskUserIds = useMemo(() => {
     const map: Record<string, { correct: number; total: number }> = {};
     for (const a of filteredAttempts) {
@@ -784,6 +884,13 @@ export default function AnalyticsPage() {
         u.vertical.toLowerCase().includes(q),
       );
     }
+    // Apply segment filter to users list when filterValue is active
+    if (filterValue && activeOptFilters.has('filterValue') && activeOptFilters.has('dimension') && dimension !== 'cosecha') {
+      list = list.filter(u => {
+        const val = dimension === 'hub' ? u.hub : dimension === 'vertical' ? u.vertical : u.estado;
+        return val === filterValue;
+      });
+    }
     list.sort((a, b) => {
       if (userSort === 'avgPct') {
         // Non-respondents always go to the bottom
@@ -800,7 +907,7 @@ export default function AnalyticsPage() {
       return 0;
     });
     return list;
-  }, [allUsersEnriched, userSearch, userSort]);
+  }, [allUsersEnriched, userSearch, userSort, filterValue, activeOptFilters, dimension]);
 
   function toggleUserExpand(uid: string) {
     setExpandedUsers(prev => {
@@ -1004,13 +1111,17 @@ export default function AnalyticsPage() {
                   {/* KPIs */}
                   <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                     <StatCard title="Pulsos enviados" value={pulses.length} description={`en los últimos ${periodDays} días`} icon={Radio} color="text-primary" />
-                    <StatCard title="Respuestas totales" value={filteredAttempts.length} description={`${uniqueRespondents} participantes únicos`} icon={Users} color="text-blue-500" />
+                    <StatCard title="Respuestas totales" value={filteredAttempts.length}
+                      description={`${uniqueRespondents} participantes únicos`} icon={Users} color="text-blue-500"
+                      delta={delta(filteredAttempts.length, prevFilteredAttempts.length > 0 ? prevFilteredAttempts.length : null)} />
                     <StatCard title="% Aciertos promedio" value={`${overallPct}%`}
                       description={avgTotalTime > 0 ? `Tiempo prom. por pulso: ${formatSeconds(avgTotalTime)}` : 'sobre todas las respuestas'}
-                      icon={Target} color={overallPct >= 70 ? 'text-green-500' : 'text-orange-500'} />
+                      icon={Target} color={overallPct >= 70 ? 'text-green-500' : 'text-orange-500'}
+                      delta={delta(overallPct, prevOverallPct)} />
                     <StatCard title="Tasa de participación" value={`${participationRate}%`}
                       description={`${uniqueRespondents} de ${totalUsers} usuarios activos`}
-                      icon={TrendingUp} color={participationRate >= 70 ? 'text-green-500' : participationRate >= 40 ? 'text-orange-500' : 'text-purple-500'} />
+                      icon={TrendingUp} color={participationRate >= 70 ? 'text-green-500' : participationRate >= 40 ? 'text-orange-500' : 'text-purple-500'}
+                      delta={delta(participationRate, prevParticipationRate)} />
                   </div>
 
                   {/* Diagnóstico */}
@@ -1290,12 +1401,12 @@ export default function AnalyticsPage() {
                     <div className="space-y-1">
                       <div className="h-2 bg-muted rounded-full overflow-hidden">
                         <div
-                          className={barColor(Math.round((respondedCount / allUsers.length) * 100))}
-                          style={{ width: `${(respondedCount / allUsers.length) * 100}%` }}
+                          className={barColor(allUsers.length > 0 ? Math.round((respondedCount / allUsers.length) * 100) : 0)}
+                          style={{ width: `${allUsers.length > 0 ? (respondedCount / allUsers.length) * 100 : 0}%` }}
                         />
                       </div>
                       <p className="text-[11px] text-muted-foreground">
-                        Participación: {Math.round((respondedCount / allUsers.length) * 100)}% ·
+                        Participación: {allUsers.length > 0 ? Math.round((respondedCount / allUsers.length) * 100) : 0}% ·
                         {' '}{allUsers.length - respondedCount} sin respuesta en este período
                       </p>
                     </div>
@@ -1321,6 +1432,14 @@ export default function AnalyticsPage() {
                         ]}
                         onChange={v => setUserSort(v as UserSortKey)}
                       />
+                      <button
+                        onClick={() => exportUsersCSV(filteredSortedUsers)}
+                        className="flex items-center gap-1.5 h-8 border rounded-full px-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
+                        title="Exportar a CSV"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Exportar CSV</span>
+                      </button>
                     </div>
 
                     {/* Table header */}
@@ -1337,8 +1456,13 @@ export default function AnalyticsPage() {
                     <div className="space-y-1">
                       {filteredSortedUsers.map(u => {
                         const expanded = expandedUsers.has(u.uid);
+                        const isAtRisk = u.hasResponded && atRiskUserIds.includes(u.uid);
                         return (
-                          <div key={u.uid} className={cn('border rounded-xl overflow-hidden', !u.hasResponded && 'opacity-60')}>
+                          <div key={u.uid} className={cn(
+                            'border rounded-xl overflow-hidden',
+                            !u.hasResponded && 'opacity-60',
+                            isAtRisk && 'border-red-300 bg-red-50/30',
+                          )}>
                             {/* Main row */}
                             <button
                               onClick={() => toggleUserExpand(u.uid)}
@@ -1348,7 +1472,14 @@ export default function AnalyticsPage() {
                                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                               </span>
                               <div className="min-w-0">
-                                <p className="text-sm font-medium truncate">{u.nombre}</p>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-sm font-medium truncate">{u.nombre}</p>
+                                  {isAtRisk && (
+                                    <span title="Usuario en riesgo: menos del 50% de aciertos">
+                                      <AlertTriangle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-[11px] text-muted-foreground truncate">
                                   {[u.hub !== '-' && u.hub, u.vertical !== '-' && u.vertical].filter(Boolean).join(' · ') || u.email}
                                 </p>
@@ -1406,6 +1537,27 @@ export default function AnalyticsPage() {
                                         Sin desglose por módulo — las preguntas respondidas no tienen módulo asignado.
                                       </p>
                                     )}
+                                    {/* Timeline */}
+                                    {(() => {
+                                      const timeline = buildUserTimeline(filteredAttempts, u.uid);
+                                      if (timeline.length < 2) return null;
+                                      return (
+                                        <div className="pt-2 border-t space-y-1.5">
+                                          <p className="text-[10px] text-muted-foreground uppercase font-medium tracking-wide">Evolución por pulso</p>
+                                          <div className="flex items-end gap-1.5 h-14 overflow-x-auto pb-1">
+                                            {timeline.map((pt, i) => (
+                                              <div key={i} className="flex flex-col items-center gap-0.5 shrink-0" style={{ minWidth: '32px' }}>
+                                                <span className={cn('text-[9px] font-bold leading-none', pctColor(pt.pct))}>{pt.pct}%</span>
+                                                <div className="w-6 flex items-end" style={{ height: '32px' }}>
+                                                  <div className={cn('w-full rounded-t-sm', barColor(pt.pct))} style={{ height: `${Math.max(Math.round((pt.pct / 100) * 32), 2)}px` }} />
+                                                </div>
+                                                <span className="text-[9px] text-muted-foreground leading-none whitespace-nowrap">{shortDate(pt.date)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      );
+                                    })()}
                                   </>
                                 )}
                               </div>
