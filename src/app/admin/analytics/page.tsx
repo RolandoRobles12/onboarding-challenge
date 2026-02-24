@@ -322,6 +322,51 @@ function buildUserDetailMetrics(
     .sort((a, b) => a.avgPct - b.avgPct); // worst performers first
 }
 
+// ── Enriched user rows (all users merged with pulse metrics) ───────────────
+
+interface EnrichedUserRow {
+  uid: string;
+  nombre: string;
+  email: string;
+  hub: string;
+  vertical: string;
+  estado: string;
+  hasResponded: boolean;
+  avgPct: number;
+  totalAttempts: number;
+  totalCorrect: number;
+  totalQuestions: number;
+  lastActivity: string | null;
+  moduleRates: ModuleRate[];
+  worstModuleLabel: string;
+}
+
+function buildEnrichedUserRows(
+  allUsers: UserProfile[],
+  userMetrics: UserDetailMetric[],
+): EnrichedUserRow[] {
+  const byId = new Map(userMetrics.map(u => [u.userId, u]));
+  return allUsers.map(user => {
+    const m = byId.get(user.uid);
+    return {
+      uid: user.uid,
+      nombre: user.nombre || user.email,
+      email: user.email,
+      hub: (m?.hub && m.hub !== '-') ? m.hub : (user.assignedKiosko || '-'),
+      vertical: (m?.vertical && m.vertical !== '-') ? m.vertical : (user.onboardingData?.['vertical'] || '-'),
+      estado: (m?.estado && m.estado !== '-') ? m.estado : (user.onboardingData?.['estado'] || '-'),
+      hasResponded: !!m,
+      avgPct: m?.avgPct ?? 0,
+      totalAttempts: m?.totalAttempts ?? 0,
+      totalCorrect: m?.totalCorrect ?? 0,
+      totalQuestions: m?.totalQuestions ?? 0,
+      lastActivity: m?.lastActivity ?? null,
+      moduleRates: m?.moduleRates ?? [],
+      worstModuleLabel: m?.worstModuleLabel ?? '-',
+    };
+  });
+}
+
 // ── Cross-tab: segment × module ────────────────────────────────────────────
 
 interface CrossTabData {
@@ -691,6 +736,12 @@ export default function AnalyticsPage() {
 
   const userDetailMetrics = useMemo(() => buildUserDetailMetrics(filteredAttempts, questionMap), [filteredAttempts, questionMap]);
 
+  // All users merged with their pulse metrics (shows even users with no responses)
+  const allUsersEnriched = useMemo(
+    () => buildEnrichedUserRows(allUsers, userDetailMetrics),
+    [allUsers, userDetailMetrics],
+  );
+
   const crossTabData = useMemo(
     () => buildCrossTab(filteredAttempts, questionMap, compDim, cosechaGranularity),
     [filteredAttempts, questionMap, compDim, cosechaGranularity],
@@ -720,24 +771,36 @@ export default function AnalyticsPage() {
 
   // ── Users table helpers ───────────────────────────────────────────────────
 
+  const respondedCount = allUsersEnriched.filter(u => u.hasResponded).length;
+
   const filteredSortedUsers = useMemo(() => {
-    let list = [...userDetailMetrics];
+    let list = [...allUsersEnriched];
     if (userSearch) {
       const q = userSearch.toLowerCase();
       list = list.filter(u =>
-        u.userName.toLowerCase().includes(q) ||
+        u.nombre.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
         u.hub.toLowerCase().includes(q) ||
         u.vertical.toLowerCase().includes(q),
       );
     }
     list.sort((a, b) => {
-      if (userSort === 'avgPct') return a.avgPct - b.avgPct;
-      if (userSort === 'nombre') return a.userName.localeCompare(b.userName);
-      if (userSort === 'lastActivity') return b.lastActivity.localeCompare(a.lastActivity);
+      if (userSort === 'avgPct') {
+        // Non-respondents always go to the bottom
+        if (!a.hasResponded && b.hasResponded) return 1;
+        if (a.hasResponded && !b.hasResponded) return -1;
+        return a.avgPct - b.avgPct; // worst performers first
+      }
+      if (userSort === 'nombre') return a.nombre.localeCompare(b.nombre);
+      if (userSort === 'lastActivity') {
+        if (!a.lastActivity) return 1;
+        if (!b.lastActivity) return -1;
+        return b.lastActivity.localeCompare(a.lastActivity);
+      }
       return 0;
     });
     return list;
-  }, [userDetailMetrics, userSearch, userSort]);
+  }, [allUsersEnriched, userSearch, userSort]);
 
   function toggleUserExpand(uid: string) {
     setExpandedUsers(prev => {
@@ -1208,25 +1271,42 @@ export default function AnalyticsPage() {
             {/* ── USUARIOS ─────────────────────────────────────────────────── */}
             <TabsContent value="usuarios" className="mt-4 space-y-4">
               {loadingPulse ? (
-                <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
-              ) : userDetailMetrics.length === 0 ? (
-                <Card><CardContent className="py-12 text-center text-muted-foreground text-sm">Sin respuestas de pulso en el período seleccionado.</CardContent></Card>
+                <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
+              ) : allUsers.length === 0 ? (
+                <Card><CardContent className="py-12 text-center text-muted-foreground text-sm">No hay usuarios activos en el sistema.</CardContent></Card>
               ) : (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" />Desempeño por usuario</CardTitle>
                     <CardDescription>
-                      {userDetailMetrics.length} usuarios con respuestas · ordenados por menor % de aciertos · click para ver detalle por módulo
+                      <span className={respondedCount === 0 ? 'text-red-500 font-medium' : ''}>
+                        {respondedCount} de {allUsers.length} usuarios han respondido en el período
+                      </span>
+                      {respondedCount > 0 && ' · click para ver detalle por módulo'}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
+                    {/* Participation summary bar */}
+                    <div className="space-y-1">
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className={barColor(Math.round((respondedCount / allUsers.length) * 100))}
+                          style={{ width: `${(respondedCount / allUsers.length) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Participación: {Math.round((respondedCount / allUsers.length) * 100)}% ·
+                        {' '}{allUsers.length - respondedCount} sin respuesta en este período
+                      </p>
+                    </div>
+
                     {/* Controls */}
                     <div className="flex flex-wrap gap-2 items-center">
                       <div className="relative flex-1 min-w-[200px] max-w-xs">
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                         <input
                           type="text"
-                          placeholder="Buscar por nombre, hub…"
+                          placeholder="Buscar por nombre, email, hub…"
                           value={userSearch}
                           onChange={e => setUserSearch(e.target.value)}
                           className="h-8 w-full pl-8 pr-3 rounded-full border text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
@@ -1235,7 +1315,7 @@ export default function AnalyticsPage() {
                       <FilterChip
                         label="Ordenar" value={userSort} removable={false}
                         options={[
-                          { value: 'avgPct', label: '% Aciertos (menor primero)' },
+                          { value: 'avgPct', label: '% Aciertos (peor primero)' },
                           { value: 'nombre', label: 'Nombre A–Z' },
                           { value: 'lastActivity', label: 'Actividad reciente' },
                         ]}
@@ -1248,7 +1328,7 @@ export default function AnalyticsPage() {
                       <span />
                       <span>Nombre</span>
                       <span className="text-center w-14">Aciertos</span>
-                      <span className="text-center w-16">Respuestas</span>
+                      <span className="text-center w-20">Respuestas</span>
                       <span className="text-center w-20 hidden sm:block">Última act.</span>
                       <span className="text-right w-28 hidden md:block">Módulo más débil</span>
                     </div>
@@ -1256,53 +1336,77 @@ export default function AnalyticsPage() {
                     {/* Rows */}
                     <div className="space-y-1">
                       {filteredSortedUsers.map(u => {
-                        const expanded = expandedUsers.has(u.userId);
+                        const expanded = expandedUsers.has(u.uid);
                         return (
-                          <div key={u.userId} className="border rounded-xl overflow-hidden">
+                          <div key={u.uid} className={cn('border rounded-xl overflow-hidden', !u.hasResponded && 'opacity-60')}>
                             {/* Main row */}
                             <button
-                              onClick={() => toggleUserExpand(u.userId)}
+                              onClick={() => toggleUserExpand(u.uid)}
                               className="w-full grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3 items-center px-3 py-2.5 hover:bg-muted/30 transition-colors text-left"
                             >
                               <span className="text-muted-foreground">
                                 {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                               </span>
                               <div className="min-w-0">
-                                <p className="text-sm font-medium truncate">{u.userName}</p>
+                                <p className="text-sm font-medium truncate">{u.nombre}</p>
                                 <p className="text-[11px] text-muted-foreground truncate">
-                                  {[u.hub !== '-' && u.hub, u.vertical !== '-' && u.vertical].filter(Boolean).join(' · ') || 'Sin segmento'}
+                                  {[u.hub !== '-' && u.hub, u.vertical !== '-' && u.vertical].filter(Boolean).join(' · ') || u.email}
                                 </p>
                               </div>
-                              <span className={cn('text-sm font-bold w-14 text-center', pctColor(u.avgPct))}>{u.avgPct}%</span>
-                              <span className="text-xs text-muted-foreground w-16 text-center">{u.totalAttempts} pulso{u.totalAttempts !== 1 ? 's' : ''}</span>
-                              <span className="text-xs text-muted-foreground w-20 text-center hidden sm:block">{shortDate(u.lastActivity)}</span>
-                              <span className="text-[11px] text-muted-foreground w-28 text-right hidden md:block truncate">{u.worstModuleLabel}</span>
+                              {u.hasResponded ? (
+                                <span className={cn('text-sm font-bold w-14 text-center', pctColor(u.avgPct))}>{u.avgPct}%</span>
+                              ) : (
+                                <span className="text-xs text-muted-foreground w-14 text-center italic">—</span>
+                              )}
+                              <span className="text-xs text-muted-foreground w-20 text-center">
+                                {u.hasResponded ? `${u.totalAttempts} pulso${u.totalAttempts !== 1 ? 's' : ''}` : 'Sin respuesta'}
+                              </span>
+                              <span className="text-xs text-muted-foreground w-20 text-center hidden sm:block">
+                                {u.lastActivity ? shortDate(u.lastActivity) : '—'}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground w-28 text-right hidden md:block truncate">
+                                {u.hasResponded ? u.worstModuleLabel : '—'}
+                              </span>
                             </button>
 
                             {/* Expanded detail */}
                             {expanded && (
                               <div className="border-t bg-muted/20 px-4 py-3 space-y-3">
-                                <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                                  <span><strong className="text-foreground">{u.totalCorrect}</strong>/{u.totalQuestions} correctas en total</span>
-                                  <span>· <strong className="text-foreground">{u.totalAttempts}</strong> pulsos completados</span>
-                                  {u.estado !== '-' && <span>· Estado: <strong className="text-foreground">{u.estado}</strong></span>}
-                                </div>
-                                {u.moduleRates.length > 0 ? (
-                                  <div className="grid gap-2 sm:grid-cols-2">
-                                    {u.moduleRates.map(mr => (
-                                      <div key={mr.module} className="space-y-0.5">
-                                        <div className="flex items-center justify-between text-xs">
-                                          <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border font-medium', MODULE_COLORS[mr.module] ?? 'bg-muted text-muted-foreground border-border')}>{mr.label}</span>
-                                          <span className={cn('font-bold text-xs', pctColor(mr.rate))}>{mr.rate}% <span className="font-normal text-muted-foreground">({mr.correct}/{mr.total})</span></span>
-                                        </div>
-                                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                          <div className={cn('h-full rounded-full', barColor(mr.rate))} style={{ width: `${mr.rate}%` }} />
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
+                                {!u.hasResponded ? (
+                                  <p className="text-sm text-muted-foreground italic">
+                                    Este usuario no ha completado ningún pulso en el período seleccionado.
+                                    Prueba ampliar el período de tiempo en los filtros.
+                                  </p>
                                 ) : (
-                                  <p className="text-xs text-muted-foreground italic">Sin datos de módulos (las preguntas no tienen módulo asignado).</p>
+                                  <>
+                                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                                      <span><strong className="text-foreground">{u.totalCorrect}</strong>/{u.totalQuestions} correctas en total</span>
+                                      <span>· <strong className="text-foreground">{u.totalAttempts}</strong> pulsos completados</span>
+                                      {u.estado !== '-' && <span>· Estado: <strong className="text-foreground">{u.estado}</strong></span>}
+                                      <span>· <span className="font-mono text-[10px]">{u.email}</span></span>
+                                    </div>
+                                    {u.moduleRates.length > 0 ? (
+                                      <div className="grid gap-2 sm:grid-cols-2">
+                                        {u.moduleRates.map(mr => (
+                                          <div key={mr.module} className="space-y-0.5">
+                                            <div className="flex items-center justify-between text-xs">
+                                              <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full border font-medium', MODULE_COLORS[mr.module] ?? 'bg-muted text-muted-foreground border-border')}>{mr.label}</span>
+                                              <span className={cn('font-bold text-xs', pctColor(mr.rate))}>
+                                                {mr.rate}% <span className="font-normal text-muted-foreground">({mr.correct}/{mr.total})</span>
+                                              </span>
+                                            </div>
+                                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                              <div className={cn('h-full rounded-full', barColor(mr.rate))} style={{ width: `${mr.rate}%` }} />
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground italic">
+                                        Sin desglose por módulo — las preguntas respondidas no tienen módulo asignado.
+                                      </p>
+                                    )}
+                                  </>
                                 )}
                               </div>
                             )}
@@ -1311,7 +1415,7 @@ export default function AnalyticsPage() {
                       })}
                     </div>
 
-                    {filteredSortedUsers.length === 0 && (
+                    {filteredSortedUsers.length === 0 && userSearch && (
                       <p className="text-sm text-muted-foreground text-center py-6 italic">
                         Ningún usuario coincide con &ldquo;{userSearch}&rdquo;
                       </p>
