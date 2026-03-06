@@ -125,14 +125,25 @@ export default function PulsePage() {
         getPulseConfig(),
       ]);
 
-      setPulse(pulseData);
+      // Auto-create today's pulse if autoDailyPulse is enabled and no pulse exists yet
+      let resolvedPulse = pulseData;
+      if (!pulseData && cfg.autoDailyPulse) {
+        try {
+          await fetch('/api/pulse/auto-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date: today }) });
+          resolvedPulse = await getDailyPulse(today);
+        } catch {
+          // Ignore auto-create errors; pulse will show as unavailable
+        }
+      }
+
+      setPulse(resolvedPulse);
       setAttempt(attemptData);
       setBacklog(backlogData);
       setPulseConfig(cfg);
 
-      if (pulseData && pulseData.questionIds.length > 0) {
+      if (resolvedPulse && resolvedPulse.questionIds.length > 0) {
         // Use the user's personal question IDs if already assigned, otherwise use pool
-        const qIds = attemptData?.questionIds ?? pulseData.questionIds;
+        const qIds = attemptData?.questionIds ?? resolvedPulse.questionIds;
         const qs: Question[] = [];
         for (const qId of qIds) {
           const snap = await getDoc(doc(db!, 'questions', qId));
