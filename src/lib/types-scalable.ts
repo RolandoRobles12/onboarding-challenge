@@ -1283,6 +1283,8 @@ export interface PulseConfig {
   sameQuestionsForAll: boolean;
   /** Si es true, el orden de las opciones de respuesta se aleatoriza por usuario */
   randomizeAnswerOrder: boolean;
+  /** Si es true, el pulso se genera automáticamente cada día */
+  autoDailyPulse: boolean;
   updatedAt?: Timestamp;
   updatedBy?: string;
 }

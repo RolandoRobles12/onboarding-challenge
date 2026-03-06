@@ -142,6 +142,7 @@ export default function KnowledgePulsePage() {
     closeAt: '12:00',
     sameQuestionsForAll: true,
     randomizeAnswerOrder: false,
+    autoDailyPulse: false,
   });
 
   // Slack config (Slack tab)
@@ -213,6 +214,7 @@ export default function KnowledgePulsePage() {
         closeAt: cfg.closeAt,
         sameQuestionsForAll: cfg.sameQuestionsForAll,
         randomizeAnswerOrder: cfg.randomizeAnswerOrder,
+        autoDailyPulse: cfg.autoDailyPulse ?? false,
       });
     }).finally(() => setLoadingPulseConfig(false));
   }, [mainTab]);
@@ -875,6 +877,22 @@ export default function KnowledgePulsePage() {
                     <Switch
                       checked={pulseConfigForm.randomizeAnswerOrder}
                       onCheckedChange={v => setPulseConfigForm(f => ({ ...f, randomizeAnswerOrder: v }))}
+                    />
+                  </div>
+                  <div className="border-t pt-5 flex items-start gap-4 justify-between">
+                    <div className="space-y-0.5">
+                      <Label className="flex items-center gap-1.5">
+                        <Zap className="h-4 w-4 text-yellow-500" /> Pulso automático diario
+                      </Label>
+                      <p className="text-xs text-muted-foreground max-w-sm">
+                        Si está activo, el pulso del día se genera automáticamente cada mañana sin necesidad
+                        de crearlo manualmente. Llama a <code className="text-xs bg-muted px-1 rounded">/api/pulse/auto-create</code> desde
+                        un cron o al abrir la app.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={pulseConfigForm.autoDailyPulse}
+                      onCheckedChange={v => setPulseConfigForm(f => ({ ...f, autoDailyPulse: v }))}
                     />
                   </div>
                 </CardContent>

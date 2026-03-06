@@ -2409,6 +2409,7 @@ const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updated
   closeAt: '12:00',
   sameQuestionsForAll: true,
   randomizeAnswerOrder: false,
+  autoDailyPulse: false,
 };
 
 /** Obtiene la configuración global del pulso de conocimiento. */
