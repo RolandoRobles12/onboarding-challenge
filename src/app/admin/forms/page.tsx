@@ -168,7 +168,7 @@ function FieldEditor({ field, index, total, onChange, onDelete, onMoveUp, onMove
   async function handleImageUpload(file: File) {
     if (!storage) return;
     setImgUploading(true);
-    const path = `form-images/${Date.now()}_${file.name}`;
+    const path = `certificates/form-images/${Date.now()}_${file.name}`;
     const task = uploadBytesResumable(ref(storage, path), file);
     task.on('state_changed', () => {}, () => { setImgUploading(false); }, async () => {
       const url = await getDownloadURL(task.snapshot.ref);

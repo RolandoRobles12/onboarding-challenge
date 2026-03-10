@@ -163,7 +163,7 @@ export default function QuestionsPage() {
   async function handleImageUpload(file: File) {
     if (!storage) return;
     setImageUploading(true);
-    const path = `question-images/${Date.now()}_${file.name}`;
+    const path = `certificates/question-images/${Date.now()}_${file.name}`;
     const task = uploadBytesResumable(ref(storage, path), file);
     task.on(
       'state_changed',
@@ -904,9 +904,9 @@ export default function QuestionsPage() {
                       </div>
                     ) : (
                       <div className="space-y-1">
-                        {question.options.map((option: any) => (
+                        {question.options.map((option: any, optIdx: number) => (
                           <div
-                            key={option.id}
+                            key={option.text || optIdx}
                             className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
                               option.isCorrect
                                 ? 'bg-green-500/10 text-green-700 dark:text-green-400'
