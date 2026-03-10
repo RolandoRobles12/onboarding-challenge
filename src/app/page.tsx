@@ -21,6 +21,7 @@ import {
   getLevelFromConfig,
   getDailyPulse,
   getPulseAttempt,
+  getProducts,
   type LevelConfig,
 } from '@/lib/firestore-service';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
@@ -32,7 +33,7 @@ import {
   HelpCircle, BarChart2, Award, AlertCircle, LayoutDashboard,
   Trophy, BookOpen, Swords, Medal, Zap,
   ChevronDown, ChevronUp, PlayCircle, Sparkles, Target, ListChecks,
-  Radio, Clock,
+  Radio, Clock, FlaskConical, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvatarComponent } from '@/lib/avatars';
@@ -768,15 +769,28 @@ function JourneyDashboard({ userId, profile }: {
 
 // ─── Admin panel ──────────────────────────────────────────────────────────────
 
-function AdminPanel({ name }: { name: string }) {
+function AdminPanel({ name, onTestMode }: { name: string; onTestMode: () => void }) {
   return (
-    <div className="rounded-2xl border-2 border-dashed border-primary/20 bg-primary/5 p-6 text-center">
-      <LayoutDashboard className="h-10 w-10 text-primary mx-auto mb-3" />
-      <h2 className="font-semibold text-lg">Hola, {name}</h2>
-      <p className="text-muted-foreground text-sm mt-1 mb-4">Gestiona la plataforma desde el panel de control.</p>
-      <Button asChild>
-        <Link href="/admin">Ir al panel de administración <ChevronRight className="ml-1 h-4 w-4" /></Link>
-      </Button>
+    <div className="space-y-4">
+      <div className="rounded-2xl border-2 border-dashed border-primary/20 bg-primary/5 p-6 text-center">
+        <LayoutDashboard className="h-10 w-10 text-primary mx-auto mb-3" />
+        <h2 className="font-semibold text-lg">Hola, {name}</h2>
+        <p className="text-muted-foreground text-sm mt-1 mb-4">Gestiona la plataforma desde el panel de control.</p>
+        <Button asChild>
+          <Link href="/admin">Ir al panel de administración <ChevronRight className="ml-1 h-4 w-4" /></Link>
+        </Button>
+      </div>
+      <button
+        onClick={onTestMode}
+        className="w-full flex items-center gap-3 rounded-2xl border border-dashed border-amber-300 bg-amber-50/50 px-4 py-3 text-left hover:bg-amber-50 transition-colors"
+      >
+        <FlaskConical className="h-5 w-5 text-amber-500 shrink-0" />
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-amber-700">Modo Prueba — Vista de vendedor</p>
+          <p className="text-xs text-amber-600 mt-0.5">Simula la experiencia del recorrido de aprendizaje como si fueras un Jaguar Aviva.</p>
+        </div>
+        <ChevronRight className="h-4 w-4 text-amber-500 shrink-0" />
+      </button>
     </div>
   );
 }
@@ -788,6 +802,35 @@ export default function LMSDashboard() {
   const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
   const firstName = profile?.nombre?.split(' ')[0] || user?.displayName?.split(' ')[0] || 'tú';
 
+  // Test mode: admin simulating seller experience
+  const [testMode, setTestMode] = useState(false);
+  const [testProductId, setTestProductId] = useState<string>('');
+  const [availableProducts, setAvailableProducts] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [showProductPicker, setShowProductPicker] = useState(false);
+
+  const enterTestMode = async () => {
+    const productId = profile?.producto;
+    if (productId) {
+      setTestProductId(productId);
+      setTestMode(true);
+    } else {
+      // Need to pick a product
+      const prods = await getProducts();
+      setAvailableProducts(prods.map(p => ({ id: p.id, name: p.name, color: p.color ?? '#7C3AED' })));
+      setShowProductPicker(true);
+    }
+  };
+
+  const exitTestMode = () => {
+    setTestMode(false);
+    setTestProductId('');
+  };
+
+  // Build a virtual seller profile for test mode
+  const testProfile = profile && testMode && testProductId
+    ? { ...profile, rol: 'seller' as const, producto: testProductId, onboardingCompleted: true }
+    : null;
+
   return (
     <ProtectedRoute>
       <SellerOnboardingGate>
@@ -798,7 +841,15 @@ export default function LMSDashboard() {
             <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
               <Link href="/"><AvivaLogo className="h-8 w-auto" /></Link>
               <div className="flex items-center gap-1">
-                {isAdmin && (
+                {isAdmin && testMode && (
+                  <button
+                    onClick={exitTestMode}
+                    className="flex items-center gap-1.5 text-xs bg-amber-400/20 text-amber-200 border border-amber-300/30 rounded-lg px-2.5 py-1.5 hover:bg-amber-400/30 transition-colors"
+                  >
+                    <FlaskConical className="h-3.5 w-3.5" /> Modo Prueba <X className="h-3 w-3" />
+                  </button>
+                )}
+                {isAdmin && !testMode && (
                   <Link href="/admin">
                     <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 gap-1">
                       <ShieldCheck className="h-3.5 w-3.5" /> Admin
@@ -815,18 +866,68 @@ export default function LMSDashboard() {
             </div>
           </header>
 
+          {/* Test mode banner */}
+          {testMode && (
+            <div className="bg-amber-50 border-b border-amber-200 px-4 py-2">
+              <div className="max-w-md mx-auto flex items-center gap-2">
+                <FlaskConical className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <p className="text-xs text-amber-700 flex-1">
+                  <strong>Modo Prueba activo</strong> — Estás viendo la experiencia como vendedor. Tu progreso real no se afecta.
+                </p>
+                <button onClick={exitTestMode} className="text-xs text-amber-600 hover:text-amber-800 underline shrink-0">Salir</button>
+              </div>
+            </div>
+          )}
+
+          {/* Product picker modal */}
+          {showProductPicker && (
+            <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+              <div className="bg-background rounded-2xl border shadow-xl w-full max-w-sm p-5 space-y-4">
+                <div className="flex items-center gap-2">
+                  <FlaskConical className="h-5 w-5 text-amber-500" />
+                  <h3 className="font-semibold">Selecciona un producto para probar</h3>
+                </div>
+                <p className="text-sm text-muted-foreground">Elige el producto cuya ruta de aprendizaje quieres simular.</p>
+                <div className="space-y-2">
+                  {availableProducts.map(p => (
+                    <button
+                      key={p.id}
+                      className="w-full flex items-center gap-3 rounded-xl border px-4 py-3 text-left hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                      onClick={() => { setTestProductId(p.id); setShowProductPicker(false); setTestMode(true); }}
+                    >
+                      <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                      <span className="font-medium text-sm">{p.name}</span>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground ml-auto" />
+                    </button>
+                  ))}
+                  {availableProducts.length === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">No hay productos configurados.</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setShowProductPicker(false)}
+                  className="w-full text-sm text-muted-foreground hover:text-foreground text-center py-1"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Main */}
           <main className="flex-grow">
             <div className="max-w-md mx-auto px-4 py-5">
-              {!isAdmin && (
+              {(!isAdmin || testMode) && (
                 <div className="mb-4 flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-primary" />
                   <h1 className="text-lg font-bold">Hola, {firstName} 👋</h1>
                 </div>
               )}
-              {isAdmin ? (
-                <AdminPanel name={firstName} />
-              ) : profile ? (
+              {isAdmin && !testMode ? (
+                <AdminPanel name={firstName} onTestMode={enterTestMode} />
+              ) : testProfile ? (
+                <JourneyDashboard userId={testProfile.uid} profile={testProfile} />
+              ) : profile && !isAdmin ? (
                 <JourneyDashboard userId={profile.uid} profile={profile} />
               ) : user ? (
                 <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed py-14 text-center gap-3">
@@ -847,7 +948,7 @@ export default function LMSDashboard() {
             </div>
           </main>
 
-          <BottomNav isAdmin={isAdmin} />
+          <BottomNav isAdmin={isAdmin && !testMode} />
         </div>
       </SellerOnboardingGate>
     </ProtectedRoute>

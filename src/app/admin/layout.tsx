@@ -29,11 +29,13 @@ import {
   KeyRound,
   FolderKanban,
   MessageSquare,
+  ShieldCheck,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AvivaLogo } from '@/components/AvivaLogo';
+import { getRolePermissions } from '@/lib/firestore-service';
 
 type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
 type NavSection = { section: string; items: NavItem[] };
@@ -82,6 +84,7 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Usuarios', href: '/admin/users', icon: Users },
       { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
       { name: 'Tokens', href: '/admin/tokens', icon: KeyRound },
+      { name: 'Roles y Permisos', href: '/admin/roles', icon: ShieldCheck },
     ],
   },
 ];
@@ -90,6 +93,33 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { profile, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [allowedPaths, setAllowedPaths] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (!profile) return;
+    if (profile.rol === 'super_admin') {
+      setAllowedPaths(null); // null = all access
+      return;
+    }
+    getRolePermissions(profile.rol).then(paths => {
+      setAllowedPaths(paths.length > 0 ? new Set(paths) : null);
+    });
+  }, [profile]);
+
+  // Filter nav based on permissions (super_admin always sees everything)
+  const filteredNavigation = navigation.map(entry => {
+    if (allowedPaths === null) return entry; // super_admin or no config = show all
+    if ('section' in entry) {
+      return {
+        ...entry,
+        items: entry.items.filter(item => allowedPaths.has(item.href)),
+      };
+    }
+    return entry;
+  }).filter(entry => {
+    if ('section' in entry) return entry.items.length > 0;
+    return true;
+  });
 
   const handleLogout = async () => {
     await logout();
@@ -150,7 +180,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
             {/* Navigation */}
             <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-              {navigation.map((entry) => {
+              {filteredNavigation.map((entry) => {
                 if ('section' in entry) {
                   return (
                     <div key={entry.section} className="pt-3 first:pt-0">
