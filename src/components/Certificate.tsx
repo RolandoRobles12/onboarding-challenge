@@ -22,6 +22,7 @@ function isLightColor(hex: string): boolean {
 export interface CertificateSignerData {
   name: string;
   position: string;
+  signatureUrl?: string;
 }
 
 interface CertificateProps {
@@ -165,7 +166,15 @@ export function Certificate({
             <div className="flex items-end gap-6 flex-wrap">
               {displaySigners.map((signer, i) => (
                 <div key={i} className="text-center min-w-[90px]">
-                  <div className="pt-2 mt-6" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}` }}>
+                  {signer.signatureUrl && (
+                    <img
+                      src={signer.signatureUrl}
+                      alt={`Firma ${signer.name}`}
+                      className="h-9 w-auto object-contain mx-auto mb-1"
+                      style={{ maxWidth: '120px', filter: lightBg ? 'none' : 'invert(1)' }}
+                    />
+                  )}
+                  <div className="pt-2" style={{ borderTop: `1px solid ${lightBg ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.6)'}`, marginTop: signer.signatureUrl ? 0 : '1.5rem' }}>
                     <p className="text-xs font-semibold leading-tight" style={{ color: textPrimary }}>{signer.name}</p>
                     <p className="text-[10px] leading-tight mt-0.5" style={{ color: textSecondary }}>{signer.position}</p>
                   </div>

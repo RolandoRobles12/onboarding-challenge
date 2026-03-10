@@ -42,6 +42,7 @@ function shuffle<T>(arr: T[]): T[] {
 // Estructura de runtime que el motor del quiz espera
 interface RuntimeQuestion {
   text: string;
+  imageUrl?: string;         // imagen opcional de la pregunta
   options: Option[];
   isTricky?: boolean;
   isMultiSelect?: boolean;
@@ -165,6 +166,7 @@ function QuizComponent() {
               .filter(Boolean)
               .map((q) => ({
                 text: q.text,
+                imageUrl: q.imageUrl,
                 options: q.type === 'open_text' ? [] : buildOptions(q.options),
                 type: q.type,
                 isTricky: q.isTricky || q.type === 'tricky',
@@ -813,6 +815,13 @@ function QuizComponent() {
           <Card className="bg-card shadow-lg rounded-lg border-primary/20">
             <CardHeader>
               <CardTitle className="text-2xl leading-snug text-primary">{currentQuestion.text}</CardTitle>
+              {currentQuestion.imageUrl && (
+                <img
+                  src={currentQuestion.imageUrl}
+                  alt="Imagen de la pregunta"
+                  className="rounded-lg border object-contain max-h-52 w-auto mt-2"
+                />
+              )}
               <CardDescription>{currentMission.title}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

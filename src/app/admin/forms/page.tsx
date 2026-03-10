@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   getJourneyForms,
@@ -59,7 +59,11 @@ import {
   Save,
   Eye,
   Copy,
+  ImageIcon,
+  Upload,
 } from 'lucide-react';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -154,10 +158,24 @@ interface FieldEditorProps {
 
 function FieldEditor({ field, index, total, onChange, onDelete, onMoveUp, onMoveDown }: FieldEditorProps) {
   const update = (patch: Partial<FormField>) => onChange({ ...field, ...patch });
+  const imgInputRef = useRef<HTMLInputElement>(null);
+  const [imgUploading, setImgUploading] = useState(false);
 
   const needsOptions = field.type === 'single_choice' || field.type === 'multiple_choice';
   const needsScale = field.type === 'rating_scale';
   const isHeader = field.type === 'section_header';
+
+  async function handleImageUpload(file: File) {
+    if (!storage) return;
+    setImgUploading(true);
+    const path = `form-images/${Date.now()}_${file.name}`;
+    const task = uploadBytesResumable(ref(storage, path), file);
+    task.on('state_changed', () => {}, () => { setImgUploading(false); }, async () => {
+      const url = await getDownloadURL(task.snapshot.ref);
+      update({ imageUrl: url });
+      setImgUploading(false);
+    });
+  }
 
   const addOption = () => {
     const opts = field.options ?? [];
@@ -216,6 +234,41 @@ function FieldEditor({ field, index, total, onChange, onDelete, onMoveUp, onMove
           className="text-sm"
         />
       </div>
+
+      {/* Image upload (for non-header fields) */}
+      {!isHeader && (
+        <div>
+          <input
+            ref={imgInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }}
+          />
+          {field.imageUrl ? (
+            <div className="relative inline-block">
+              <img src={field.imageUrl} alt="Imagen del campo" className="max-h-32 rounded-lg border object-contain" />
+              <button
+                type="button"
+                onClick={() => update({ imageUrl: undefined })}
+                className="absolute top-1 right-1 h-5 w-5 rounded-full bg-destructive text-white flex items-center justify-center hover:bg-destructive/80"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={imgUploading}
+              onClick={() => imgInputRef.current?.click()}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed rounded px-2 py-1 transition-colors"
+            >
+              {imgUploading ? <Upload className="h-3 w-3 animate-pulse" /> : <ImageIcon className="h-3 w-3" />}
+              {imgUploading ? 'Subiendo…' : 'Agregar imagen'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Section header description */}
       {isHeader && (

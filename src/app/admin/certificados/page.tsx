@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   getAllCertificateSigners,
@@ -56,8 +56,120 @@ import {
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-const DEFAULT_SIGNER_FORM = { name: '', position: '' };
+const DEFAULT_SIGNER_FORM = { name: '', position: '', signatureUrl: '' };
 type EditableConfig = Omit<CertificateConfig, 'organizationId' | 'updatedAt'>;
+
+// ─── Signature Canvas ─────────────────────────────────────────────────────────
+
+function SignatureCanvas({ value, onChange }: { value: string; onChange: (dataUrl: string) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const hasDrawn = useRef(false);
+
+  // Load existing signature into canvas on mount
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !value) return;
+    const img = new Image();
+    img.onload = () => {
+      const ctx = canvas.getContext('2d');
+      if (ctx) { ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0); }
+    };
+    img.src = value;
+  }, []);
+
+  function getPos(e: MouseEvent | Touch, canvas: HTMLCanvasElement) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: ((e as any).clientX !== undefined ? (e as MouseEvent).clientX : (e as Touch).clientX) * scaleX - rect.left * scaleX,
+      y: ((e as any).clientY !== undefined ? (e as MouseEvent).clientY : (e as Touch).clientY) * scaleY - rect.top * scaleY,
+    };
+  }
+
+  function startDraw(clientX: number, clientY: number) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    drawing.current = true;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    ctx.beginPath();
+    ctx.moveTo((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
+  }
+
+  function continueDraw(clientX: number, clientY: number) {
+    if (!drawing.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#111827';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineTo((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
+    ctx.stroke();
+    hasDrawn.current = true;
+  }
+
+  function endDraw() {
+    if (!drawing.current) return;
+    drawing.current = false;
+    const canvas = canvasRef.current;
+    if (canvas && hasDrawn.current) onChange(canvas.toDataURL('image/png'));
+  }
+
+  function handleClear() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    hasDrawn.current = false;
+    onChange('');
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="relative rounded-lg border bg-white overflow-hidden" style={{ touchAction: 'none' }}>
+        <canvas
+          ref={canvasRef}
+          width={500}
+          height={120}
+          className="w-full cursor-crosshair block"
+          style={{ height: '120px' }}
+          onMouseDown={e => startDraw(e.clientX, e.clientY)}
+          onMouseMove={e => continueDraw(e.clientX, e.clientY)}
+          onMouseUp={endDraw}
+          onMouseLeave={endDraw}
+          onTouchStart={e => { e.preventDefault(); const t = e.touches[0]; startDraw(t.clientX, t.clientY); }}
+          onTouchMove={e => { e.preventDefault(); const t = e.touches[0]; continueDraw(t.clientX, t.clientY); }}
+          onTouchEnd={endDraw}
+        />
+        {/* Bottom signature line */}
+        <div className="absolute bottom-6 left-4 right-4 border-b border-gray-300 pointer-events-none" />
+        {!value && !hasDrawn.current && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <p className="text-xs text-gray-400">Dibuja tu firma aquí</p>
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={handleClear}
+        className="text-xs text-muted-foreground hover:text-destructive transition-colors underline underline-offset-2"
+      >
+        Limpiar firma
+      </button>
+    </div>
+  );
+}
 
 /** 4 opciones de color para el certificado */
 const CERT_COLORS = [
@@ -109,7 +221,7 @@ export default function CertificadosPage() {
   function openSignerDialog(signer?: CertificateSigner) {
     if (signer) {
       setEditingSigner(signer);
-      setSignerForm({ name: signer.name, position: signer.position });
+      setSignerForm({ name: signer.name, position: signer.position, signatureUrl: signer.signatureUrl ?? '' });
     } else {
       setEditingSigner(null);
       setSignerForm(DEFAULT_SIGNER_FORM);
@@ -129,6 +241,7 @@ export default function CertificadosPage() {
         await updateCertificateSigner(editingSigner.id, {
           name: signerForm.name.trim(),
           position: signerForm.position.trim(),
+          signatureUrl: signerForm.signatureUrl || undefined,
         });
         toast({ title: 'Firmante actualizado' });
       } else {
@@ -137,6 +250,7 @@ export default function CertificadosPage() {
             organizationId: 'aviva-credito',
             name: signerForm.name.trim(),
             position: signerForm.position.trim(),
+            signatureUrl: signerForm.signatureUrl || undefined,
             active: true,
             order: signers.length,
             createdBy: user.uid,
@@ -217,7 +331,7 @@ export default function CertificadosPage() {
     toast({ title: 'Valores restaurados', description: 'Guarda para aplicarlos.' });
   }
 
-  const previewSigners = signers.filter(s => s.active).slice(0, 3).map(s => ({ name: s.name, position: s.position }));
+  const previewSigners = signers.filter(s => s.active).slice(0, 3).map(s => ({ name: s.name, position: s.position, signatureUrl: s.signatureUrl }));
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -639,11 +753,21 @@ export default function CertificadosPage() {
                 placeholder="Ej. Directora de Capacitación"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label>Firma digital <span className="text-muted-foreground font-normal text-xs">(dibuja con el ratón o dedo)</span></Label>
+              <SignatureCanvas
+                value={signerForm.signatureUrl}
+                onChange={url => setSignerForm(prev => ({ ...prev, signatureUrl: url }))}
+              />
+            </div>
             {(signerForm.name || signerForm.position) && (
               <div className="rounded-lg border bg-muted/30 p-4">
                 <p className="text-xs text-muted-foreground mb-3">Vista previa:</p>
                 <div className="text-center inline-block min-w-[120px]">
-                  <div className="border-t-2 border-foreground pt-2 mt-4">
+                  {signerForm.signatureUrl && (
+                    <img src={signerForm.signatureUrl} alt="Firma" className="h-10 w-auto object-contain mx-auto mb-1" style={{ maxWidth: '140px' }} />
+                  )}
+                  <div className="border-t-2 border-foreground pt-2 mt-1">
                     <p className="font-semibold text-sm">{signerForm.name || 'Nombre'}</p>
                     <p className="text-xs text-muted-foreground">{signerForm.position || 'Cargo'}</p>
                   </div>
