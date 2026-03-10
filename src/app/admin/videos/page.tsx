@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,7 +30,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Plus, Pencil, Trash2, Eye, EyeOff, Video as VideoIcon,
   Upload, Link as LinkIcon, X, Users, CheckCircle, Play,
-  GripVertical, BarChart2, Folder, FolderPlus,
+  GripVertical, BarChart2, Folder, FolderPlus, Package, Filter,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -537,6 +537,7 @@ function FolderFormDialog({
 
 export default function AdminVideosPage() {
   const { user } = useAuth();
+  const { products } = useProducts();
   const [videos, setVideos] = useState<Video[]>([]);
   const [folders, setFolders] = useState<VideoFolder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -546,6 +547,8 @@ export default function AdminVideosPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showFolderForm, setShowFolderForm] = useState(false);
   const [editingFolder, setEditingFolder] = useState<VideoFolder | null>(null);
+  const [filterProductId, setFilterProductId] = useState<string>('all');
+  const [filterFolderId, setFilterFolderId] = useState<string>('all');
 
   async function load() {
     setLoading(true);
@@ -600,6 +603,16 @@ export default function AdminVideosPage() {
   const maxOrder = videos.length > 0 ? Math.max(...videos.map(v => v.order)) + 1 : 0;
   const maxFolderOrder = folders.length > 0 ? Math.max(...folders.map(f => f.order)) + 1 : 0;
   const folderMap = Object.fromEntries(folders.map(f => [f.id, f.name]));
+  const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+
+  const filteredVideos = useMemo(() => videos.filter(v => {
+    if (filterProductId !== 'all' && (v.productId || '') !== filterProductId) return false;
+    if (filterFolderId !== 'all') {
+      if (filterFolderId === '__none__') return !v.folderId;
+      if (v.folderId !== filterFolderId) return false;
+    }
+    return true;
+  }), [videos, filterProductId, filterFolderId]);
 
   return (
     <div className="space-y-6">
@@ -626,7 +639,47 @@ export default function AdminVideosPage() {
 
         {/* ── Tab: Videos ── */}
         <TabsContent value="videos" className="mt-4 space-y-4">
-          <div className="flex justify-end">
+          <div className="flex flex-wrap gap-2 justify-between items-center">
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2">
+              <Select value={filterProductId} onValueChange={setFilterProductId}>
+                <SelectTrigger className="w-44 h-8 text-xs">
+                  <Package className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                  <SelectValue placeholder="Todos los productos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los productos</SelectItem>
+                  <SelectItem value="">Sin producto</SelectItem>
+                  {products.map(p => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                        {p.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={filterFolderId} onValueChange={setFilterFolderId}>
+                <SelectTrigger className="w-40 h-8 text-xs">
+                  <Folder className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
+                  <SelectValue placeholder="Todas las carpetas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las carpetas</SelectItem>
+                  <SelectItem value="__none__">Sin carpeta</SelectItem>
+                  {folders.filter(f => f.active).map(f => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(filterProductId !== 'all' || filterFolderId !== 'all') && (
+                <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground gap-1"
+                  onClick={() => { setFilterProductId('all'); setFilterFolderId('all'); }}>
+                  <X className="h-3 w-3" /> Limpiar filtros
+                </Button>
+              )}
+            </div>
             <Button className="gap-2" onClick={() => { setEditing(null); setShowForm(true); }}>
               <Plus className="h-4 w-4" /> Nuevo video
             </Button>
@@ -647,9 +700,16 @@ export default function AdminVideosPage() {
                 </Button>
               </CardContent>
             </Card>
+          ) : filteredVideos.length === 0 ? (
+            <Card className="rounded-xl">
+              <CardContent className="py-10 text-center">
+                <Filter className="h-8 w-8 mx-auto text-muted-foreground mb-2 opacity-40" />
+                <p className="text-muted-foreground text-sm">Sin videos para los filtros seleccionados.</p>
+              </CardContent>
+            </Card>
           ) : (
             <div className="space-y-2">
-              {videos.map(v => (
+              {filteredVideos.map(v => (
                 <Card key={v.id} className={cn('rounded-xl transition-opacity', !v.active && 'opacity-60')}>
                   <CardContent className="py-3 px-4 flex items-center gap-3">
                     <div className="h-12 w-16 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
@@ -664,14 +724,19 @@ export default function AdminVideosPage() {
                         <p className="font-semibold text-sm truncate">{v.title}</p>
                         {!v.active && <Badge variant="secondary" className="text-[10px]">Oculto</Badge>}
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5">
+                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                         {v.duration > 0 && <span className="text-xs text-muted-foreground">{fmtDuration(v.duration)}</span>}
                         {v.folderId && folderMap[v.folderId] && (
                           <Badge variant="outline" className="text-[10px] h-4 gap-1">
                             <Folder className="h-2.5 w-2.5" />{folderMap[v.folderId]}
                           </Badge>
                         )}
-                        {v.productId && <Badge variant="outline" className="text-[10px] h-4">Por producto</Badge>}
+                        {v.productId && productMap[v.productId] && (
+                          <Badge variant="outline" className="text-[10px] h-4 gap-1" style={{ borderColor: productMap[v.productId].color + '80', color: productMap[v.productId].color }}>
+                            <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: productMap[v.productId].color }} />
+                            {productMap[v.productId].name}
+                          </Badge>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">

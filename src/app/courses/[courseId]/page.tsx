@@ -237,30 +237,33 @@ function LessonViewer({
   // Timer duration in seconds for iframe-based content
   const timerSeconds = (lesson.estimatedDuration ?? 1) * 60;
 
+  // Iframe height: full viewport minus header+footer, capped for desktop
+  const iframeStyle = { height: 'min(72vh, 640px)' };
+
   return (
     <div className="flex-1 overflow-y-auto">
       {/* Lesson header */}
-      <div className="px-6 pt-5 pb-4 border-b">
-        <div className="flex items-center gap-2 mb-1">
+      <div className="px-4 sm:px-6 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
           <LessonIcon type={lesson.type} className="text-muted-foreground" />
           <span className="text-xs text-muted-foreground capitalize">{lesson.type}</span>
           {lesson.estimatedDuration && (
             <span className="text-xs text-muted-foreground">· {lesson.estimatedDuration} min</span>
           )}
           {isCompleted && (
-            <span className="flex items-center gap-1 text-xs text-green-600 font-medium ml-2">
+            <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
               <CheckCircle2 className="h-3.5 w-3.5" /> Completada
             </span>
           )}
         </div>
-        <h2 className="text-xl font-bold">{lesson.title}</h2>
+        <h2 className="text-lg sm:text-xl font-bold leading-snug">{lesson.title}</h2>
         {lesson.description && (
           <p className="text-muted-foreground text-sm mt-1">{lesson.description}</p>
         )}
       </div>
 
       {/* Content */}
-      <div className="px-6 py-5 space-y-4">
+      <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-4">
 
         {/* VIDEO — auto-complete on ended */}
         {lesson.type === 'video' && content.videoUrl && (
@@ -269,6 +272,7 @@ function LessonViewer({
               key={lesson.id}
               className="w-full h-full"
               controls
+              playsInline
               src={content.videoUrl}
               onEnded={() => { if (!isCompleted) onComplete(); }}
             />
@@ -277,8 +281,8 @@ function LessonViewer({
 
         {/* AUDIO — auto-complete on ended */}
         {lesson.type === 'audio' && content.audioUrl && (
-          <div className="rounded-xl border p-6 bg-muted/30 flex flex-col items-center gap-4">
-            <Headphones className="h-12 w-12 text-muted-foreground" />
+          <div className="rounded-xl border p-4 bg-muted/30 flex flex-col items-center gap-4">
+            <Headphones className="h-10 w-10 text-muted-foreground" />
             <audio
               key={lesson.id}
               controls
@@ -304,7 +308,7 @@ function LessonViewer({
         {/* EMBEDDED — auto-complete via timer */}
         {lesson.type === 'embedded' && content.embedUrl && (
           <>
-            <div className="rounded-xl overflow-hidden border" style={{ height: content.embedHeight || 480 }}>
+            <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
               <iframe
                 key={lesson.id}
                 src={content.embedUrl}
@@ -325,7 +329,7 @@ function LessonViewer({
         {/* SLIDES — auto-complete via timer */}
         {lesson.type === 'slides' && content.slidesUrl && (
           <>
-            <div className="rounded-xl overflow-hidden border" style={{ height: 480 }}>
+            <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
               <iframe
                 key={lesson.id}
                 src={content.slidesUrl}
@@ -346,19 +350,21 @@ function LessonViewer({
         {/* DOCUMENT — inline viewer + download */}
         {lesson.type === 'document' && content.documentUrl && (() => {
           const rawUrl = content.documentUrl;
-          // Detect extension from the path segment before query params
           const pathExt = rawUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
           const docType = content.documentType ?? pathExt;
           const isPdf = docType === 'pdf';
-          // Office formats use Google Docs Viewer for inline preview
-          const officeExts = ['doc', 'docx', 'ppt', 'pptx'];
+          const officeExts = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
           const isOffice = officeExts.includes(pathExt) || officeExts.includes(docType);
+          // Microsoft Office Online works on all mobile browsers (iOS Safari, Chrome Android)
+          // Google Docs Viewer is fallback for non-office types
           const viewerSrc = isPdf
             ? rawUrl
-            : `https://docs.google.com/viewer?url=${encodeURIComponent(rawUrl)}&embedded=true`;
+            : isOffice
+              ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(rawUrl)}`
+              : `https://docs.google.com/viewer?url=${encodeURIComponent(rawUrl)}&embedded=true`;
           return (
             <>
-              <div className="rounded-xl overflow-hidden border" style={{ height: 560 }}>
+              <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
                 <iframe
                   key={lesson.id}
                   src={viewerSrc}
@@ -369,12 +375,12 @@ function LessonViewer({
               </div>
               <a
                 href={rawUrl}
-                download
+                target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 text-sm text-primary underline"
               >
                 <Download className="h-4 w-4" />
-                Descargar documento
+                Abrir / descargar documento
               </a>
               <TimerAutoComplete
                 key={lesson.id}
@@ -389,7 +395,7 @@ function LessonViewer({
         {/* SCORM — auto-complete via timer */}
         {lesson.type === 'scorm' && content.scormPackageUrl && (
           <>
-            <div className="rounded-xl overflow-hidden border" style={{ height: 560 }}>
+            <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
               <iframe
                 key={lesson.id}
                 src={content.scormPackageUrl}
@@ -451,7 +457,7 @@ export default function CourseDetailPage() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
   // Tracks the in-flight Firestore write so Finalizar can await it
   const savePromiseRef = useRef<Promise<void>>(Promise.resolve());
@@ -553,10 +559,16 @@ export default function CourseDetailPage() {
           <header className="bg-accent text-accent-foreground border-b shrink-0 z-20">
             <div className="flex items-center gap-3 px-4 h-14">
               <button
-                className="text-accent-foreground/70 hover:text-accent-foreground lg:hidden"
+                className="text-accent-foreground/70 hover:text-accent-foreground lg:hidden flex items-center gap-1.5 shrink-0"
                 onClick={() => setSidebarOpen(o => !o)}
+                aria-label="Abrir contenido del curso"
               >
-                {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                <Menu className="h-5 w-5" />
+                {!loading && course && (
+                  <span className="text-[10px] font-semibold bg-white/20 rounded px-1 hidden sm:inline">
+                    {completedLessonIds.size}/{allLessons.length}
+                  </span>
+                )}
               </button>
 
               <Link href="/" aria-label="Volver al inicio">
@@ -618,20 +630,38 @@ export default function CourseDetailPage() {
               </Button>
             </div>
           ) : course ? (
-            <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 overflow-hidden relative">
 
-              {/* Sidebar */}
+              {/* Mobile backdrop */}
+              {sidebarOpen && (
+                <div
+                  className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+                  onClick={() => setSidebarOpen(false)}
+                />
+              )}
+
+              {/* Sidebar — overlay on mobile, inline on desktop */}
               <aside className={cn(
-                'shrink-0 border-r bg-card flex flex-col overflow-hidden',
-                'w-72',
-                sidebarOpen ? 'flex' : 'hidden',
-                'lg:flex',
+                'bg-card flex flex-col overflow-hidden border-r',
+                // Mobile: fixed overlay
+                'fixed inset-y-0 left-0 z-30 w-[min(288px,85vw)] transition-transform duration-200',
+                sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+                // Desktop: always visible, part of flex layout
+                'lg:relative lg:z-auto lg:translate-x-0 lg:w-72 lg:shrink-0',
               )}>
-                <div className="px-4 py-3 border-b">
-                  <h1 className="font-bold text-sm leading-snug line-clamp-2">{course.title}</h1>
-                  {course.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{course.description}</p>
-                  )}
+                <div className="px-4 py-3 border-b flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h1 className="font-bold text-sm leading-snug line-clamp-2">{course.title}</h1>
+                    {course.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{course.description}</p>
+                    )}
+                  </div>
+                  <button
+                    className="shrink-0 lg:hidden text-muted-foreground hover:text-foreground mt-0.5"
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
                 <Sidebar
                   course={course}
@@ -659,59 +689,68 @@ export default function CourseDetailPage() {
                       />
                     </div>
 
-                    {/* Bottom nav — no manual complete button */}
-                    <div className="shrink-0 border-t bg-card px-4 py-3 flex items-center gap-3">
+                    {/* Bottom nav — touch-friendly */}
+                    <div className="shrink-0 border-t bg-card px-3 py-2.5 flex items-center gap-2">
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={!prevLesson}
                         onClick={() => prevLesson && setSelectedLesson(prevLesson)}
-                        className="gap-1"
+                        className="gap-1 h-10 px-3 sm:px-4"
                       >
                         <ChevronLeft className="h-4 w-4" />
-                        Anterior
+                        <span className="hidden sm:inline">Anterior</span>
                       </Button>
 
-                      <div className="flex-1 text-center">
+                      {/* Center: progress + open sidebar on mobile */}
+                      <div className="flex-1 flex flex-col items-center gap-0.5">
                         {isDone ? (
-                          <span className="flex items-center justify-center gap-1 text-xs text-green-600 font-medium">
-                            <CheckCheck className="h-3.5 w-3.5" /> Lección completada
+                          <span className="flex items-center gap-1 text-xs text-green-600 font-semibold">
+                            <CheckCheck className="h-3.5 w-3.5" /> Completada
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="text-xs text-muted-foreground font-medium">
                             {currentIdx + 1} / {allLessons.length}
                           </span>
                         )}
+                        <button
+                          onClick={() => setSidebarOpen(true)}
+                          className="lg:hidden text-[10px] text-primary underline"
+                        >
+                          Ver lecciones
+                        </button>
                       </div>
 
-                      {/* "Siguiente" locked until lesson is done */}
                       {nextLesson ? (
                         <Button
                           size="sm"
                           disabled={!isDone}
                           onClick={() => isDone && setSelectedLesson(nextLesson)}
-                          className="gap-1"
+                          className="gap-1 h-10 px-3 sm:px-4"
                           title={!isDone ? 'Completa esta lección para continuar' : undefined}
                         >
                           {!isDone && <Lock className="h-3.5 w-3.5" />}
-                          Siguiente
+                          <span className="hidden sm:inline">Siguiente</span>
                           {isDone && <ChevronRight className="h-4 w-4" />}
+                          {!isDone && <ChevronRight className="h-4 w-4 opacity-40" />}
                         </Button>
                       ) : isDone ? (
                         <Button
                           size="sm"
                           variant="outline"
-                          className="gap-1"
+                          className="gap-1 h-10 px-3 sm:px-4"
                           onClick={async () => {
                             await savePromiseRef.current;
                             router.push('/');
                           }}
                         >
-                          <CheckCircle2 className="h-4 w-4" /> Finalizar
+                          <CheckCircle2 className="h-4 w-4" />
+                          <span className="hidden sm:inline">Finalizar</span>
                         </Button>
                       ) : (
-                        <Button size="sm" disabled className="gap-1">
-                          <Lock className="h-3.5 w-3.5" /> Finalizar
+                        <Button size="sm" disabled className="gap-1 h-10 px-3 sm:px-4">
+                          <Lock className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Finalizar</span>
                         </Button>
                       )}
                     </div>
@@ -735,7 +774,10 @@ export default function CourseDetailPage() {
                     ) : (
                       <>
                         <BookOpen className="h-12 w-12 text-muted-foreground" />
-                        <p className="text-muted-foreground">Selecciona una lección del panel izquierdo.</p>
+                        <p className="text-muted-foreground text-sm">Selecciona una lección para comenzar.</p>
+                        <Button size="sm" variant="outline" className="gap-2 lg:hidden" onClick={() => setSidebarOpen(true)}>
+                          <Menu className="h-4 w-4" /> Ver lecciones
+                        </Button>
                       </>
                     )}
                   </div>
