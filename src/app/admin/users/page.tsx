@@ -26,7 +26,7 @@ import {
 import {
   Users, Search, UserCog, Plus, Trash2,
   Loader2, RefreshCw, CheckCircle, UserX, UserCheck,
-  Upload, FileSpreadsheet, AlertCircle, ArrowRight, X,
+  Upload, FileSpreadsheet, AlertCircle, ArrowRight, X, Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { UserProfile, UserRole } from '@/lib/types-scalable';
@@ -92,6 +92,11 @@ export default function UsersPage() {
   // Reactivate confirm
   const [reactivatingUser, setReactivatingUser] = useState<UserProfile | null>(null);
 
+
+  // Invite user
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: '', rol: 'seller' as UserRole, assignedKiosko: '', producto: '' });
+  const [inviting, setInviting] = useState(false);
 
   // CSV import
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -226,6 +231,35 @@ export default function UsersPage() {
     }
   };
 
+
+  // ── Invite user ───────────────────────────────────────────────────────────
+
+  const handleInvite = async () => {
+    if (!inviteForm.email.trim() || !inviteForm.email.includes('@')) {
+      toast({ title: 'Email inválido', variant: 'destructive' });
+      return;
+    }
+    setInviting(true);
+    try {
+      const prod = inviteForm.producto ? products.find(p => p.id === inviteForm.producto) : null;
+      await addToWhitelist({
+        organizationId: 'aviva-credito',
+        email: inviteForm.email.trim().toLowerCase(),
+        role: inviteForm.rol,
+        assignedKiosko: inviteForm.assignedKiosko || undefined,
+        assignedProductId: prod?.id || undefined,
+        addedBy: currentUser?.uid || '',
+        expiresAt: undefined,
+      } as never);
+      toast({ title: 'Usuario invitado', description: `${inviteForm.email} fue agregado a la whitelist.` });
+      setInviteOpen(false);
+      setInviteForm({ email: '', rol: 'seller', assignedKiosko: '', producto: '' });
+    } catch (err: unknown) {
+      toast({ title: 'Error al invitar', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
+    } finally {
+      setInviting(false);
+    }
+  };
 
   // ── CSV / XLS import ──────────────────────────────────────────────────────
 
@@ -392,9 +426,14 @@ export default function UsersPage() {
           <h1 className="text-3xl font-bold">Usuarios</h1>
           <p className="text-muted-foreground mt-1">Gestiona usuarios, accesos e importa desde CSV/XLS</p>
         </div>
-        <Button variant="outline" onClick={fetchAll} className="gap-2">
-          <RefreshCw className="h-4 w-4" /> Actualizar
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setInviteOpen(true)} className="gap-2">
+            <Mail className="h-4 w-4" /> Invitar usuario
+          </Button>
+          <Button variant="outline" onClick={fetchAll} className="gap-2">
+            <RefreshCw className="h-4 w-4" /> Actualizar
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -733,6 +772,74 @@ export default function UsersPage() {
                 : <UserX className="h-4 w-4 mr-2" />
               }
               Desactivar {bulkMatchedUsers.filter(m => m.user).length} usuarios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Invite user dialog ────────────────────────────────────────────── */}
+      <Dialog open={inviteOpen} onOpenChange={v => { setInviteOpen(v); if (!v) setInviteForm({ email: '', rol: 'seller', assignedKiosko: '', producto: '' }); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Mail className="h-5 w-5 text-primary" /> Invitar usuario</DialogTitle>
+            <DialogDescription>
+              El usuario recibirá acceso al ingresar con este email. Si ya existe en la plataforma, actualiza su perfil directamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Email <span className="text-destructive">*</span></Label>
+              <Input
+                type="email"
+                placeholder="usuario@empresa.com"
+                value={inviteForm.email}
+                onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Rol</Label>
+                <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                      <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                <Input
+                  placeholder="Ej: CDMX-01"
+                  value={inviteForm.assignedKiosko}
+                  onChange={e => setInviteForm(f => ({ ...f, assignedKiosko: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Producto asignado <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+              <Select value={inviteForm.producto || '__none__'} onValueChange={v => setInviteForm(f => ({ ...f, producto: v === '__none__' ? '' : v }))}>
+                <SelectTrigger><SelectValue placeholder="Sin producto" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Sin producto</SelectItem>
+                  {products.map(p => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                        {p.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancelar</Button>
+            <Button onClick={handleInvite} disabled={inviting || !inviteForm.email.trim()} className="gap-2">
+              {inviting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+              Invitar
             </Button>
           </DialogFooter>
         </DialogContent>

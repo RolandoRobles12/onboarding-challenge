@@ -119,6 +119,7 @@ const COLLECTIONS = {
   ORG_TOKENS: 'org_tokens',
   // --- Pulse Categories ---
   PULSE_CATEGORIES: 'pulseCategories',
+  ROLE_PERMISSIONS: 'role_permissions',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -2602,4 +2603,42 @@ export async function seedDefaultCategoriesIfEmpty(): Promise<void> {
     batch.set(ref, { ...cat, order: i });
   });
   await batch.commit();
+}
+
+// ============================================================================
+// ROLE PERMISSIONS
+// ============================================================================
+
+export async function getRolePermissions(role: string): Promise<string[]> {
+  try {
+    const firestore = ensureFirestore();
+    const ref = doc(firestore, COLLECTIONS.ROLE_PERMISSIONS, role);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return [];
+    return (snap.data()?.allowedPaths as string[]) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveRolePermissions(
+  role: string,
+  allowedPaths: string[],
+  updatedBy: string
+): Promise<void> {
+  const firestore = ensureFirestore();
+  const ref = doc(firestore, COLLECTIONS.ROLE_PERMISSIONS, role);
+  await setDoc(ref, { role, allowedPaths, updatedAt: serverTimestamp(), updatedBy });
+}
+
+export async function getAllRolePermissions(): Promise<Record<string, string[]>> {
+  try {
+    const firestore = ensureFirestore();
+    const snap = await getDocs(collection(firestore, COLLECTIONS.ROLE_PERMISSIONS));
+    const result: Record<string, string[]> = {};
+    snap.docs.forEach(d => { result[d.id] = (d.data()?.allowedPaths as string[]) ?? []; });
+    return result;
+  } catch {
+    return {};
+  }
 }
