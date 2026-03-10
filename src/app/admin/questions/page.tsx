@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuestions, useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
@@ -12,8 +12,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-service';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { toast } from '@/hooks/use-toast';
-import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine } from 'lucide-react';
+import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine, ImageIcon, Upload } from 'lucide-react';
 import type { QuestionFormData, QuestionType, QuestionOption, KnowledgeModule } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +43,7 @@ export default function QuestionsPage() {
   const [formData, setFormData] = useState<QuestionFormData>({
     text: '',
     explanation: '',
+    imageUrl: '',
     type: 'single_choice',
     options: [
       { text: '', isCorrect: false, order: 0 },
@@ -58,6 +61,8 @@ export default function QuestionsPage() {
   const [distractorInput, setDistractorInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   // ── Helpers for question type switching ──────────────────────────────────
   function getDefaultOptionsForType(type: QuestionType): Omit<QuestionOption, 'id'>[] {
@@ -113,6 +118,7 @@ export default function QuestionsPage() {
       setFormData({
         text: question.text,
         explanation: question.explanation || '',
+        imageUrl: question.imageUrl || '',
         type: question.type,
         options: question.options,
         tags: question.tags || [],
@@ -132,6 +138,7 @@ export default function QuestionsPage() {
       setFormData({
         text: '',
         explanation: '',
+        imageUrl: '',
         type: 'single_choice',
         options: [
           { text: '', isCorrect: false, order: 0 },
@@ -152,6 +159,23 @@ export default function QuestionsPage() {
     }
     setDialogOpen(true);
   };
+
+  async function handleImageUpload(file: File) {
+    if (!storage) return;
+    setImageUploading(true);
+    const path = `question-images/${Date.now()}_${file.name}`;
+    const task = uploadBytesResumable(ref(storage, path), file);
+    task.on(
+      'state_changed',
+      () => {},
+      () => { toast({ variant: 'destructive', title: 'Error al subir imagen' }); setImageUploading(false); },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        setFormData(prev => ({ ...prev, imageUrl: url }));
+        setImageUploading(false);
+      }
+    );
+  }
 
   const addOption = () => {
     setFormData({
@@ -254,6 +278,7 @@ export default function QuestionsPage() {
         organizationId: 'aviva-credito',
         productId: selectedProductId,
         ...formData,
+        imageUrl: formData.imageUrl || undefined,
         options: finalOptions,
         tags,
         active: true,
@@ -372,6 +397,44 @@ export default function QuestionsPage() {
                     rows={3}
                     required
                   />
+                </div>
+
+                {/* Imagen de la pregunta (opcional) */}
+                <div className="space-y-2">
+                  <Label>Imagen de la pregunta <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }}
+                  />
+                  {formData.imageUrl ? (
+                    <div className="relative inline-block">
+                      <img src={formData.imageUrl} alt="Imagen de la pregunta" className="max-h-40 rounded-lg border object-contain" />
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, imageUrl: '' }))}
+                        className="absolute top-1 right-1 h-6 w-6 rounded-full bg-destructive text-white flex items-center justify-center hover:bg-destructive/80"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-dashed gap-2"
+                      disabled={imageUploading}
+                      onClick={() => imageInputRef.current?.click()}
+                    >
+                      {imageUploading ? (
+                        <><Upload className="h-4 w-4 animate-pulse" /> Subiendo…</>
+                      ) : (
+                        <><ImageIcon className="h-4 w-4" /> Agregar imagen</>
+                      )}
+                    </Button>
+                  )}
                 </div>
 
                 {/* Tipo */}

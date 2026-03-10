@@ -220,6 +220,7 @@ export interface Question {
   productId: string;
   text: string;
   explanation?: string; // explicación de la respuesta correcta
+  imageUrl?: string;    // imagen opcional para la pregunta
   options: QuestionOption[];
   type: QuestionType;
   difficulty?: QuizDifficulty;
@@ -645,6 +646,9 @@ export interface FormField {
 
   // Para section_header
   description?: string;    // Descripción debajo del encabezado
+
+  // Imagen opcional del campo (se muestra encima del campo)
+  imageUrl?: string;
 }
 
 /** Formulario completo como entidad de primer nivel */
@@ -701,6 +705,7 @@ export interface CertificateSigner {
   organizationId: string;
   name: string;
   position: string; // cargo / título
+  signatureUrl?: string; // imagen de firma dibujada (base64 o URL)
   active: boolean;
   order: number;
   createdAt: Timestamp;
@@ -837,6 +842,7 @@ export interface OnboardingField {
 export interface QuestionFormData {
   text: string;
   explanation?: string;
+  imageUrl?: string;   // imagen opcional para la pregunta
   type: QuestionType;
   options: Omit<QuestionOption, 'id'>[];
   tags: string[];
@@ -1004,6 +1010,19 @@ export interface Scenario {
 // VIDEO FEED
 // ============================================================================
 
+/** Carpeta para organizar videos */
+export interface VideoFolder {
+  id: string;
+  name: string;
+  description?: string;
+  productId?: string;   // Si se asigna, solo se muestra a usuarios con este producto
+  order: number;
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  createdBy: string;
+}
+
 /** Video publicado para el feed TikTok-style */
 export interface Video {
   id: string;
@@ -1013,6 +1032,7 @@ export interface Video {
   thumbnailUrl?: string;      // Poster image URL (optional)
   duration: number;           // Seconds (0 = unknown)
   productId?: string;         // If set, only shown to users with this product
+  folderId?: string;          // Carpeta a la que pertenece (opcional)
   tags?: string[];
   active: boolean;
   order: number;

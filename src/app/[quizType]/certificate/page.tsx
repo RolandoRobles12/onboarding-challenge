@@ -50,7 +50,7 @@ function CertificateContent() {
             const ordered = signerIds
               .map(id => allSigners.find(s => s.id === id))
               .filter((s): s is typeof allSigners[0] => s !== undefined)
-              .map(s => ({ name: s.name, position: s.position }));
+              .map(s => ({ name: s.name, position: s.position, signatureUrl: s.signatureUrl }));
             setSigners(ordered);
             return;
           }
@@ -58,7 +58,7 @@ function CertificateContent() {
 
         // Fallback: use first available active signers
         if (allSigners.length > 0) {
-          setSigners(allSigners.slice(0, 2).map(s => ({ name: s.name, position: s.position })));
+          setSigners(allSigners.slice(0, 2).map(s => ({ name: s.name, position: s.position, signatureUrl: s.signatureUrl })));
         }
       } catch {
         // Certificate renders with default fallback signer

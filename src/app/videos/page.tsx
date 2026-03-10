@@ -15,8 +15,9 @@ import {
   getVideos, getUserVideoViews, upsertVideoView,
   getVideoReactions, setVideoReaction,
   getVideoComments, addVideoComment, deleteVideoComment,
+  getVideoFolders,
 } from '@/lib/firestore-service';
-import type { Video, VideoView, VideoReaction, VideoComment } from '@/lib/types-scalable';
+import type { Video, VideoView, VideoReaction, VideoComment, VideoFolder } from '@/lib/types-scalable';
 import {
   LogOut, ShieldCheck, Play, Pause, Volume2, VolumeX,
   CheckCircle, Clapperboard, ChevronDown, ChevronUp,
@@ -229,7 +230,15 @@ function VideoCard({
   }
   useEffect(() => () => stopTimer(), []);
 
-  function handlePlay() { setPlaying(true); startTimer(); }
+  function handlePlay() {
+    const el = videoRef.current;
+    if (el && el.currentTime < 3 && highestRef.current > 10) {
+      // User is replaying from the start — reset session tracker
+      highestRef.current = 0;
+    }
+    setPlaying(true);
+    startTimer();
+  }
   function handlePause() { setPlaying(false); stopTimer(); saveProgress(); }
   function handleTimeUpdate() {
     const el = videoRef.current;
@@ -466,8 +475,10 @@ function VideoFeed() {
   const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
 
   const [videos, setVideos] = useState<Video[]>([]);
+  const [folders, setFolders] = useState<VideoFolder[]>([]);
   const [viewsMap, setViewsMap] = useState<Record<string, VideoView>>({});
   const [loading, setLoading] = useState(true);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = todos
 
   const productId = profile?.producto;
 
@@ -485,11 +496,13 @@ function VideoFeed() {
     if (!user?.uid) return;
     async function load() {
       setLoading(true);
-      const [vids, views] = await Promise.all([
+      const [vids, views, flds] = await Promise.all([
         getVideos(productId),
         getUserVideoViews(user!.uid),
+        getVideoFolders(),
       ]);
       setVideos(vids);
+      setFolders(flds.filter(f => f.active));
       const map: Record<string, VideoView> = {};
       views.forEach(v => { map[v.videoId] = v; });
       setViewsMap(map);
@@ -515,6 +528,14 @@ function VideoFeed() {
 
   const watched = Object.values(viewsMap).filter(v => v.completed).length;
   const total = videos.length;
+
+  // Videos filtrados según carpeta activa
+  const filteredVideos = activeFolder === null
+    ? videos
+    : videos.filter(v => v.folderId === activeFolder);
+
+  // Recientes no vistos (sin folderId o feed principal, sin completar), máx 5
+  const unwatchedVideos = videos.filter(v => !viewsMap[v.id]?.completed).slice(0, 5);
 
   return (
     <div className="flex flex-col min-h-screen bg-background">
@@ -567,7 +588,6 @@ function VideoFeed() {
             </div>
           )}
 
-          {/* Feed */}
           {loading ? (
             <div className="space-y-5">
               {[...Array(2)].map((_, i) => (
@@ -589,21 +609,96 @@ function VideoFeed() {
               </p>
             </div>
           ) : (
-            <div className="space-y-5">
-              {videos.map(v => (
-                <VideoCard
-                  key={v.id}
-                  video={v}
-                  view={viewsMap[v.id]}
-                  userId={user!.uid}
-                  resolvedName={resolvedName}
-                  resolvedKiosk={resolvedKiosk}
-                  productId={productId}
-                  isAdmin={isAdmin}
-                  onViewUpdate={handleViewUpdate}
-                />
-              ))}
-            </div>
+            <>
+              {/* Folder navigation tabs */}
+              {folders.length > 0 && (
+                <div className="overflow-x-auto -mx-4 px-4">
+                  <div className="flex gap-2 w-max pb-1">
+                    <button
+                      onClick={() => setActiveFolder(null)}
+                      className={cn(
+                        'px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors',
+                        activeFolder === null
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                      )}
+                    >
+                      Todos
+                    </button>
+                    {folders.map(f => (
+                      <button
+                        key={f.id}
+                        onClick={() => setActiveFolder(f.id)}
+                        className={cn(
+                          'px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors',
+                          activeFolder === f.id
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                        )}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Section: Por ver (solo cuando se muestra "Todos") */}
+              {activeFolder === null && unwatchedVideos.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-primary">Por ver</span>
+                    <span className="text-xs text-muted-foreground">{unwatchedVideos.length} pendiente{unwatchedVideos.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="space-y-5">
+                    {unwatchedVideos.map(v => (
+                      <VideoCard
+                        key={v.id}
+                        video={v}
+                        view={viewsMap[v.id]}
+                        userId={user!.uid}
+                        resolvedName={resolvedName}
+                        resolvedKiosk={resolvedKiosk}
+                        productId={productId}
+                        isAdmin={isAdmin}
+                        onViewUpdate={handleViewUpdate}
+                      />
+                    ))}
+                  </div>
+                  {videos.length > unwatchedVideos.length && (
+                    <div className="pt-2 border-t">
+                      <p className="text-sm font-semibold text-muted-foreground mb-3">Todos los videos</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Feed filtrado */}
+              <div className="space-y-5">
+                {(activeFolder === null ? videos : filteredVideos).map(v => (
+                  // Si activeFolder es null, saltamos los que ya aparecen en "Por ver"
+                  (activeFolder === null && !viewsMap[v.id]?.completed && unwatchedVideos.find(u => u.id === v.id)) ? null : (
+                    <VideoCard
+                      key={v.id}
+                      video={v}
+                      view={viewsMap[v.id]}
+                      userId={user!.uid}
+                      resolvedName={resolvedName}
+                      resolvedKiosk={resolvedKiosk}
+                      productId={productId}
+                      isAdmin={isAdmin}
+                      onViewUpdate={handleViewUpdate}
+                    />
+                  )
+                ))}
+                {activeFolder !== null && filteredVideos.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <Clapperboard className="h-10 w-10 text-muted-foreground opacity-30 mb-2" />
+                    <p className="text-muted-foreground text-sm">Esta carpeta no tiene videos todavía.</p>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       </main>

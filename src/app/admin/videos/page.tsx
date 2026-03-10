@@ -18,17 +18,19 @@ import {
 } from '@/components/ui/table';
 import {
   getAllVideos, createVideo, updateVideo, deleteVideo, getVideoViews,
+  getVideoFolders, createVideoFolder, updateVideoFolder, deleteVideoFolder,
 } from '@/lib/firestore-service';
 import { useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import type { Video, VideoView } from '@/lib/types-scalable';
+import type { Video, VideoView, VideoFolder } from '@/lib/types-scalable';
 import { serverTimestamp } from 'firebase/firestore';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Plus, Pencil, Trash2, Eye, EyeOff, Video as VideoIcon,
   Upload, Link as LinkIcon, X, Users, CheckCircle, Play,
-  GripVertical, BarChart2,
+  GripVertical, BarChart2, Folder, FolderPlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -50,6 +52,7 @@ const EMPTY_FORM = {
   thumbnailUrl: '',
   duration: 0,
   productId: '',
+  folderId: '',
   tags: '',
   active: true,
   order: 0,
@@ -171,11 +174,13 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
 function VideoFormDialog({
   initial,
   maxOrder,
+  folders,
   onSave,
   onClose,
 }: {
   initial?: Video;
   maxOrder: number;
+  folders: VideoFolder[];
   onSave: (data: Omit<Video, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -192,6 +197,7 @@ function VideoFormDialog({
           thumbnailUrl: initial.thumbnailUrl ?? '',
           duration: initial.duration,
           productId: initial.productId ?? '',
+          folderId: initial.folderId ?? '',
           tags: (initial.tags ?? []).join(', '),
           active: initial.active,
           order: initial.order,
@@ -241,6 +247,7 @@ function VideoFormDialog({
         thumbnailUrl: form.thumbnailUrl.trim() || undefined,
         duration: Number(form.duration) || 0,
         productId: form.productId || undefined,
+        folderId: form.folderId || undefined,
         tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : undefined,
         active: form.active,
         order: Number(form.order) || 0,
@@ -397,6 +404,24 @@ function VideoFormDialog({
             </Select>
           </div>
 
+          {/* Folder */}
+          {folders.length > 0 && (
+            <div>
+              <Label>Carpeta <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+              <Select value={form.folderId} onValueChange={v => handleChange('folderId', v === '_none' ? '' : v)}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Sin carpeta (feed principal)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_none">Sin carpeta (feed principal)</SelectItem>
+                  {folders.map(f => (
+                    <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Thumbnail URL */}
           <div>
             <Label>URL de miniatura <span className="text-muted-foreground font-normal">(opcional)</span></Label>
@@ -447,18 +472,87 @@ function VideoFormDialog({
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+// ─── Folder Form Dialog ────────────────────────────────────────────────────────
+
+function FolderFormDialog({
+  initial,
+  maxOrder,
+  onSave,
+  onClose,
+}: {
+  initial?: VideoFolder;
+  maxOrder: number;
+  onSave: (data: Omit<VideoFolder, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: initial?.name ?? '',
+    description: initial?.description ?? '',
+    order: initial?.order ?? maxOrder,
+    active: initial?.active ?? true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSave() {
+    if (!form.name.trim()) { setError('El nombre es obligatorio.'); return; }
+    setSaving(true);
+    try {
+      await onSave({ name: form.name.trim(), description: form.description.trim() || undefined, order: Number(form.order) || 0, active: form.active });
+      onClose();
+    } catch { setError('Error al guardar.'); } finally { setSaving(false); }
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{initial ? 'Editar carpeta' : 'Nueva carpeta'}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div>
+            <Label>Nombre *</Label>
+            <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} placeholder="Ej. Técnicas de venta" className="mt-1" />
+          </div>
+          <div>
+            <Label>Descripción <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+            <Textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2} className="mt-1 resize-none" placeholder="Descripción breve de la carpeta..." />
+          </div>
+          <div className="flex items-center gap-3">
+            <Switch checked={form.active} onCheckedChange={v => setForm(p => ({ ...p, active: v }))} id="folder-active" />
+            <Label htmlFor="folder-active" className="cursor-pointer">{form.active ? 'Visible' : 'Oculta'}</Label>
+          </div>
+          {error && <p className="text-sm text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function AdminVideosPage() {
   const { user } = useAuth();
   const [videos, setVideos] = useState<Video[]>([]);
+  const [folders, setFolders] = useState<VideoFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Video | null>(null);
   const [statsVideo, setStatsVideo] = useState<Video | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showFolderForm, setShowFolderForm] = useState(false);
+  const [editingFolder, setEditingFolder] = useState<VideoFolder | null>(null);
 
   async function load() {
     setLoading(true);
-    getAllVideos().then(setVideos).finally(() => setLoading(false));
+    const [vids, flds] = await Promise.all([getAllVideos(), getVideoFolders()]);
+    setVideos(vids);
+    setFolders(flds);
+    setLoading(false);
   }
 
   useEffect(() => { load(); }, []);
@@ -485,7 +579,27 @@ export default function AdminVideosPage() {
     setDeletingId(null);
   }
 
+  async function handleSaveFolder(data: Omit<VideoFolder, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) {
+    if (editingFolder) {
+      await updateVideoFolder(editingFolder.id, data);
+    } else {
+      await createVideoFolder({ ...data, createdBy: user?.uid ?? '' } as any);
+    }
+    await load();
+  }
+
+  async function handleDeleteFolder(folderId: string) {
+    if (!confirm('¿Eliminar esta carpeta? Los videos que estén en ella se moverán al feed principal.')) return;
+    await deleteVideoFolder(folderId);
+    // Move videos in this folder back to no folder
+    const videosInFolder = videos.filter(v => v.folderId === folderId);
+    await Promise.all(videosInFolder.map(v => updateVideo(v.id, { folderId: undefined })));
+    await load();
+  }
+
   const maxOrder = videos.length > 0 ? Math.max(...videos.map(v => v.order)) + 1 : 0;
+  const maxFolderOrder = folders.length > 0 ? Math.max(...folders.map(f => f.order)) + 1 : 0;
+  const folderMap = Object.fromEntries(folders.map(f => [f.id, f.name]));
 
   return (
     <div className="space-y-6">
@@ -497,101 +611,161 @@ export default function AdminVideosPage() {
             Sube videos tipo TikTok para los vendedores. Podrás ver quién los vio y cuánto.
           </p>
         </div>
-        <Button className="gap-2" onClick={() => { setEditing(null); setShowForm(true); }}>
-          <Plus className="h-4 w-4" /> Nuevo video
-        </Button>
       </div>
 
-      {/* List */}
-      {loading ? (
-        <div className="space-y-3">
-          {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
-        </div>
-      ) : videos.length === 0 ? (
-        <Card className="rounded-xl">
-          <CardContent className="py-16 text-center">
-            <VideoIcon className="h-12 w-12 mx-auto text-muted-foreground mb-3 opacity-40" />
-            <p className="font-semibold text-lg">Aún no hay videos</p>
-            <p className="text-muted-foreground text-sm mt-1">Sube el primer video para tu equipo de ventas.</p>
-            <Button className="mt-4 gap-2" onClick={() => { setEditing(null); setShowForm(true); }}>
-              <Plus className="h-4 w-4" /> Subir primer video
+      {/* Tabs: Videos | Carpetas */}
+      <Tabs defaultValue="videos">
+        <TabsList>
+          <TabsTrigger value="videos" className="gap-2">
+            <VideoIcon className="h-4 w-4" /> Videos
+          </TabsTrigger>
+          <TabsTrigger value="folders" className="gap-2">
+            <Folder className="h-4 w-4" /> Carpetas
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── Tab: Videos ── */}
+        <TabsContent value="videos" className="mt-4 space-y-4">
+          <div className="flex justify-end">
+            <Button className="gap-2" onClick={() => { setEditing(null); setShowForm(true); }}>
+              <Plus className="h-4 w-4" /> Nuevo video
             </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {videos.map(v => (
-            <Card key={v.id} className={cn('rounded-xl transition-opacity', !v.active && 'opacity-60')}>
-              <CardContent className="py-3 px-4 flex items-center gap-3">
-                {/* Thumbnail / icon */}
-                <div className="h-12 w-16 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
-                  {v.thumbnailUrl ? (
-                    <img src={v.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <Play className="h-5 w-5 text-muted-foreground" />
-                  )}
-                </div>
+          </div>
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-sm truncate">{v.title}</p>
-                    {!v.active && <Badge variant="secondary" className="text-[10px]">Oculto</Badge>}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {v.duration > 0 && (
-                      <span className="text-xs text-muted-foreground">{fmtDuration(v.duration)}</span>
-                    )}
-                    {v.productId && (
-                      <Badge variant="outline" className="text-[10px] h-4">Por producto</Badge>
-                    )}
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost" size="icon" className="h-8 w-8"
-                    title="Ver estadísticas"
-                    onClick={() => setStatsVideo(v)}
-                  >
-                    <BarChart2 className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost" size="icon" className="h-8 w-8"
-                    title={v.active ? 'Ocultar' : 'Mostrar'}
-                    onClick={() => handleToggle(v)}
-                  >
-                    {v.active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    variant="ghost" size="icon" className="h-8 w-8"
-                    onClick={() => { setEditing(v); setShowForm(true); }}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost" size="icon"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
-                    disabled={deletingId === v.id}
-                    onClick={() => handleDelete(v.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+          {loading ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}
+            </div>
+          ) : videos.length === 0 ? (
+            <Card className="rounded-xl">
+              <CardContent className="py-16 text-center">
+                <VideoIcon className="h-12 w-12 mx-auto text-muted-foreground mb-3 opacity-40" />
+                <p className="font-semibold text-lg">Aún no hay videos</p>
+                <p className="text-muted-foreground text-sm mt-1">Sube el primer video para tu equipo de ventas.</p>
+                <Button className="mt-4 gap-2" onClick={() => { setEditing(null); setShowForm(true); }}>
+                  <Plus className="h-4 w-4" /> Subir primer video
+                </Button>
               </CardContent>
             </Card>
-          ))}
-        </div>
-      )}
+          ) : (
+            <div className="space-y-2">
+              {videos.map(v => (
+                <Card key={v.id} className={cn('rounded-xl transition-opacity', !v.active && 'opacity-60')}>
+                  <CardContent className="py-3 px-4 flex items-center gap-3">
+                    <div className="h-12 w-16 rounded-lg bg-muted flex items-center justify-center overflow-hidden shrink-0">
+                      {v.thumbnailUrl ? (
+                        <img src={v.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <Play className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-sm truncate">{v.title}</p>
+                        {!v.active && <Badge variant="secondary" className="text-[10px]">Oculto</Badge>}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {v.duration > 0 && <span className="text-xs text-muted-foreground">{fmtDuration(v.duration)}</span>}
+                        {v.folderId && folderMap[v.folderId] && (
+                          <Badge variant="outline" className="text-[10px] h-4 gap-1">
+                            <Folder className="h-2.5 w-2.5" />{folderMap[v.folderId]}
+                          </Badge>
+                        )}
+                        {v.productId && <Badge variant="outline" className="text-[10px] h-4">Por producto</Badge>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title="Ver estadísticas" onClick={() => setStatsVideo(v)}>
+                        <BarChart2 className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" title={v.active ? 'Ocultar' : 'Mostrar'} onClick={() => handleToggle(v)}>
+                        {v.active ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditing(v); setShowForm(true); }}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" disabled={deletingId === v.id} onClick={() => handleDelete(v.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── Tab: Carpetas ── */}
+        <TabsContent value="folders" className="mt-4 space-y-4">
+          <div className="flex justify-end">
+            <Button className="gap-2" onClick={() => { setEditingFolder(null); setShowFolderForm(true); }}>
+              <FolderPlus className="h-4 w-4" /> Nueva carpeta
+            </Button>
+          </div>
+
+          {folders.length === 0 ? (
+            <Card className="rounded-xl">
+              <CardContent className="py-16 text-center">
+                <Folder className="h-12 w-12 mx-auto text-muted-foreground mb-3 opacity-40" />
+                <p className="font-semibold text-lg">Sin carpetas</p>
+                <p className="text-muted-foreground text-sm mt-1">Crea carpetas para organizar tus videos.</p>
+                <Button className="mt-4 gap-2" onClick={() => { setEditingFolder(null); setShowFolderForm(true); }}>
+                  <FolderPlus className="h-4 w-4" /> Crear primera carpeta
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {folders.map(f => {
+                const count = videos.filter(v => v.folderId === f.id).length;
+                return (
+                  <Card key={f.id} className={cn('rounded-xl transition-opacity', !f.active && 'opacity-60')}>
+                    <CardContent className="py-3 px-4 flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                        <Folder className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-sm truncate">{f.name}</p>
+                          {!f.active && <Badge variant="secondary" className="text-[10px]">Oculta</Badge>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {count} {count === 1 ? 'video' : 'videos'}{f.description ? ` · ${f.description}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditingFolder(f); setShowFolderForm(true); }}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDeleteFolder(f.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Dialogs */}
       {showForm && (
         <VideoFormDialog
           initial={editing ?? undefined}
           maxOrder={maxOrder}
+          folders={folders}
           onSave={handleSave}
           onClose={() => { setShowForm(false); setEditing(null); }}
+        />
+      )}
+      {showFolderForm && (
+        <FolderFormDialog
+          initial={editingFolder ?? undefined}
+          maxOrder={maxFolderOrder}
+          onSave={handleSaveFolder}
+          onClose={() => { setShowFolderForm(false); setEditingFolder(null); }}
         />
       )}
       {statsVideo && <StatsModal video={statsVideo} onClose={() => setStatsVideo(null)} />}

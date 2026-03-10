@@ -49,6 +49,14 @@ function FieldRenderer({
         {field.required && <span className="text-destructive ml-1">*</span>}
       </label>
 
+      {field.imageUrl && (
+        <img
+          src={field.imageUrl}
+          alt={field.label}
+          className="rounded-lg border object-contain max-h-48 w-auto"
+        />
+      )}
+
       {field.helpText && (
         <p className="text-xs text-muted-foreground">{field.helpText}</p>
       )}

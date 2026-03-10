@@ -46,6 +46,7 @@ import type {
   JourneyForm,
   FormResponse,
   Video,
+  VideoFolder,
   VideoView,
   VideoReaction,
   VideoComment,
@@ -104,6 +105,7 @@ const COLLECTIONS = {
   CONFIG: 'config',
   // --- Video Feed ---
   VIDEOS: 'videos',
+  VIDEO_FOLDERS: 'video_folders',
   VIDEO_VIEWS: 'video_views',
   VIDEO_REACTIONS: 'video_reactions',
   VIDEO_COMMENTS: 'video_comments',
@@ -1928,6 +1930,40 @@ export async function updateVideo(videoId: string, updates: Partial<Omit<Video, 
 /** Elimina un video. */
 export async function deleteVideo(videoId: string): Promise<void> {
   await deleteDoc(getDocRef(COLLECTIONS.VIDEOS, videoId));
+}
+
+// ============================================================================
+// VIDEO FOLDERS
+// ============================================================================
+
+/** Devuelve todas las carpetas de videos (activas e inactivas). */
+export async function getVideoFolders(): Promise<VideoFolder[]> {
+  try {
+    const q = query(getCollectionRef(COLLECTIONS.VIDEO_FOLDERS), orderBy('order', 'asc'));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as VideoFolder);
+  } catch (error) {
+    console.error('Error getting video folders:', error);
+    return [];
+  }
+}
+
+/** Crea una nueva carpeta de videos. */
+export async function createVideoFolder(data: Omit<VideoFolder, 'id'>): Promise<string> {
+  const docRef = doc(getCollectionRef(COLLECTIONS.VIDEO_FOLDERS));
+  await setDoc(docRef, stripUndefined({ ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  return docRef.id;
+}
+
+/** Actualiza una carpeta de videos existente. */
+export async function updateVideoFolder(folderId: string, updates: Partial<Omit<VideoFolder, 'id'>>): Promise<void> {
+  const docRef = getDocRef(COLLECTIONS.VIDEO_FOLDERS, folderId);
+  await updateDoc(docRef, stripUndefined({ ...updates, updatedAt: serverTimestamp() }) as WithFieldValue<DocumentData>);
+}
+
+/** Elimina una carpeta de videos. */
+export async function deleteVideoFolder(folderId: string): Promise<void> {
+  await deleteDoc(getDocRef(COLLECTIONS.VIDEO_FOLDERS, folderId));
 }
 
 /** Devuelve el registro de visualización de un usuario para todos sus videos. */
