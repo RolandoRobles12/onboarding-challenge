@@ -606,7 +606,10 @@ export default function AdminVideosPage() {
   const productMap = Object.fromEntries(products.map(p => [p.id, p]));
 
   const filteredVideos = useMemo(() => videos.filter(v => {
-    if (filterProductId !== 'all' && (v.productId || '') !== filterProductId) return false;
+    if (filterProductId !== 'all') {
+      if (filterProductId === '__no_product__') { if (v.productId) return false; }
+      else if ((v.productId || '') !== filterProductId) return false;
+    }
     if (filterFolderId !== 'all') {
       if (filterFolderId === '__none__') return !v.folderId;
       if (v.folderId !== filterFolderId) return false;
@@ -649,7 +652,7 @@ export default function AdminVideosPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos los productos</SelectItem>
-                  <SelectItem value="">Sin producto</SelectItem>
+                  <SelectItem value="__no_product__">Sin producto</SelectItem>
                   {products.map(p => (
                     <SelectItem key={p.id} value={p.id}>
                       <span className="flex items-center gap-2">
