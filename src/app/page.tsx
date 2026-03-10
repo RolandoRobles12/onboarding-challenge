@@ -433,9 +433,11 @@ function MiniLeaderboard({ productId, currentUserName }: { productId: string; cu
 
 // ─── Journey Dashboard ────────────────────────────────────────────────────────
 
-function JourneyDashboard({ userId, profile }: {
+function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
   userId: string;
   profile: NonNullable<ReturnType<typeof useAuth>['profile']>;
+  testStageId?: string | null;
+  onStagesLoaded?: (stages: { id: string; title: string }[]) => void;
 }) {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
@@ -647,7 +649,25 @@ function JourneyDashboard({ userId, profile }: {
   // Hidden stages (visible === false) are teasers — excluded from progress
   const visibleStages = stages.filter(s => s.visible !== false);
 
+  // Notify parent of available stages when loaded (for test mode module selector)
+  const prevStagesRef = useRef<string>('');
+  useEffect(() => {
+    if (!onStagesLoaded || visibleStages.length === 0) return;
+    const key = visibleStages.map(s => s.id).join(',');
+    if (key === prevStagesRef.current) return;
+    prevStagesRef.current = key;
+    onStagesLoaded(visibleStages.map(s => ({ id: s.id, title: s.title })));
+  }, [visibleStages, onStagesLoaded]);
+
   const getStageStatus = (stage: JourneyStage): 'completed' | 'active' | 'locked' => {
+    // Test mode: jump to a specific stage
+    if (testStageId) {
+      const targetIdx = visibleStages.findIndex(s => s.id === testStageId);
+      const stageIdx = visibleStages.indexOf(stage);
+      if (stageIdx < targetIdx) return 'completed';
+      if (stageIdx === targetIdx) return 'active';
+      return 'locked';
+    }
     if (isStageDone(stage)) return 'completed';
     const vIdx = visibleStages.indexOf(stage);
     return visibleStages.slice(0, vIdx).every(isStageDone) ? 'active' : 'locked';
@@ -805,6 +825,8 @@ export default function LMSDashboard() {
   // Test mode: admin simulating seller experience
   const [testMode, setTestMode] = useState(false);
   const [testProductId, setTestProductId] = useState<string>('');
+  const [testStageId, setTestStageId] = useState<string | null>(null);
+  const [journeyStages, setJourneyStages] = useState<{ id: string; title: string }[]>([]);
   const [availableProducts, setAvailableProducts] = useState<{ id: string; name: string; color: string }[]>([]);
   const [showProductPicker, setShowProductPicker] = useState(false);
 
@@ -824,6 +846,8 @@ export default function LMSDashboard() {
   const exitTestMode = () => {
     setTestMode(false);
     setTestProductId('');
+    setTestStageId(null);
+    setJourneyStages([]);
   };
 
   // Build a virtual seller profile for test mode
@@ -866,16 +890,50 @@ export default function LMSDashboard() {
             </div>
           </header>
 
-          {/* Test mode banner */}
+          {/* Test mode banner + module selector */}
           {testMode && (
-            <div className="bg-amber-50 border-b border-amber-200 px-4 py-2">
-              <div className="max-w-md mx-auto flex items-center gap-2">
+            <div className="bg-amber-50 border-b border-amber-200">
+              <div className="max-w-md mx-auto px-4 py-2 flex items-center gap-2">
                 <FlaskConical className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                 <p className="text-xs text-amber-700 flex-1">
-                  <strong>Modo Prueba activo</strong> — Estás viendo la experiencia como vendedor. Tu progreso real no se afecta.
+                  <strong>Modo Prueba</strong> — Simula la vista del vendedor.
                 </p>
                 <button onClick={exitTestMode} className="text-xs text-amber-600 hover:text-amber-800 underline shrink-0">Salir</button>
               </div>
+              {journeyStages.length > 0 && (
+                <div className="max-w-md mx-auto px-3 pb-2">
+                  <p className="text-[10px] text-amber-600 uppercase tracking-wide font-semibold mb-1.5 px-1">
+                    Saltar a módulo:
+                  </p>
+                  <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                    <button
+                      onClick={() => setTestStageId(null)}
+                      className={cn(
+                        'shrink-0 text-xs px-3 py-1.5 rounded-full border font-medium transition-colors whitespace-nowrap',
+                        testStageId === null
+                          ? 'bg-amber-500 text-white border-amber-500'
+                          : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'
+                      )}
+                    >
+                      Ruta completa
+                    </button>
+                    {journeyStages.map((stage, i) => (
+                      <button
+                        key={stage.id}
+                        onClick={() => setTestStageId(stage.id)}
+                        className={cn(
+                          'shrink-0 text-xs px-3 py-1.5 rounded-full border font-medium transition-colors whitespace-nowrap',
+                          testStageId === stage.id
+                            ? 'bg-amber-500 text-white border-amber-500'
+                            : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50'
+                        )}
+                      >
+                        {i + 1}. {stage.title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -926,7 +984,12 @@ export default function LMSDashboard() {
               {isAdmin && !testMode ? (
                 <AdminPanel name={firstName} onTestMode={enterTestMode} />
               ) : testProfile ? (
-                <JourneyDashboard userId={testProfile.uid} profile={testProfile} />
+                <JourneyDashboard
+                  userId={testProfile.uid}
+                  profile={testProfile}
+                  testStageId={testStageId}
+                  onStagesLoaded={setJourneyStages}
+                />
               ) : profile && !isAdmin ? (
                 <JourneyDashboard userId={profile.uid} profile={profile} />
               ) : user ? (
