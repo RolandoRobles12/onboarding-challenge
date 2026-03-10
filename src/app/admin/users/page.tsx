@@ -4,7 +4,9 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useProducts } from '@/hooks/use-firestore';
-import { getAllUsers, updateUserProfile, addToWhitelist } from '@/lib/firestore-service';
+import { getAllUsers, updateUserProfile, addToWhitelist, getKioscos } from '@/lib/firestore-service';
+import { Combobox } from '@/components/ui/combobox';
+import type { Kiosko } from '@/lib/types-scalable';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
@@ -66,6 +68,7 @@ type CsvRow = {
 export default function UsersPage() {
   const { profile: currentUser } = useAuth();
   const { products } = useProducts();
+  const [kioscos, setKioscos] = useState<Kiosko[]>([]);
 
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,8 +112,9 @@ export default function UsersPage() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const usersData = await getAllUsers();
+      const [usersData, kioscosData] = await Promise.all([getAllUsers(), getKioscos()]);
       setUsers(usersData);
+      setKioscos(kioscosData);
     } catch (err: unknown) {
       toast({ title: 'Error al cargar datos', description: err instanceof Error ? err.message : 'Error desconocido', variant: 'destructive' });
     } finally {
@@ -316,9 +320,21 @@ export default function UsersPage() {
   };
 
   const downloadTemplate = () => {
+    const exampleKiosko = kioscos.length > 0 ? kioscos[0].name : '0001 Chalco';
+    const productRows = products.map(p => [
+      `vendedor_${p.name.toLowerCase().replace(/\s+/g, '_')}@empresa.com`,
+      `Vendedor Ejemplo ${p.name}`,
+      'seller',
+      exampleKiosko,
+      p.id,
+      new Date().toISOString().split('T')[0],
+      '',
+    ]);
     const rows = [
       CSV_COLUMNS,
-      ['juan@empresa.com', 'Juan García', 'seller', 'CDMX-01', '', '2024-01-15', ''],
+      ...(productRows.length > 0
+        ? productRows
+        : [['juan@empresa.com', 'Juan García', 'seller', exampleKiosko, '', new Date().toISOString().split('T')[0], '']]),
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -680,10 +696,13 @@ export default function UsersPage() {
 
               <div className="space-y-1.5">
                 <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
-                <Input
+                <Combobox
+                  options={kioscos.filter(k => k.active).map(k => ({ value: k.name, label: k.name, description: k.location }))}
                   value={editForm.assignedKiosko}
-                  onChange={e => setEditForm(f => ({ ...f, assignedKiosko: e.target.value }))}
-                  placeholder="Ej: CDMX-01"
+                  onChange={v => setEditForm(f => ({ ...f, assignedKiosko: v }))}
+                  placeholder="Seleccionar kiosko…"
+                  searchPlaceholder="Buscar kiosko…"
+                  emptyLabel="No hay kioscos registrados"
                 />
               </div>
 
@@ -810,10 +829,13 @@ export default function UsersPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-                <Input
-                  placeholder="Ej: CDMX-01"
+                <Combobox
+                  options={kioscos.filter(k => k.active).map(k => ({ value: k.name, label: k.name, description: k.location }))}
                   value={inviteForm.assignedKiosko}
-                  onChange={e => setInviteForm(f => ({ ...f, assignedKiosko: e.target.value }))}
+                  onChange={v => setInviteForm(f => ({ ...f, assignedKiosko: v }))}
+                  placeholder="Seleccionar kiosko…"
+                  searchPlaceholder="Buscar kiosko…"
+                  emptyLabel="No hay kioscos registrados"
                 />
               </div>
             </div>

@@ -30,6 +30,7 @@ import type {
   Quiz,
   Question,
   UserProfile,
+  Kiosko,
   QuizAttempt,
   LeaderboardEntry,
   Achievement,
@@ -120,6 +121,7 @@ const COLLECTIONS = {
   // --- Pulse Categories ---
   PULSE_CATEGORIES: 'pulseCategories',
   ROLE_PERMISSIONS: 'role_permissions',
+  KIOSCOS: 'kioscos',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -2641,4 +2643,50 @@ export async function getAllRolePermissions(): Promise<Record<string, string[]>>
   } catch {
     return {};
   }
+}
+
+// ============================================================================
+// KIOSCOS
+// ============================================================================
+
+export async function getKioscos(onlyActive = false): Promise<Kiosko[]> {
+  try {
+    const firestore = ensureFirestore();
+    const constraints: QueryConstraint[] = onlyActive ? [where('active', '==', true)] : [];
+    constraints.push(orderBy('name', 'asc'));
+    const q = query(collection(firestore, COLLECTIONS.KIOSCOS), ...constraints);
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as Kiosko));
+  } catch (error) {
+    console.error('Error getting kioscos:', error);
+    return [];
+  }
+}
+
+export async function createKiosko(
+  data: Omit<Kiosko, 'id' | 'createdAt' | 'updatedAt'>,
+  userId: string
+): Promise<string> {
+  const firestore = ensureFirestore();
+  const docRef = doc(collection(firestore, COLLECTIONS.KIOSCOS));
+  await setDoc(docRef, {
+    ...data,
+    createdBy: userId,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return docRef.id;
+}
+
+export async function updateKiosko(id: string, updates: Partial<Kiosko>): Promise<void> {
+  const firestore = ensureFirestore();
+  await updateDoc(doc(firestore, COLLECTIONS.KIOSCOS, id), {
+    ...updates,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function deleteKiosko(id: string): Promise<void> {
+  const firestore = ensureFirestore();
+  await deleteDoc(doc(firestore, COLLECTIONS.KIOSCOS, id));
 }
