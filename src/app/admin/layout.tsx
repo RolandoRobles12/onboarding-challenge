@@ -30,6 +30,7 @@ import {
   FolderKanban,
   MessageSquare,
   ShieldCheck,
+  Store,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -73,6 +74,7 @@ const navigation: (NavItem | NavSection)[] = [
     section: 'Configuración',
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
+      { name: 'Kioscos', href: '/admin/kioscos', icon: Store },
       { name: 'Niveles XP', href: '/admin/levels', icon: Layers },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
       { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },

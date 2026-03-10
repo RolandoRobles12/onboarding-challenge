@@ -61,6 +61,8 @@ import {
   Copy,
   ImageIcon,
   Upload,
+  Users,
+  MapPin,
 } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -117,6 +119,8 @@ const FIELD_TYPE_CONFIG: Record<FormFieldType, { label: string; icon: React.Reac
   rating_nps: { label: 'NPS (0–10)', icon: <BarChart2 className="h-4 w-4" />, description: 'Net Promoter Score' },
   rating_scale: { label: 'Escala personalizada', icon: <BarChart2 className="h-4 w-4 opacity-70" />, description: 'Escala numérica 1–N' },
   section_header: { label: 'Encabezado de sección', icon: <Minus className="h-4 w-4" />, description: 'Separador visual (no captura datos)' },
+  trainer_select: { label: 'Selector de capacitador', icon: <Users className="h-4 w-4" />, description: 'Lista buscable de capacitadores del sistema' },
+  kiosk_select: { label: 'Selector de kiosko', icon: <MapPin className="h-4 w-4" />, description: 'Lista buscable de kioscos registrados' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

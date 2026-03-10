@@ -256,6 +256,16 @@ export interface QuestionOption {
 // USUARIOS Y PERFILES
 // ============================================================================
 
+export interface Kiosko {
+  id: string;
+  name: string;          // Ej: "0001 Chalco"
+  productIds: string[];  // Productos disponibles en este kiosko
+  location?: string;     // Zona o dirección física (opcional)
+  active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
 export interface UserProfile {
   uid: string; // ID único de Firebase Auth
   email: string;
@@ -609,7 +619,9 @@ export type FormFieldType =
   | 'rating_stars'    // Calificación con estrellas (1-5)
   | 'rating_nps'      // Escala NPS (0-10)
   | 'rating_scale'    // Escala numérica personalizada
-  | 'section_header'; // Separador/encabezado de sección (no captura datos)
+  | 'section_header'  // Separador/encabezado de sección (no captura datos)
+  | 'trainer_select'  // Selector buscable de capacitador (desde Firestore)
+  | 'kiosk_select';   // Selector buscable de kiosko (desde Firestore)
 
 /** Propósito del formulario */
 export type FormPurpose =

@@ -13,10 +13,13 @@ import {
   getJourneyForm,
   saveFormResponse,
   markJourneyStepComplete,
+  getAllUsers,
+  getKioscos,
 } from '@/lib/firestore-service';
-import type { JourneyForm, FormField, FormAnswer } from '@/lib/types-scalable';
+import type { JourneyForm, FormField, FormAnswer, UserProfile, Kiosko } from '@/lib/types-scalable';
 import { ChevronLeft, AlertCircle, Send, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Combobox } from '@/components/ui/combobox';
 
 // ─── Field renderers ──────────────────────────────────────────────────────────
 
@@ -24,10 +27,14 @@ function FieldRenderer({
   field,
   value,
   onChange,
+  trainers = [],
+  kioscos = [],
 }: {
   field: FormField;
   value: string | string[] | number | undefined;
   onChange: (v: string | string[] | number) => void;
+  trainers?: UserProfile[];
+  kioscos?: Kiosko[];
 }) {
   if (field.type === 'section_header') {
     return (
@@ -215,6 +222,28 @@ function FieldRenderer({
           )}
         </div>
       )}
+
+      {field.type === 'trainer_select' && (
+        <Combobox
+          options={trainers.map(t => ({ value: t.nombre || t.email, label: t.nombre || t.email, description: t.email }))}
+          value={strVal}
+          onChange={v => onChange(v)}
+          placeholder="Selecciona un capacitador…"
+          searchPlaceholder="Buscar capacitador…"
+          emptyLabel="No hay capacitadores registrados"
+        />
+      )}
+
+      {field.type === 'kiosk_select' && (
+        <Combobox
+          options={kioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
+          value={strVal}
+          onChange={v => onChange(v)}
+          placeholder="Selecciona un kiosko…"
+          searchPlaceholder="Buscar kiosko…"
+          emptyLabel="No hay kioscos registrados"
+        />
+      )}
     </div>
   );
 }
@@ -239,13 +268,21 @@ function FormContent() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [trainers, setTrainers] = useState<UserProfile[]>([]);
+  const [kioscos, setKioscos] = useState<Kiosko[]>([]);
 
   useEffect(() => {
     if (!formId) return;
     getJourneyForm(formId)
       .then(data => {
         if (!data) setNotFound(true);
-        else setForm(data);
+        else {
+          setForm(data);
+          const needsTrainers = data.fields.some(f => f.type === 'trainer_select');
+          const needsKioscos = data.fields.some(f => f.type === 'kiosk_select');
+          if (needsTrainers) getAllUsers().then(users => setTrainers(users.filter(u => u.rol === 'trainer' && u.active !== false)));
+          if (needsKioscos) getKioscos(true).then(setKioscos);
+        }
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -362,6 +399,8 @@ function FormContent() {
                 field={field}
                 value={answers[field.id]}
                 onChange={val => setAnswer(field.id, val)}
+                trainers={trainers}
+                kioscos={kioscos}
               />
               {errors[field.id] && (
                 <p className="text-xs text-destructive mt-1">{errors[field.id]}</p>
