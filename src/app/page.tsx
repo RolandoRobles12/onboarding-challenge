@@ -529,9 +529,19 @@ function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
 
       setCompletedIds(ids);
       setXp(calcXP(attempts as QuizAttempt[], bLen, ids.size));
+
+      // Notify parent of visible stages — used by test mode module selector
+      if (onStagesLoaded && foundJourney) {
+        const sortedStages = foundJourney.stages?.length
+          ? [...foundJourney.stages].sort((a, b) => a.order - b.order).filter(s => s.visible !== false)
+          : foundJourney.steps?.length
+            ? [{ id: 'legacy', title: foundJourney.name || 'Mi Ruta' }]
+            : [];
+        onStagesLoaded(sortedStages.map(s => ({ id: s.id, title: s.title })));
+      }
     } catch { setLoadError(true); }
     finally { setLoading(false); }
-  }, [productId, userId, profile.onboardingCompleted]);
+  }, [productId, userId, profile.onboardingCompleted, onStagesLoaded]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -648,16 +658,6 @@ function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
 
   // Hidden stages (visible === false) are teasers — excluded from progress
   const visibleStages = stages.filter(s => s.visible !== false);
-
-  // Notify parent of available stages when loaded (for test mode module selector)
-  const prevStagesRef = useRef<string>('');
-  useEffect(() => {
-    if (!onStagesLoaded || visibleStages.length === 0) return;
-    const key = visibleStages.map(s => s.id).join(',');
-    if (key === prevStagesRef.current) return;
-    prevStagesRef.current = key;
-    onStagesLoaded(visibleStages.map(s => ({ id: s.id, title: s.title })));
-  }, [visibleStages, onStagesLoaded]);
 
   const getStageStatus = (stage: JourneyStage): 'completed' | 'active' | 'locked' => {
     // Test mode: jump to a specific stage
