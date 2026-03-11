@@ -459,11 +459,14 @@ export default function EditQuizPage() {
           narrative: m.narrative || '',
           description: m.description || '',
           maxErrors: m.maxErrors,
-          bonusPoints: m.bonusPoints,
+          bonusPoints: m.bonusPoints ?? 0,
           questionIds: m.questionIds,
           expanded: false,
         })));
       }
+    }).catch((err: any) => {
+      toast({ title: 'Error al cargar la evaluación', description: err?.message, variant: 'destructive' });
+      router.push('/admin/quizzes');
     }).finally(() => setLoadingQuiz(false));
   }, [quizId, router]);
 

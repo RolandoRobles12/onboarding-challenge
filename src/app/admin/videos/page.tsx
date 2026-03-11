@@ -485,9 +485,11 @@ function FolderFormDialog({
   onSave: (data: Omit<VideoFolder, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => Promise<void>;
   onClose: () => void;
 }) {
+  const { products } = useProducts();
   const [form, setForm] = useState({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
+    productId: initial?.productId ?? '',
     order: initial?.order ?? maxOrder,
     active: initial?.active ?? true,
   });
@@ -498,7 +500,13 @@ function FolderFormDialog({
     if (!form.name.trim()) { setError('El nombre es obligatorio.'); return; }
     setSaving(true);
     try {
-      await onSave({ name: form.name.trim(), description: form.description.trim() || undefined, order: Number(form.order) || 0, active: form.active });
+      await onSave({
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        productId: form.productId || undefined,
+        order: Number(form.order) || 0,
+        active: form.active,
+      });
       onClose();
     } catch { setError('Error al guardar.'); } finally { setSaving(false); }
   }
@@ -517,6 +525,25 @@ function FolderFormDialog({
           <div>
             <Label>Descripción <span className="text-muted-foreground font-normal">(opcional)</span></Label>
             <Textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} rows={2} className="mt-1 resize-none" placeholder="Descripción breve de la carpeta..." />
+          </div>
+          <div>
+            <Label>Producto <span className="text-muted-foreground font-normal">(opcional — filtra visibilidad)</span></Label>
+            <Select value={form.productId} onValueChange={v => setForm(p => ({ ...p, productId: v === '_all' ? '' : v }))}>
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="Todos los productos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_all">Todos los productos</SelectItem>
+                {products.map(p => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <span className="flex items-center gap-2">
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                      {p.name}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-center gap-3">
             <Switch checked={form.active} onCheckedChange={v => setForm(p => ({ ...p, active: v }))} id="folder-active" />
@@ -793,9 +820,15 @@ export default function AdminVideosPage() {
                         <Folder className="h-5 w-5 text-primary" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-semibold text-sm truncate">{f.name}</p>
                           {!f.active && <Badge variant="secondary" className="text-[10px]">Oculta</Badge>}
+                          {f.productId && productMap[f.productId] && (
+                            <Badge variant="outline" className="text-[10px] h-4 gap-1" style={{ borderColor: productMap[f.productId].color + '80', color: productMap[f.productId].color }}>
+                              <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: productMap[f.productId].color }} />
+                              {productMap[f.productId].name}
+                            </Badge>
+                          )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {count} {count === 1 ? 'video' : 'videos'}{f.description ? ` · ${f.description}` : ''}
