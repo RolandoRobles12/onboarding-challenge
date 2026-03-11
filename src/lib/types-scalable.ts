@@ -706,6 +706,11 @@ export interface JourneyStage {
   actions: JourneyStep[];
   /** Si es false, el usuario ve un teaser "próximamente" en lugar del contenido. */
   visible?: boolean;
+  /**
+   * Plazo en días desde la fecha de ingreso del usuario para completar esta etapa.
+   * undefined = sin plazo. Ej: 14 = "primeros 14 días".
+   */
+  deadlineDays?: number;
 }
 
 // ============================================================================
