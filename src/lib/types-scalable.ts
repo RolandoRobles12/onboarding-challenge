@@ -707,10 +707,11 @@ export interface JourneyStage {
   /** Si es false, el usuario ve un teaser "próximamente" en lugar del contenido. */
   visible?: boolean;
   /**
-   * Plazo en días desde la fecha de ingreso del usuario para completar esta etapa.
-   * undefined = sin plazo. Ej: 14 = "primeros 14 días".
+   * Plazo para completar esta etapa desde la fecha de ingreso del usuario.
+   * undefined = sin plazo. Ej: deadlineDays=2, deadlineUnit='semanas'.
    */
   deadlineDays?: number;
+  deadlineUnit?: 'días' | 'semanas' | 'meses'; // unidad del plazo (default: 'días')
 }
 
 // ============================================================================
