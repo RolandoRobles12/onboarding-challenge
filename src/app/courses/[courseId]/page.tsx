@@ -38,6 +38,7 @@ import {
   Download,
   CheckCheck,
   Clock,
+  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -355,8 +356,12 @@ function LessonViewer({
           const isPdf = docType === 'pdf';
           const officeExts = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
           const isOffice = officeExts.includes(pathExt) || officeExts.includes(docType);
-          // Microsoft Office Online works on all mobile browsers (iOS Safari, Chrome Android)
-          // Google Docs Viewer is fallback for non-office types
+          // For PDFs: use direct URL (native browser renderer)
+          // For Office docs: Microsoft Office Online viewer
+          // For others: Google Docs Viewer
+          // NOTE: External viewers require the URL to be publicly accessible.
+          // If the document is behind auth/signed URL it may show "no preview available".
+          // The open button below is always the reliable fallback.
           const viewerSrc = isPdf
             ? rawUrl
             : isOffice
@@ -364,6 +369,18 @@ function LessonViewer({
               : `https://docs.google.com/viewer?url=${encodeURIComponent(rawUrl)}&embedded=true`;
           return (
             <>
+              {/* Prominent open button — always works regardless of viewer availability */}
+              <a
+                href={rawUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+              >
+                <ExternalLink className="h-4 w-4 shrink-0" />
+                Abrir / descargar documento
+              </a>
+
+              {/* Inline preview (best-effort — may not work for private storage URLs) */}
               <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
                 <iframe
                   key={lesson.id}
@@ -373,15 +390,9 @@ function LessonViewer({
                   allow="fullscreen"
                 />
               </div>
-              <a
-                href={rawUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary underline"
-              >
-                <Download className="h-4 w-4" />
-                Abrir / descargar documento
-              </a>
+              <p className="text-[11px] text-muted-foreground">
+                Si no se visualiza el documento arriba, usa el botón "Abrir / descargar documento".
+              </p>
               <TimerAutoComplete
                 key={lesson.id}
                 seconds={timerSeconds}
@@ -724,32 +735,27 @@ export default function CourseDetailPage() {
                       {nextLesson ? (
                         <Button
                           size="sm"
-                          disabled={!isDone}
-                          onClick={() => isDone && setSelectedLesson(nextLesson)}
+                          onClick={() => {
+                            if (!isDone) handleAutoComplete();
+                            setSelectedLesson(nextLesson);
+                          }}
                           className="gap-1 h-10 px-3 sm:px-4"
-                          title={!isDone ? 'Completa esta lección para continuar' : undefined}
                         >
-                          {!isDone && <Lock className="h-3.5 w-3.5" />}
                           <span className="hidden sm:inline">Siguiente</span>
-                          {isDone && <ChevronRight className="h-4 w-4" />}
-                          {!isDone && <ChevronRight className="h-4 w-4 opacity-40" />}
+                          <ChevronRight className="h-4 w-4" />
                         </Button>
-                      ) : isDone ? (
+                      ) : (
                         <Button
                           size="sm"
-                          variant="outline"
+                          variant={isDone ? 'outline' : 'default'}
                           className="gap-1 h-10 px-3 sm:px-4"
                           onClick={async () => {
+                            if (!isDone) handleAutoComplete();
                             await savePromiseRef.current;
                             router.push('/');
                           }}
                         >
                           <CheckCircle2 className="h-4 w-4" />
-                          <span className="hidden sm:inline">Finalizar</span>
-                        </Button>
-                      ) : (
-                        <Button size="sm" disabled className="gap-1 h-10 px-3 sm:px-4">
-                          <Lock className="h-3.5 w-3.5" />
                           <span className="hidden sm:inline">Finalizar</span>
                         </Button>
                       )}
