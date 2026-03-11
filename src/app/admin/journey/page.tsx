@@ -565,6 +565,11 @@ function StageCard({
         <Badge variant="secondary" className="text-xs shrink-0">
           {stage.actions.length} {stage.actions.length === 1 ? 'acción' : 'acciones'}
         </Badge>
+        {stage.deadlineDays && (
+          <Badge variant="outline" className="text-xs shrink-0 border-sky-300 text-sky-600 bg-sky-50 gap-1">
+            <Clock className="h-3 w-3" /> {stage.deadlineDays} días
+          </Badge>
+        )}
         {stage.visible === false && (
           <Badge variant="outline" className="text-xs shrink-0 border-amber-300 text-amber-600 bg-amber-50 gap-1">
             <EyeOff className="h-3 w-3" /> Oculto
@@ -616,6 +621,34 @@ function StageCard({
             placeholder="Descripción opcional de esta etapa..."
             className="h-7 text-xs border-0 border-b rounded-none px-0 bg-transparent focus-visible:ring-0 focus-visible:border-primary text-muted-foreground"
           />
+
+          {/* Deadline */}
+          <div className="flex items-center gap-2 pt-1">
+            <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground shrink-0">Plazo:</span>
+            <input
+              type="number"
+              min={1}
+              value={stage.deadlineDays ?? ''}
+              onChange={e => {
+                const v = e.target.value;
+                onUpdate({ ...stage, deadlineDays: v === '' ? undefined : Math.max(1, parseInt(v, 10)) });
+              }}
+              placeholder="Sin plazo"
+              className="h-6 w-24 rounded border border-dashed border-muted bg-transparent px-2 text-xs focus:outline-none focus:border-primary text-center"
+            />
+            <span className="text-xs text-muted-foreground">días desde ingreso</span>
+            {stage.deadlineDays && (
+              <button
+                type="button"
+                onClick={() => onUpdate({ ...stage, deadlineDays: undefined })}
+                className="text-muted-foreground hover:text-destructive"
+                title="Quitar plazo"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
 
           {/* Actions list */}
           {stage.actions.length === 0 ? (
