@@ -567,7 +567,7 @@ function StageCard({
         </Badge>
         {stage.deadlineDays && (
           <Badge variant="outline" className="text-xs shrink-0 border-sky-300 text-sky-600 bg-sky-50 gap-1">
-            <Clock className="h-3 w-3" /> {stage.deadlineDays} días
+            <Clock className="h-3 w-3" /> {stage.deadlineDays} {stage.deadlineUnit ?? 'días'}
           </Badge>
         )}
         {stage.visible === false && (
@@ -632,16 +632,30 @@ function StageCard({
               value={stage.deadlineDays ?? ''}
               onChange={e => {
                 const v = e.target.value;
-                onUpdate({ ...stage, deadlineDays: v === '' ? undefined : Math.max(1, parseInt(v, 10)) });
+                onUpdate({
+                  ...stage,
+                  deadlineDays: v === '' ? undefined : Math.max(1, parseInt(v, 10)),
+                  deadlineUnit: v === '' ? undefined : (stage.deadlineUnit ?? 'días'),
+                });
               }}
               placeholder="Sin plazo"
-              className="h-6 w-24 rounded border border-dashed border-muted bg-transparent px-2 text-xs focus:outline-none focus:border-primary text-center"
+              className="h-6 w-16 rounded border border-dashed border-muted bg-transparent px-2 text-xs focus:outline-none focus:border-primary text-center"
             />
-            <span className="text-xs text-muted-foreground">días desde ingreso</span>
+            <select
+              value={stage.deadlineUnit ?? 'días'}
+              onChange={e => onUpdate({ ...stage, deadlineUnit: e.target.value as 'días' | 'semanas' | 'meses' })}
+              disabled={!stage.deadlineDays}
+              className="h-6 rounded border border-dashed border-muted bg-transparent px-1 text-xs focus:outline-none focus:border-primary disabled:opacity-40"
+            >
+              <option value="días">días</option>
+              <option value="semanas">semanas</option>
+              <option value="meses">meses</option>
+            </select>
+            <span className="text-xs text-muted-foreground">desde ingreso</span>
             {stage.deadlineDays && (
               <button
                 type="button"
-                onClick={() => onUpdate({ ...stage, deadlineDays: undefined })}
+                onClick={() => onUpdate({ ...stage, deadlineDays: undefined, deadlineUnit: undefined })}
                 className="text-muted-foreground hover:text-destructive"
                 title="Quitar plazo"
               >
