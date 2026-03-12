@@ -22,10 +22,12 @@ import {
   getDailyPulse,
   getPulseAttempt,
   getProducts,
+  getCourse,
   type LevelConfig,
 } from '@/lib/firestore-service';
 import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import type { Journey, JourneyStep, JourneyStage, Product, QuizAttempt } from '@/lib/types-scalable';
+import type { Course } from '@/lib/types-lms';
 import { calcXP } from '@/lib/xp';
 import { BottomNav } from '@/components/BottomNav';
 import {
@@ -64,8 +66,8 @@ const STEP_META: Record<string, {
   briefing: string;
 }> = {
   info_form:  { icon: FileText,    label: 'Formulario',           color: 'text-blue-500',   actionLabel: 'Ver mis datos',       href: () => '#',                                                      briefing: 'Completa tu perfil de promotor.' },
-  quiz:       { icon: HelpCircle,  label: 'Evaluación',           color: 'text-purple-500', actionLabel: 'Comenzar evaluación', href: (id) => `/${id}/quiz`,                                          briefing: 'Demuestra lo que has aprendido. Cada acierto suma XP.' },
-  challenge:  { icon: Swords,      label: 'Desafío',              color: 'text-orange-500', actionLabel: 'Aceptar desafío',     href: (id) => `/${id}/quiz`,                                          briefing: 'Pon tus habilidades a prueba.' },
+  quiz:       { icon: HelpCircle,  label: 'Evaluación',           color: 'text-purple-500', actionLabel: 'Comenzar evaluación', href: (id, cfg) => cfg?.quizId ? `/${id}/quiz?quizId=${cfg.quizId}` : `/${id}/quiz`,  briefing: 'Demuestra lo que has aprendido. Cada acierto suma XP.' },
+  challenge:  { icon: Swords,      label: 'Desafío',              color: 'text-orange-500', actionLabel: 'Aceptar desafío',     href: (id, cfg) => cfg?.quizId ? `/${id}/quiz?quizId=${cfg.quizId}` : `/${id}/quiz`,  briefing: 'Pon tus habilidades a prueba.' },
   course:     { icon: BookOpen,    label: 'Curso',                color: 'text-emerald-500',actionLabel: 'Iniciar curso',       href: (_, cfg) => cfg?.courseId ? `/courses/${cfg.courseId}` : '/',  briefing: 'Material para convertirte en experto.' },
   results:    { icon: BarChart2,   label: 'Resultados',           color: 'text-sky-500',    actionLabel: 'Ver resultados',      href: (id) => `/${id}/results`,                                       briefing: 'Consulta tu desempeño y áreas de mejora.' },
   certificate:{ icon: Award,       label: 'Certificado',          color: 'text-amber-500',  actionLabel: 'Obtener certificado', href: (id) => `/${id}/certificate`,                                   briefing: '¡Descarga tu certificado oficial Aviva!' },
@@ -85,9 +87,12 @@ const STAGE_COLORS = [
 
 // ─── Action row ───────────────────────────────────────────────────────────────
 
-function ActionRow({ action, status, productId, journeyId, onMarkComplete }: {
+function ActionRow({ action, status, productId, journeyId, isTestMode, courseInfo, completedLessonIds, onMarkComplete }: {
   action: JourneyStep; status: 'completed' | 'active' | 'locked';
-  productId: string; journeyId: string; onMarkComplete: (id: string) => void;
+  productId: string; journeyId: string; isTestMode?: boolean;
+  courseInfo?: { title: string; modules: { id: string; title: string; lessonCount: number }[] };
+  completedLessonIds?: string[];
+  onMarkComplete: (id: string) => void;
 }) {
   const meta = STEP_META[action.type] ?? STEP_META.quiz;
   const Icon = meta.icon;
@@ -143,13 +148,49 @@ function ActionRow({ action, status, productId, journeyId, onMarkComplete }: {
         {/* checklist → no button; items appear below */}
         {/* other types → standard Ir button */}
         {active && action.type !== 'info_form' && action.type !== 'checklist' && (
-          <Button size="sm" className="h-7 text-xs shrink-0 gap-1" asChild>
-            <Link href={meta.href(productId, action.config)}>
-              <PlayCircle className="h-3 w-3" /> Ir
-            </Link>
-          </Button>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button size="sm" className="h-7 text-xs gap-1" asChild>
+              <Link href={meta.href(productId, action.config)}>
+                <PlayCircle className="h-3 w-3" /> Ir
+              </Link>
+            </Button>
+            {isTestMode && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                onClick={() => onMarkComplete(action.id)}
+                title="Marcar como completado (solo en modo prueba)"
+              >
+                <CheckCircle2 className="h-3 w-3" /> ✓
+              </Button>
+            )}
+          </div>
         )}
       </div>
+
+      {/* Course module breakdown — shown when active or completed */}
+      {action.type === 'course' && courseInfo && courseInfo.modules.length > 0 && (status === 'active' || status === 'completed') && (
+        <div className="pl-11 space-y-1.5">
+          {courseInfo.modules.map(mod => {
+            const completedInMod = (completedLessonIds ?? []).length; // rough indicator
+            return (
+              <div key={mod.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="h-4 w-4 rounded-full bg-muted flex items-center justify-center shrink-0">
+                  <BookOpen className="h-2.5 w-2.5" />
+                </div>
+                <span className="flex-1 truncate">{mod.title}</span>
+                <span className="text-[10px] font-mono shrink-0">{mod.lessonCount} lecc.</span>
+              </div>
+            );
+          })}
+          {active && (
+            <p className="text-[10px] text-muted-foreground italic">
+              {courseInfo.modules.reduce((s, m) => s + m.lessonCount, 0)} lecciones en total
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Checklist items (inline, only when active) */}
       {action.type === 'checklist' && active && checklistItems.length > 0 && (
@@ -183,9 +224,12 @@ function ActionRow({ action, status, productId, journeyId, onMarkComplete }: {
 
 // ─── Stage card ───────────────────────────────────────────────────────────────
 
-function StageCard({ stage, index, status, completedIds, productId, journeyId, onMarkComplete }: {
+function StageCard({ stage, index, status, completedIds, productId, journeyId, isTestMode, coursesMap, enrollmentsMap, onMarkComplete }: {
   stage: JourneyStage; index: number; status: 'completed' | 'active' | 'locked';
-  completedIds: Set<string>; productId: string; journeyId: string; onMarkComplete: (id: string) => void;
+  completedIds: Set<string>; productId: string; journeyId: string; isTestMode?: boolean;
+  coursesMap?: Record<string, Course>;
+  enrollmentsMap?: Record<string, string[]>; // courseId → completedLessonIds
+  onMarkComplete: (id: string) => void;
 }) {
   const [open, setOpen] = useState(status === 'active');
   const palette = STAGE_COLORS[index % STAGE_COLORS.length];
@@ -196,6 +240,8 @@ function StageCard({ stage, index, status, completedIds, productId, journeyId, o
   const getActionStatus = (action: JourneyStep, i: number): 'completed' | 'active' | 'locked' => {
     if (completedIds.has(action.id)) return 'completed';
     if (status === 'locked') return 'locked';
+    // In test mode with an active stage, all actions are accessible (not just the first incomplete)
+    if (isTestMode && status === 'active') return 'active';
     const firstIncomplete = stage.actions.findIndex(a => !completedIds.has(a.id));
     return i === firstIncomplete ? 'active' : 'locked';
   };
@@ -247,10 +293,23 @@ function StageCard({ stage, index, status, completedIds, productId, journeyId, o
         <div className="px-3 pb-3 space-y-1.5 border-t border-muted/40 pt-3">
           {stage.actions.length === 0
             ? <p className="text-xs text-muted-foreground text-center py-3">Sin acciones configuradas</p>
-            : stage.actions.map((action, i) => (
-                <ActionRow key={action.id} action={action} status={getActionStatus(action, i)}
-                  productId={productId} journeyId={journeyId} onMarkComplete={onMarkComplete} />
-              ))}
+            : stage.actions.map((action, i) => {
+                const course = action.type === 'course' && action.config?.courseId && coursesMap
+                  ? coursesMap[action.config.courseId]
+                  : undefined;
+                const courseInfo = course
+                  ? { title: course.title, modules: course.modules.map(m => ({ id: m.id, title: m.title, lessonCount: m.lessons.length })) }
+                  : undefined;
+                const completedLessonIds = action.type === 'course' && action.config?.courseId && enrollmentsMap
+                  ? enrollmentsMap[action.config.courseId]
+                  : undefined;
+                return (
+                  <ActionRow key={action.id} action={action} status={getActionStatus(action, i)}
+                    productId={productId} journeyId={journeyId} isTestMode={isTestMode}
+                    courseInfo={courseInfo} completedLessonIds={completedLessonIds}
+                    onMarkComplete={onMarkComplete} />
+                );
+              })}
         </div>
       )}
     </div>
@@ -433,15 +492,18 @@ function MiniLeaderboard({ productId, currentUserName }: { productId: string; cu
 
 // ─── Journey Dashboard ────────────────────────────────────────────────────────
 
-function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
+function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLoaded }: {
   userId: string;
   profile: NonNullable<ReturnType<typeof useAuth>['profile']>;
   testStageId?: string | null;
+  isTestMode?: boolean;
   onStagesLoaded?: (stages: { id: string; title: string }[]) => void;
 }) {
   const [journey, setJourney] = useState<Journey | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
+  const [coursesMap, setCoursesMap] = useState<Record<string, Course>>({});
+  const [enrollmentsMap, setEnrollmentsMap] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [xp, setXp] = useState(0);
@@ -468,7 +530,8 @@ function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
       setBadgeCount(bLen);
 
       const ids = new Set<string>();
-      if (foundJourney) {
+      if (foundJourney && !isTestMode) {
+        // In test mode we start with a clean slate so admins can test the full flow
         const prog = await getUserJourneyProgress(userId, foundJourney.id).catch(() => null);
         (prog?.completedStepIds ?? []).forEach((id: string) => ids.add(id));
       }
@@ -477,16 +540,32 @@ function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
         ? (foundJourney.stages?.length ? foundJourney.stages.flatMap(s => s.actions ?? []) : foundJourney.steps ?? [])
         : [];
 
-      // Auto-mark info_form if onboarding done
+      // Auto-mark info_form if onboarding done (always, even in test mode)
       allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
 
-      if (foundJourney) {
+      // Fetch course data for all course steps (for module breakdown display)
+      const courseStepIds = allActions
+        .filter(a => a.type === 'course' && a.config?.courseId)
+        .map(a => a.config!.courseId as string);
+      if (courseStepIds.length > 0) {
+        const courseResults = await Promise.all(courseStepIds.map(id => getCourse(id).catch(() => null)));
+        const cMap: Record<string, Course> = {};
+        courseResults.forEach((c, i) => { if (c) cMap[courseStepIds[i]] = c; });
+        setCoursesMap(cMap);
+      }
+
+      if (foundJourney && !isTestMode) {
+        // In test mode skip auto-marks so admins see the flow from scratch
         const markPromises: Promise<void>[] = [];
 
         // Auto-mark course steps whose enrollment is completed
         const courseActions = allActions.filter(a => a.type === 'course' && a.config?.courseId);
         if (courseActions.length > 0) {
           const enrollments = await getUserEnrollments(userId).catch(() => []);
+          // Build enrollments map for lesson completion display
+          const eMap: Record<string, string[]> = {};
+          enrollments.forEach(e => { eMap[e.courseId] = e.completedLessonIds ?? []; });
+          setEnrollmentsMap(eMap);
           courseActions.forEach(a => {
             if (ids.has(a.id)) return;
             const enr = enrollments.find(e => e.courseId === a.config!.courseId);
@@ -554,7 +633,10 @@ function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
 
   const handleMarkComplete = async (stepId: string) => {
     if (!journey) return;
-    await markJourneyStepComplete(userId, journey.id, productId, stepId);
+    // In test mode, only update local state — don't pollute the admin's real progress in Firestore
+    if (!isTestMode) {
+      await markJourneyStepComplete(userId, journey.id, productId, stepId);
+    }
     setCompletedIds(prev => { const n = new Set(prev); n.add(stepId); return n; });
     setXp(prev => prev + 25);
   };
@@ -760,6 +842,9 @@ function JourneyDashboard({ userId, profile, testStageId, onStagesLoaded }: {
                   completedIds={completedIds}
                   productId={productId}
                   journeyId={journey.id}
+                  isTestMode={isTestMode}
+                  coursesMap={coursesMap}
+                  enrollmentsMap={enrollmentsMap}
                   onMarkComplete={handleMarkComplete}
                 />
           ))}
@@ -829,11 +914,14 @@ export default function LMSDashboard() {
   const [journeyStages, setJourneyStages] = useState<{ id: string; title: string }[]>([]);
   const [availableProducts, setAvailableProducts] = useState<{ id: string; name: string; color: string }[]>([]);
   const [showProductPicker, setShowProductPicker] = useState(false);
+  // Incrementing this key forces JourneyDashboard to remount → clean test state
+  const [testResetKey, setTestResetKey] = useState(0);
 
   const enterTestMode = async () => {
     const productId = profile?.producto;
     if (productId) {
       setTestProductId(productId);
+      setTestResetKey(k => k + 1);
       setTestMode(true);
     } else {
       // Need to pick a product
@@ -848,6 +936,11 @@ export default function LMSDashboard() {
     setTestProductId('');
     setTestStageId(null);
     setJourneyStages([]);
+  };
+
+  const resetTestProgress = () => {
+    setTestStageId(null);
+    setTestResetKey(k => k + 1);
   };
 
   // Build a virtual seller profile for test mode
@@ -898,6 +991,7 @@ export default function LMSDashboard() {
                 <p className="text-xs text-amber-700 flex-1">
                   <strong>Modo Prueba</strong> — Simula la vista del vendedor.
                 </p>
+                <button onClick={resetTestProgress} className="text-xs text-amber-600 hover:text-amber-800 underline shrink-0 mr-2">↺ Reiniciar</button>
                 <button onClick={exitTestMode} className="text-xs text-amber-600 hover:text-amber-800 underline shrink-0">Salir</button>
               </div>
               {journeyStages.length > 0 && (
@@ -985,9 +1079,11 @@ export default function LMSDashboard() {
                 <AdminPanel name={firstName} onTestMode={enterTestMode} />
               ) : testProfile ? (
                 <JourneyDashboard
+                  key={testResetKey}
                   userId={testProfile.uid}
                   profile={testProfile}
                   testStageId={testStageId}
+                  isTestMode={true}
                   onStagesLoaded={setJourneyStages}
                 />
               ) : profile && !isAdmin ? (
