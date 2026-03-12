@@ -21,7 +21,7 @@ import type { Video, VideoView, VideoReaction, VideoComment, VideoFolder } from 
 import {
   LogOut, ShieldCheck, Play, Pause, Volume2, VolumeX,
   CheckCircle, Clapperboard, ChevronDown, ChevronUp,
-  Share2, MessageCircle, Send, Trash2, X,
+  Share2, MessageCircle, Send, Trash2, X, Heart, Maximize, Minimize,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -183,6 +183,7 @@ function VideoCard({
   const [duration, setDuration] = useState(video.duration || 0);
   const [descExpanded, setDescExpanded] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Reactions
   const [reactions, setReactions] = useState<VideoReaction[]>([]);
@@ -296,11 +297,29 @@ function VideoCard({
     }
   }
 
+  // ── Fullscreen ────────────────────────────────────────────────────────────
+
+  function toggleFullscreen() {
+    const el = videoRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }
+
+  // Keep isFullscreen in sync when user presses Escape
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
   // ── Computed ─────────────────────────────────────────────────────────────
 
   const pct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
   const totalReactions = reactions.length;
-  const reactionDisplay = myReaction ?? '❤️';
 
   return (
     <>
@@ -372,10 +391,13 @@ function VideoCard({
                 className="flex flex-col items-center gap-0.5"
               >
                 <div className={cn(
-                  'h-12 w-12 rounded-full flex items-center justify-center text-2xl shadow-lg transition-transform active:scale-90',
-                  myReaction ? 'bg-white/20' : 'bg-black/40 backdrop-blur-sm'
+                  'h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-90',
+                  myReaction ? 'bg-white/20 text-2xl' : 'bg-black/40 backdrop-blur-sm'
                 )}>
-                  {reactionDisplay}
+                  {myReaction
+                    ? myReaction
+                    : <Heart className="h-6 w-6 text-white" />
+                  }
                 </div>
                 <span className="text-white text-xs font-semibold drop-shadow">{totalReactions || ''}</span>
               </button>
@@ -401,6 +423,20 @@ function VideoCard({
             >
               <div className="h-12 w-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center shadow-lg active:scale-90 transition-transform">
                 <Share2 className="h-6 w-6 text-white" />
+              </div>
+            </button>
+
+            {/* Fullscreen */}
+            <button
+              onClick={toggleFullscreen}
+              className="flex flex-col items-center gap-0.5"
+              title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            >
+              <div className="h-12 w-12 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center shadow-lg active:scale-90 transition-transform">
+                {isFullscreen
+                  ? <Minimize className="h-6 w-6 text-white" />
+                  : <Maximize className="h-6 w-6 text-white" />
+                }
               </div>
             </button>
           </div>
@@ -703,7 +739,8 @@ function VideoFeed() {
         </div>
       </main>
 
-      <BottomNav isAdmin={isAdmin} />
+      {/* Always show bottom nav on the videos page — admins can use the header button to go back */}
+      <BottomNav isAdmin={false} />
     </div>
   );
 }
