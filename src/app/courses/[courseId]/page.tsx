@@ -41,6 +41,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 // ─── Lesson type icon ────────────────────────────────────────────────────────
 
@@ -223,6 +224,7 @@ function LessonViewer({
 }) {
   const { content } = lesson;
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
 
   // HTML: auto-complete when the user scrolls to the bottom (sentinel visible)
   useEffect(() => {
@@ -238,8 +240,8 @@ function LessonViewer({
   // Timer duration in seconds for iframe-based content
   const timerSeconds = (lesson.estimatedDuration ?? 1) * 60;
 
-  // Iframe height: full viewport minus header+footer, capped for desktop
-  const iframeStyle = { height: 'min(72vh, 640px)' };
+  // Responsive iframe height: smaller on mobile to leave room for header + bottom nav
+  const iframeStyle = { height: isMobile ? 'min(55dvh, 400px)' : 'min(72dvh, 640px)' };
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -282,12 +284,15 @@ function LessonViewer({
 
         {/* AUDIO — auto-complete on ended */}
         {lesson.type === 'audio' && content.audioUrl && (
-          <div className="rounded-xl border p-4 bg-muted/30 flex flex-col items-center gap-4">
-            <Headphones className="h-10 w-10 text-muted-foreground" />
+          <div className="rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-background to-primary/[0.03] p-6 sm:p-8 flex flex-col items-center gap-5">
+            <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <Headphones className="h-7 w-7 sm:h-8 sm:w-8 text-primary" />
+            </div>
+            <p className="text-sm text-muted-foreground font-medium">Escucha el audio para continuar</p>
             <audio
               key={lesson.id}
               controls
-              className="w-full"
+              className="w-full max-w-md"
               src={content.audioUrl}
               onEnded={() => { if (!isCompleted) onComplete(); }}
             />
@@ -315,6 +320,7 @@ function LessonViewer({
                 src={content.embedUrl}
                 className="w-full h-full"
                 allowFullScreen
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                 title={lesson.title}
               />
             </div>
@@ -336,6 +342,7 @@ function LessonViewer({
                 src={content.slidesUrl}
                 className="w-full h-full"
                 allowFullScreen
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
                 title={lesson.title}
               />
             </div>
@@ -348,51 +355,74 @@ function LessonViewer({
           </>
         )}
 
-        {/* DOCUMENT — inline viewer + download */}
+        {/* DOCUMENT — smart viewer: inline PDF on desktop, card CTA everywhere else */}
         {lesson.type === 'document' && content.documentUrl && (() => {
           const rawUrl = content.documentUrl;
           const pathExt = rawUrl.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
           const docType = content.documentType ?? pathExt;
           const isPdf = docType === 'pdf';
-          const officeExts = ['doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'];
-          const isOffice = officeExts.includes(pathExt) || officeExts.includes(docType);
-          // For PDFs: use direct URL (native browser renderer)
-          // For Office docs: Microsoft Office Online viewer
-          // For others: Google Docs Viewer
-          // NOTE: External viewers require the URL to be publicly accessible.
-          // If the document is behind auth/signed URL it may show "no preview available".
-          // The open button below is always the reliable fallback.
-          const viewerSrc = isPdf
-            ? rawUrl
-            : isOffice
-              ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(rawUrl)}`
-              : `https://docs.google.com/viewer?url=${encodeURIComponent(rawUrl)}&embedded=true`;
+          // Desktop browsers render PDFs natively in iframes; mobile ones don't
+          const canPreviewInline = isPdf && !isMobile;
+
+          const fileInfo: Record<string, { label: string; action: string }> = {
+            pdf:  { label: 'PDF',        action: 'Leer documento' },
+            doc:  { label: 'Word',       action: 'Abrir documento' },
+            docx: { label: 'Word',       action: 'Abrir documento' },
+            ppt:  { label: 'PowerPoint', action: 'Ver presentación' },
+            pptx: { label: 'PowerPoint', action: 'Ver presentación' },
+            xls:  { label: 'Excel',      action: 'Ver hoja de cálculo' },
+            xlsx: { label: 'Excel',      action: 'Ver hoja de cálculo' },
+          };
+          const info = fileInfo[docType] ?? { label: docType.toUpperCase(), action: 'Abrir documento' };
+
           return (
             <>
-              {/* Prominent open button — always works regardless of viewer availability */}
-              <a
-                href={rawUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
-              >
-                <ExternalLink className="h-4 w-4 shrink-0" />
-                Abrir / descargar documento
-              </a>
+              {canPreviewInline ? (
+                <>
+                  {/* Desktop PDF: native browser renderer works perfectly */}
+                  <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
+                    <iframe
+                      key={lesson.id}
+                      src={rawUrl}
+                      className="w-full h-full"
+                      title={lesson.title}
+                    />
+                  </div>
+                  <a
+                    href={rawUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                  >
+                    <Download className="h-4 w-4" />
+                    Descargar documento
+                  </a>
+                </>
+              ) : (
+                /* Mobile or non-PDF: beautiful card with prominent CTA */
+                <div className="rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-background to-primary/[0.03] p-6 sm:p-10 flex flex-col items-center text-center gap-5">
+                  <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl bg-primary/10 flex items-center justify-center">
+                    <FileText className="h-8 w-8 sm:h-10 sm:w-10 text-primary" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <p className="font-bold text-base sm:text-lg leading-snug">{lesson.title}</p>
+                    <p className="text-sm text-muted-foreground">Documento {info.label}</p>
+                  </div>
+                  <a
+                    href={rawUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2.5 rounded-xl bg-primary text-primary-foreground px-6 py-3.5 text-sm font-semibold shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 active:scale-[0.97] transition-all"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    {info.action}
+                  </a>
+                  <p className="text-xs text-muted-foreground max-w-xs">
+                    Se abrirá en una nueva pestaña donde podrás verlo cómodamente
+                  </p>
+                </div>
+              )}
 
-              {/* Inline preview (best-effort — may not work for private storage URLs) */}
-              <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
-                <iframe
-                  key={lesson.id}
-                  src={viewerSrc}
-                  className="w-full h-full"
-                  title={lesson.title}
-                  allow="fullscreen"
-                />
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Si no se visualiza el documento arriba, usa el botón "Abrir / descargar documento".
-              </p>
               <TimerAutoComplete
                 key={lesson.id}
                 seconds={timerSeconds}
@@ -565,7 +595,7 @@ export default function CourseDetailPage() {
   return (
     <ProtectedRoute>
       <SellerOnboardingGate>
-        <div className="flex flex-col h-screen bg-background overflow-hidden">
+        <div className="flex flex-col h-dvh bg-background overflow-hidden">
           {/* Top bar */}
           <header className="bg-accent text-accent-foreground border-b shrink-0 z-20">
             <div className="flex items-center gap-3 px-4 h-14">
@@ -700,17 +730,17 @@ export default function CourseDetailPage() {
                       />
                     </div>
 
-                    {/* Bottom nav — touch-friendly */}
-                    <div className="shrink-0 border-t bg-card px-3 py-2.5 flex items-center gap-2">
+                    {/* Bottom nav — mobile-optimized with safe area padding */}
+                    <div className="shrink-0 border-t bg-card px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex items-center gap-2">
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={!prevLesson}
                         onClick={() => prevLesson && setSelectedLesson(prevLesson)}
-                        className="gap-1 h-10 px-3 sm:px-4"
+                        className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                       >
                         <ChevronLeft className="h-4 w-4" />
-                        <span className="hidden sm:inline">Anterior</span>
+                        <span className="hidden xs:inline">Anterior</span>
                       </Button>
 
                       {/* Center: progress + open sidebar on mobile */}
@@ -726,7 +756,7 @@ export default function CourseDetailPage() {
                         )}
                         <button
                           onClick={() => setSidebarOpen(true)}
-                          className="lg:hidden text-[10px] text-primary underline"
+                          className="lg:hidden text-[10px] text-primary font-medium underline underline-offset-2"
                         >
                           Ver lecciones
                         </button>
@@ -739,16 +769,16 @@ export default function CourseDetailPage() {
                             if (!isDone) handleAutoComplete();
                             setSelectedLesson(nextLesson);
                           }}
-                          className="gap-1 h-10 px-3 sm:px-4"
+                          className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                         >
-                          <span className="hidden sm:inline">Siguiente</span>
+                          <span className="hidden xs:inline">Siguiente</span>
                           <ChevronRight className="h-4 w-4" />
                         </Button>
                       ) : (
                         <Button
                           size="sm"
                           variant={isDone ? 'outline' : 'default'}
-                          className="gap-1 h-10 px-3 sm:px-4"
+                          className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                           onClick={async () => {
                             if (!isDone) handleAutoComplete();
                             await savePromiseRef.current;
@@ -756,7 +786,7 @@ export default function CourseDetailPage() {
                           }}
                         >
                           <CheckCircle2 className="h-4 w-4" />
-                          <span className="hidden sm:inline">Finalizar</span>
+                          <span className="hidden xs:inline">Finalizar</span>
                         </Button>
                       )}
                     </div>
