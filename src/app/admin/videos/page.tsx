@@ -19,7 +19,9 @@ import {
 import {
   getAllVideos, createVideo, updateVideo, deleteVideo, getVideoViews,
   getVideoFolders, createVideoFolder, updateVideoFolder, deleteVideoFolder,
+  getAllUsers,
 } from '@/lib/firestore-service';
+import type { UserProfile } from '@/lib/types-scalable';
 import { useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import { storage } from '@/lib/firebase';
@@ -62,11 +64,28 @@ const EMPTY_FORM = {
 
 function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
   const [views, setViews] = useState<VideoView[]>([]);
+  const [sellers, setSellers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'watched' | 'pending'>('watched');
 
   useEffect(() => {
-    getVideoViews(video.id).then(setViews).finally(() => setLoading(false));
-  }, [video.id]);
+    Promise.all([
+      getVideoViews(video.id),
+      getAllUsers().catch(() => [] as UserProfile[]),
+    ]).then(([vws, users]) => {
+      setViews(vws);
+      // Keep only active sellers whose product matches the video (or all sellers if video has no product)
+      const relevantSellers = users.filter(u =>
+        u.rol === 'seller' &&
+        u.active !== false &&
+        (!video.productId || u.producto === video.productId)
+      );
+      setSellers(relevantSellers);
+    }).finally(() => setLoading(false));
+  }, [video.id, video.productId]);
+
+  const viewedUids = new Set(views.map(v => v.userId));
+  const pendingSellers = sellers.filter(u => !viewedUids.has(u.uid));
 
   const completed = views.filter(v => v.completed).length;
   const totalPlays = views.reduce((sum, v) => sum + (v.viewCount ?? 1), 0);
@@ -96,67 +115,114 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
               </div>
               <div className="rounded-xl border p-3">
                 <p className="text-2xl font-bold text-blue-600">{views.length}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Usuarios únicos</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Vieron</p>
               </div>
               <div className="rounded-xl border p-3">
                 <p className="text-2xl font-bold text-emerald-600">{completed}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Completaron (100%)</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Completaron</p>
               </div>
               <div className="rounded-xl border p-3">
-                <p className="text-2xl font-bold text-amber-600">{avgPct}%</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Promedio visto</p>
+                <p className={cn('text-2xl font-bold', pendingSellers.length > 0 ? 'text-red-500' : 'text-emerald-600')}>{pendingSellers.length}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Pendientes</p>
               </div>
             </div>
 
-            {/* Viewer list */}
-            {views.length === 0 ? (
-              <p className="text-center text-muted-foreground text-sm py-6">
-                Nadie ha visto este video todavía.
-              </p>
-            ) : (
-              <div className="max-h-80 overflow-y-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead className="text-right">Reproducciones</TableHead>
-                      <TableHead className="text-right">% Máximo</TableHead>
-                      <TableHead className="text-right">Completó</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {views.map(v => (
-                      <TableRow key={v.id}>
-                        <TableCell>
-                          <p className="font-medium text-sm">{v.trainerName || 'Participante'}</p>
-                          {v.assignedKiosko && <p className="text-xs text-muted-foreground">{v.assignedKiosko}</p>}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span className={`text-sm font-semibold ${(v.viewCount ?? 1) > 1 ? 'text-purple-600' : 'text-muted-foreground'}`}>
-                            {v.viewCount ?? 1}×
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <div className="h-1.5 w-14 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary rounded-full"
-                                style={{ width: `${v.percentWatched}%` }}
-                              />
-                            </div>
-                            <span className="text-xs font-mono w-7 text-right">{v.percentWatched}%</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {v.completed
-                            ? <CheckCircle className="h-4 w-4 text-emerald-500 ml-auto" />
-                            : <span className="text-xs text-muted-foreground">No</span>}
-                        </TableCell>
+            {/* Tab switcher */}
+            <div className="flex gap-1 rounded-lg bg-muted p-1">
+              <button
+                className={cn('flex-1 text-xs font-medium py-1.5 rounded-md transition-colors', tab === 'watched' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => setTab('watched')}
+              >
+                Vieron ({views.length})
+              </button>
+              <button
+                className={cn('flex-1 text-xs font-medium py-1.5 rounded-md transition-colors', tab === 'pending' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground')}
+                onClick={() => setTab('pending')}
+              >
+                Pendientes ({pendingSellers.length})
+              </button>
+            </div>
+
+            {/* Watched tab */}
+            {tab === 'watched' && (
+              views.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-6">Nadie ha visto este video todavía.</p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead className="text-right">Reproducciones</TableHead>
+                        <TableHead className="text-right">% Máximo</TableHead>
+                        <TableHead className="text-right">Completó</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {views.map(v => (
+                        <TableRow key={v.id}>
+                          <TableCell>
+                            <p className="font-medium text-sm">{v.trainerName || 'Participante'}</p>
+                            {v.assignedKiosko && <p className="text-xs text-muted-foreground">{v.assignedKiosko}</p>}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <span className={`text-sm font-semibold ${(v.viewCount ?? 1) > 1 ? 'text-purple-600' : 'text-muted-foreground'}`}>
+                              {v.viewCount ?? 1}×
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="h-1.5 w-14 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-primary rounded-full" style={{ width: `${v.percentWatched}%` }} />
+                              </div>
+                              <span className="text-xs font-mono w-7 text-right">{v.percentWatched}%</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {v.completed
+                              ? <CheckCircle className="h-4 w-4 text-emerald-500 ml-auto" />
+                              : <span className="text-xs text-muted-foreground">No</span>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )
+            )}
+
+            {/* Pending tab */}
+            {tab === 'pending' && (
+              pendingSellers.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-6">¡Todos los vendedores han visto este video! 🎉</p>
+              ) : (
+                <div className="max-h-72 overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Kiosko</TableHead>
+                        <TableHead>Correo</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pendingSellers.map(u => (
+                        <TableRow key={u.uid}>
+                          <TableCell>
+                            <p className="font-medium text-sm">{u.nombre}</p>
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-xs text-muted-foreground">{u.assignedKiosko || '—'}</p>
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-xs text-muted-foreground">{u.email}</p>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )
             )}
           </>
         )}
