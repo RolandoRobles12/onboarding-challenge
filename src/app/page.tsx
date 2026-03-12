@@ -149,11 +149,17 @@ function ActionRow({ action, status, productId, journeyId, isTestMode, courseInf
         {/* other types → standard Ir button */}
         {active && action.type !== 'info_form' && action.type !== 'checklist' && (
           <div className="flex items-center gap-1 shrink-0">
+            {action.type === 'course' && !action.config?.courseId ? (
+              <Button size="sm" className="h-7 text-xs gap-1" disabled title="Este paso no tiene un curso asignado">
+                <PlayCircle className="h-3 w-3" /> Ir
+              </Button>
+            ) : (
             <Button size="sm" className="h-7 text-xs gap-1" asChild>
               <Link href={meta.href(productId, action.config)}>
                 <PlayCircle className="h-3 w-3" /> Ir
               </Link>
             </Button>
+            )}
             {isTestMode && (
               <Button
                 size="sm"
@@ -540,8 +546,10 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
         ? (foundJourney.stages?.length ? foundJourney.stages.flatMap(s => s.actions ?? []) : foundJourney.steps ?? [])
         : [];
 
-      // Auto-mark info_form if onboarding done (always, even in test mode)
-      allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
+      // Auto-mark info_form if onboarding done (skip in test mode so admins can test the form flow)
+      if (!isTestMode) {
+        allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
+      }
 
       // Fetch course data for all course steps (for module breakdown display)
       const courseStepIds = allActions
