@@ -586,31 +586,9 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
           });
         }
 
-        // Auto-mark quiz/challenge/results steps based on completed attempts
-        // For quiz/challenge steps: only mark complete if the specific assigned quiz was attempted
-        // For results steps: mark complete if any attempt exists for the product
-        const completedAttempts = (attempts as QuizAttempt[]).filter(a => a.productId === productId);
-        if (completedAttempts.length > 0) {
-          allActions.forEach(a => {
-            if (ids.has(a.id)) return;
-            if (a.type === 'results') {
-              ids.add(a.id);
-              markPromises.push(
-                markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
-              );
-            } else if (a.type === 'quiz' || a.type === 'challenge') {
-              const assignedQuizId = a.config?.quizId;
-              const hasAttempt = !!assignedQuizId &&
-                completedAttempts.some(att => att.quizId === assignedQuizId);
-              if (hasAttempt) {
-                ids.add(a.id);
-                markPromises.push(
-                  markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
-                );
-              }
-            }
-          });
-        }
+        // Note: quiz/challenge/results steps are marked complete via the quiz results
+        // page (results/page.tsx) after the user finishes a quiz. Auto-marking them
+        // here based on stored attempts would re-apply completions after an admin reset.
 
         // Auto-mark badge steps if the user already has any badges
         if (bLen > 0) {
