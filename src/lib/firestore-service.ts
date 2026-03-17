@@ -1045,11 +1045,37 @@ export async function getUserJourneyProgress(
   }
 }
 
+export async function getUserAllJourneyProgress(userId: string): Promise<UserJourneyProgress[]> {
+  try {
+    const q = query(
+      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      where('userId', '==', userId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as UserJourneyProgress));
+  } catch (error) {
+    console.error('Error getting user journey progress:', error);
+    return [];
+  }
+}
+
+export async function resetUserJourneyProgress(userId: string, journeyId: string): Promise<void> {
+  try {
+    const docId = `${userId}_${journeyId}`;
+    const docRef = doc(collection(db, COLLECTIONS.JOURNEY_PROGRESS), docId);
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error resetting journey progress:', error);
+    throw error;
+  }
+}
+
 export async function markJourneyStepComplete(
   userId: string,
   journeyId: string,
   productId: string,
-  stepId: string
+  stepId: string,
+  userMeta?: { userName?: string; userEmail?: string }
 ): Promise<void> {
   try {
     const docId = `${userId}_${journeyId}`;
@@ -1059,6 +1085,8 @@ export async function markJourneyStepComplete(
     if (!snap.exists()) {
       await setDoc(docRef, {
         userId,
+        ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
+        ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
         journeyId,
         productId,
         completedStepIds: [stepId],
@@ -1070,6 +1098,8 @@ export async function markJourneyStepComplete(
       if (!existing.includes(stepId)) {
         await updateDoc(docRef, {
           completedStepIds: [...existing, stepId],
+          ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
+          ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
           updatedAt: serverTimestamp(),
         });
       }
