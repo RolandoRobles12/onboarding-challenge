@@ -741,9 +741,12 @@ export default function AnalyticsPage() {
   const [evalUsers, setEvalUsers] = useState<UserProfile[]>([]);
   const [selectedQuizIds, setSelectedQuizIds] = useState<Set<string>>(new Set());
   const [evalCosechaGranularity, setEvalCosechaGranularity] = useState<CosechaGranularity>('mes');
+  const [evalCosechaFrom, setEvalCosechaFrom] = useState('');
+  const [evalCosechaTo, setEvalCosechaTo] = useState('');
   const [evalSearch, setEvalSearch] = useState('');
   const [evalHubFilter, setEvalHubFilter] = useState('');
   const [evalProductFilter, setEvalProductFilter] = useState('');
+  const [quizSelectorSearch, setQuizSelectorSearch] = useState('');
   const [loadingPulse, setLoadingPulse] = useState(false);
   const [pulseAttempts, setPulseAttempts] = useState<PulseAttempt[]>([]);
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
@@ -1059,12 +1062,14 @@ export default function AnalyticsPage() {
   const evalFilteredScores = useMemo(() => {
     let list = evalUserScores;
     if (evalHubFilter) list = list.filter(s => s.hub === evalHubFilter);
+    if (evalCosechaFrom) list = list.filter(s => s.cosecha && getCosechaGroup(s.cosecha, 'mes') >= evalCosechaFrom);
+    if (evalCosechaTo) list = list.filter(s => s.cosecha && getCosechaGroup(s.cosecha, 'mes') <= evalCosechaTo);
     if (evalSearch) {
       const q = evalSearch.toLowerCase();
       list = list.filter(s => s.userName.toLowerCase().includes(q) || s.hub.toLowerCase().includes(q));
     }
     return list;
-  }, [evalUserScores, evalHubFilter, evalSearch]);
+  }, [evalUserScores, evalHubFilter, evalCosechaFrom, evalCosechaTo, evalSearch]);
 
   const evalCosechaMetrics = useMemo(
     () => buildEvalCosechaMetrics(evalFilteredScores, evalCosechaGranularity),
@@ -1919,73 +1924,180 @@ export default function AnalyticsPage() {
           ) : (
             <>
               {/* ── Filter bar ─────────────────────────────────────────────── */}
-              <div className="flex flex-wrap items-start gap-3">
+              <div className="flex flex-wrap items-start gap-4">
                 {/* Quiz selector */}
-                <div className="space-y-1.5 min-w-[260px]">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evaluaciones a medir</p>
-                  <div className="border rounded-xl p-3 bg-background space-y-1.5 max-h-48 overflow-y-auto">
-                    {quizzes.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic">No hay evaluaciones</p>
-                    ) : (
-                      <>
-                        <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
-                          <input
-                            type="checkbox"
-                            checked={selectedQuizIds.size === 0}
-                            onChange={() => setSelectedQuizIds(new Set())}
-                            className="accent-primary"
-                          />
-                          <span className="text-xs font-medium">Todas las evaluaciones</span>
-                        </label>
-                        <div className="border-t my-1" />
-                        {quizzes.filter(q => q.published).map(q => (
-                          <label key={q.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
-                            <input
-                              type="checkbox"
-                              checked={selectedQuizIds.has(q.id)}
-                              onChange={() => {
-                                setSelectedQuizIds(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(q.id)) next.delete(q.id); else next.add(q.id);
-                                  return next;
-                                });
-                              }}
-                              className="accent-primary"
-                            />
-                            <span className="text-xs truncate max-w-[200px]" title={q.title}>{q.title}</span>
-                          </label>
-                        ))}
-                      </>
+                <div className="space-y-1.5 w-[300px] shrink-0">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evaluaciones a medir</p>
+                    {selectedQuizIds.size > 0 && (
+                      <button onClick={() => setSelectedQuizIds(new Set())} className="text-[10px] text-primary hover:underline">
+                        Limpiar ({selectedQuizIds.size})
+                      </button>
                     )}
+                  </div>
+                  <div className="border rounded-xl bg-background overflow-hidden">
+                    {/* Search within quizzes */}
+                    <div className="p-2 border-b">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="Buscar evaluación..."
+                          value={quizSelectorSearch}
+                          onChange={e => setQuizSelectorSearch(e.target.value)}
+                          className="w-full pl-6 pr-2 py-1 text-xs bg-muted/40 rounded-md outline-none focus:ring-1 focus:ring-primary/40"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-2 space-y-0.5 max-h-52 overflow-y-auto">
+                      {quizzes.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic px-1">No hay evaluaciones</p>
+                      ) : (
+                        <>
+                          {/* "All" option */}
+                          {!quizSelectorSearch && (
+                            <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded-md px-2 py-1">
+                              <input
+                                type="checkbox"
+                                checked={selectedQuizIds.size === 0}
+                                onChange={() => setSelectedQuizIds(new Set())}
+                                className="accent-primary shrink-0"
+                              />
+                              <span className="text-xs font-semibold">Todas las evaluaciones</span>
+                            </label>
+                          )}
+                          {/* Grouped by product */}
+                          {products.map(prod => {
+                            const prodQuizzes = quizzes.filter(q =>
+                              q.productId === prod.id &&
+                              (!quizSelectorSearch || q.title.toLowerCase().includes(quizSelectorSearch.toLowerCase()))
+                            );
+                            if (prodQuizzes.length === 0) return null;
+                            return (
+                              <div key={prod.id}>
+                                {!quizSelectorSearch && <div className="border-t mt-1 mb-1" />}
+                                <div className="flex items-center gap-1.5 px-2 py-0.5">
+                                  <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: prod.color }} />
+                                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{prod.name}</span>
+                                </div>
+                                {prodQuizzes.map(q => (
+                                  <label key={q.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded-md px-2 py-1 ml-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedQuizIds.has(q.id)}
+                                      onChange={() => {
+                                        setSelectedQuizIds(prev => {
+                                          const next = new Set(prev);
+                                          if (next.has(q.id)) next.delete(q.id); else next.add(q.id);
+                                          return next;
+                                        });
+                                      }}
+                                      className="accent-primary shrink-0"
+                                    />
+                                    <span className="text-xs leading-tight" title={q.title}>{q.title}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            );
+                          })}
+                          {/* Quizzes without a recognized product */}
+                          {(() => {
+                            const orphans = quizzes.filter(q =>
+                              !products.some(p => p.id === q.productId) &&
+                              (!quizSelectorSearch || q.title.toLowerCase().includes(quizSelectorSearch.toLowerCase()))
+                            );
+                            if (orphans.length === 0) return null;
+                            return (
+                              <div>
+                                <div className="border-t mt-1 mb-1" />
+                                <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground px-2 py-0.5">Sin producto</p>
+                                {orphans.map(q => (
+                                  <label key={q.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded-md px-2 py-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedQuizIds.has(q.id)}
+                                      onChange={() => {
+                                        setSelectedQuizIds(prev => {
+                                          const next = new Set(prev);
+                                          if (next.has(q.id)) next.delete(q.id); else next.add(q.id);
+                                          return next;
+                                        });
+                                      }}
+                                      className="accent-primary shrink-0"
+                                    />
+                                    <span className="text-xs leading-tight">{q.title}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Other filters */}
-                <div className="flex flex-wrap gap-2 items-end flex-1">
-                  <FilterChip
-                    label="Producto" value={evalProductFilter} removable={false}
-                    options={[{ value: '', label: 'Todos' }, ...products.map(p => ({ value: p.id, label: p.name }))]}
-                    onChange={setEvalProductFilter}
-                  />
-                  <FilterChip
-                    label="Hub" value={evalHubFilter} removable={false}
-                    options={[{ value: '', label: 'Todos' }, ...evalHubs.map(h => ({ value: h, label: h }))]}
-                    onChange={setEvalHubFilter}
-                  />
-                  <FilterChip
-                    label="Cosecha" value={evalCosechaGranularity} removable={false}
-                    options={(Object.entries(GRANULARITY_LABELS) as [CosechaGranularity, string][]).map(([v, l]) => ({ value: v, label: l }))}
-                    onChange={v => setEvalCosechaGranularity(v as CosechaGranularity)}
-                  />
-                  <div className="relative flex-1 min-w-[180px]">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    <input
-                      type="text"
-                      placeholder="Buscar vendedor..."
-                      value={evalSearch}
-                      onChange={e => setEvalSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 h-8 text-sm border rounded-full bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                {/* Right-side filters */}
+                <div className="flex flex-col gap-3 flex-1 min-w-[240px]">
+                  {/* Row 1: product + hub + search */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <FilterChip
+                      label="Producto" value={evalProductFilter} removable={false}
+                      options={[{ value: '', label: 'Todos' }, ...products.map(p => ({ value: p.id, label: p.name }))]}
+                      onChange={v => { setEvalProductFilter(v); setSelectedQuizIds(new Set()); }}
                     />
+                    <FilterChip
+                      label="Hub" value={evalHubFilter} removable={false}
+                      options={[{ value: '', label: 'Todos' }, ...evalHubs.map(h => ({ value: h, label: h }))]}
+                      onChange={setEvalHubFilter}
+                    />
+                    <div className="relative flex-1 min-w-[160px]">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar vendedor..."
+                        value={evalSearch}
+                        onChange={e => setEvalSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 h-8 text-sm border rounded-full bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Row 2: cosecha filters */}
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <FilterChip
+                      label="Agrupar cosecha" value={evalCosechaGranularity} removable={false}
+                      options={(Object.entries(GRANULARITY_LABELS) as [CosechaGranularity, string][]).map(([v, l]) => ({ value: v, label: l }))}
+                      onChange={v => setEvalCosechaGranularity(v as CosechaGranularity)}
+                    />
+                    <div className="flex items-center gap-1.5 h-8 border rounded-full px-3 bg-background text-sm shadow-sm hover:border-primary/40 transition-colors">
+                      <span className="text-muted-foreground text-xs shrink-0 font-medium">Cosecha desde:</span>
+                      <input
+                        type="month"
+                        value={evalCosechaFrom}
+                        onChange={e => setEvalCosechaFrom(e.target.value)}
+                        className="bg-transparent border-none outline-none text-xs font-semibold cursor-pointer"
+                      />
+                      {evalCosechaFrom && (
+                        <button onClick={() => setEvalCosechaFrom('')} className="text-muted-foreground hover:text-foreground ml-0.5">
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 h-8 border rounded-full px-3 bg-background text-sm shadow-sm hover:border-primary/40 transition-colors">
+                      <span className="text-muted-foreground text-xs shrink-0 font-medium">hasta:</span>
+                      <input
+                        type="month"
+                        value={evalCosechaTo}
+                        onChange={e => setEvalCosechaTo(e.target.value)}
+                        className="bg-transparent border-none outline-none text-xs font-semibold cursor-pointer"
+                      />
+                      {evalCosechaTo && (
+                        <button onClick={() => setEvalCosechaTo('')} className="text-muted-foreground hover:text-foreground ml-0.5">
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

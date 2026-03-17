@@ -580,7 +580,7 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
             if (enr?.status === 'completed') {
               ids.add(a.id);
               markPromises.push(
-                markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+                markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
               );
             }
           });
@@ -596,7 +596,7 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
             if (a.type === 'results') {
               ids.add(a.id);
               markPromises.push(
-                markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+                markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
               );
             } else if (a.type === 'quiz' || a.type === 'challenge') {
               const assignedQuizId = a.config?.quizId;
@@ -606,7 +606,7 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
               if (hasAttempt) {
                 ids.add(a.id);
                 markPromises.push(
-                  markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+                  markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
                 );
               }
             }
@@ -619,7 +619,7 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
             if (a.type === 'badge' && !ids.has(a.id)) {
               ids.add(a.id);
               markPromises.push(
-                markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+                markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
               );
             }
           });
@@ -657,7 +657,7 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
     if (!journey) return;
     // In test mode, only update local state — don't pollute the admin's real progress in Firestore
     if (!isTestMode) {
-      await markJourneyStepComplete(userId, journey.id, productId, stepId);
+      await markJourneyStepComplete(userId, journey.id, productId, stepId, { userName: profile.nombre, userEmail: profile.email });
     }
     setCompletedIds(prev => { const n = new Set(prev); n.add(stepId); return n; });
     setXp(prev => prev + 25);

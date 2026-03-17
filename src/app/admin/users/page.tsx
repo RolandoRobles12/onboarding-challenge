@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useProducts } from '@/hooks/use-firestore';
-import { getAllUsers, updateUserProfile, addToWhitelist, getKioscos } from '@/lib/firestore-service';
+import { getAllUsers, updateUserProfile, addToWhitelist, getKioscos, getUserAllJourneyProgress, resetUserJourneyProgress } from '@/lib/firestore-service';
 import { Combobox } from '@/components/ui/combobox';
 import type { Kiosko } from '@/lib/types-scalable';
 import { toast } from '@/hooks/use-toast';
@@ -28,10 +28,10 @@ import {
 import {
   Users, Search, UserCog, Plus, Trash2,
   Loader2, RefreshCw, CheckCircle, UserX, UserCheck,
-  Upload, FileSpreadsheet, AlertCircle, ArrowRight, X, Mail,
+  Upload, FileSpreadsheet, AlertCircle, ArrowRight, X, Mail, RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UserProfile, UserRole } from '@/lib/types-scalable';
+import type { UserProfile, UserRole, UserJourneyProgress } from '@/lib/types-scalable';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -86,6 +86,9 @@ export default function UsersPage() {
     fechaIngreso: '',
   });
   const [saving, setSaving] = useState(false);
+  const [journeyProgress, setJourneyProgress] = useState<UserJourneyProgress[]>([]);
+  const [loadingJourney, setLoadingJourney] = useState(false);
+  const [resettingJourneyId, setResettingJourneyId] = useState<string | null>(null);
 
   // Bulk deactivate
   const [bulkDeactivateOpen, setBulkDeactivateOpen] = useState(false);
@@ -166,6 +169,25 @@ export default function UsersPage() {
       trainerId: user.trainerId || '',
       fechaIngreso: user.fechaIngreso || '',
     });
+    setJourneyProgress([]);
+    setLoadingJourney(true);
+    getUserAllJourneyProgress(user.uid)
+      .then(setJourneyProgress)
+      .finally(() => setLoadingJourney(false));
+  };
+
+  const handleResetJourney = async (journeyId: string) => {
+    if (!editingUser) return;
+    setResettingJourneyId(journeyId);
+    try {
+      await resetUserJourneyProgress(editingUser.uid, journeyId);
+      setJourneyProgress(prev => prev.filter(p => p.journeyId !== journeyId));
+      toast({ title: 'Journey reseteado', description: 'El progreso del journey fue eliminado. El usuario comenzará desde cero.' });
+    } catch {
+      toast({ title: 'Error', description: 'No se pudo resetear el journey.', variant: 'destructive' });
+    } finally {
+      setResettingJourneyId(null);
+    }
   };
 
   const handleSaveEdit = async () => {
@@ -678,7 +700,12 @@ export default function UsersPage() {
 
               <div className="space-y-1.5">
                 <Label>Producto asignado</Label>
-                <Select value={editForm.producto || '__none__'} onValueChange={v => setEditForm(f => ({ ...f, producto: v === '__none__' ? '' : v }))}>
+                <Select value={editForm.producto || '__none__'} onValueChange={v => {
+                  const newProducto = v === '__none__' ? '' : v;
+                  // Clear hub if it doesn't belong to the new product
+                  const stillValid = kioscos.some(k => k.active && k.productIds?.includes(newProducto) && k.name === editForm.assignedKiosko);
+                  setEditForm(f => ({ ...f, producto: newProducto, assignedKiosko: stillValid ? f.assignedKiosko : '' }));
+                }}>
                   <SelectTrigger><SelectValue placeholder="Sin producto" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin producto</SelectItem>
@@ -694,17 +721,23 @@ export default function UsersPage() {
                 </Select>
               </div>
 
-              <div className="space-y-1.5">
-                <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
-                <Combobox
-                  options={kioscos.filter(k => k.active).map(k => ({ value: k.name, label: k.name, description: k.location }))}
-                  value={editForm.assignedKiosko}
-                  onChange={v => setEditForm(f => ({ ...f, assignedKiosko: v }))}
-                  placeholder="Seleccionar kiosko…"
-                  searchPlaceholder="Buscar kiosko…"
-                  emptyLabel="No hay kioscos registrados"
-                />
-              </div>
+              {(() => {
+                const productKioscos = kioscos.filter(k => k.active && (editForm.producto ? k.productIds?.includes(editForm.producto) : false));
+                if (!editForm.producto || productKioscos.length === 0) return null;
+                return (
+                  <div className="space-y-1.5">
+                    <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                    <Combobox
+                      options={productKioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
+                      value={editForm.assignedKiosko}
+                      onChange={v => setEditForm(f => ({ ...f, assignedKiosko: v }))}
+                      placeholder="Seleccionar kiosko…"
+                      searchPlaceholder="Buscar kiosko…"
+                      emptyLabel="No hay kioscos para este producto"
+                    />
+                  </div>
+                );
+              })()}
 
               <div className="space-y-1.5">
                 <Label>Fecha de ingreso</Label>
@@ -732,6 +765,45 @@ export default function UsersPage() {
               </div>
             </div>
           </div>
+          {/* Journey progress reset */}
+          <div className="border-t pt-4 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <RotateCcw className="h-3.5 w-3.5" /> Progreso del Journey
+            </p>
+            {loadingJourney ? (
+              <p className="text-xs text-muted-foreground">Cargando...</p>
+            ) : journeyProgress.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">Sin progreso registrado.</p>
+            ) : (
+              <div className="space-y-2">
+                {journeyProgress.map(jp => (
+                  <div key={jp.id} className="flex items-center justify-between rounded-lg border px-3 py-2 bg-muted/30">
+                    <div>
+                      <p className="text-xs font-medium">Journey: <span className="font-mono text-[10px] text-muted-foreground">{jp.journeyId}</span></p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {jp.completedStepIds.length} pasos completados
+                        {jp.updatedAt && ` · actualizado ${new Date((jp.updatedAt as unknown as { seconds: number }).seconds * 1000).toLocaleDateString('es-MX')}`}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1 border-destructive/40 text-destructive hover:bg-destructive/5"
+                      disabled={resettingJourneyId === jp.journeyId}
+                      onClick={() => handleResetJourney(jp.journeyId)}
+                    >
+                      {resettingJourneyId === jp.journeyId
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <RotateCcw className="h-3 w-3" />}
+                      Resetear
+                    </Button>
+                  </div>
+                ))}
+                <p className="text-[10px] text-muted-foreground">Resetear elimina todo el progreso del journey. El usuario comenzará desde el paso 1.</p>
+              </div>
+            )}
+          </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
             <Button onClick={handleSaveEdit} disabled={saving}>
@@ -815,33 +887,24 @@ export default function UsersPage() {
                 onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Rol</Label>
-                <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
-                      <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-                <Combobox
-                  options={kioscos.filter(k => k.active).map(k => ({ value: k.name, label: k.name, description: k.location }))}
-                  value={inviteForm.assignedKiosko}
-                  onChange={v => setInviteForm(f => ({ ...f, assignedKiosko: v }))}
-                  placeholder="Seleccionar kiosko…"
-                  searchPlaceholder="Buscar kiosko…"
-                  emptyLabel="No hay kioscos registrados"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Rol</Label>
+              <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                    <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Producto asignado <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-              <Select value={inviteForm.producto || '__none__'} onValueChange={v => setInviteForm(f => ({ ...f, producto: v === '__none__' ? '' : v }))}>
+              <Select value={inviteForm.producto || '__none__'} onValueChange={v => {
+                const newProducto = v === '__none__' ? '' : v;
+                const stillValid = kioscos.some(k => k.active && k.productIds?.includes(newProducto) && k.name === inviteForm.assignedKiosko);
+                setInviteForm(f => ({ ...f, producto: newProducto, assignedKiosko: stillValid ? f.assignedKiosko : '' }));
+              }}>
                 <SelectTrigger><SelectValue placeholder="Sin producto" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Sin producto</SelectItem>
@@ -856,6 +919,23 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            {(() => {
+              const productKioscos = kioscos.filter(k => k.active && (inviteForm.producto ? k.productIds?.includes(inviteForm.producto) : false));
+              if (!inviteForm.producto || productKioscos.length === 0) return null;
+              return (
+                <div className="space-y-1.5">
+                  <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                  <Combobox
+                    options={productKioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
+                    value={inviteForm.assignedKiosko}
+                    onChange={v => setInviteForm(f => ({ ...f, assignedKiosko: v }))}
+                    placeholder="Seleccionar kiosko…"
+                    searchPlaceholder="Buscar kiosko…"
+                    emptyLabel="No hay kioscos para este producto"
+                  />
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancelar</Button>
