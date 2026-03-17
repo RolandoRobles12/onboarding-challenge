@@ -678,7 +678,12 @@ export default function UsersPage() {
 
               <div className="space-y-1.5">
                 <Label>Producto asignado</Label>
-                <Select value={editForm.producto || '__none__'} onValueChange={v => setEditForm(f => ({ ...f, producto: v === '__none__' ? '' : v }))}>
+                <Select value={editForm.producto || '__none__'} onValueChange={v => {
+                  const newProducto = v === '__none__' ? '' : v;
+                  // Clear hub if it doesn't belong to the new product
+                  const stillValid = kioscos.some(k => k.active && k.productIds?.includes(newProducto) && k.name === editForm.assignedKiosko);
+                  setEditForm(f => ({ ...f, producto: newProducto, assignedKiosko: stillValid ? f.assignedKiosko : '' }));
+                }}>
                   <SelectTrigger><SelectValue placeholder="Sin producto" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">Sin producto</SelectItem>
@@ -694,17 +699,23 @@ export default function UsersPage() {
                 </Select>
               </div>
 
-              <div className="space-y-1.5">
-                <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
-                <Combobox
-                  options={kioscos.filter(k => k.active).map(k => ({ value: k.name, label: k.name, description: k.location }))}
-                  value={editForm.assignedKiosko}
-                  onChange={v => setEditForm(f => ({ ...f, assignedKiosko: v }))}
-                  placeholder="Seleccionar kiosko…"
-                  searchPlaceholder="Buscar kiosko…"
-                  emptyLabel="No hay kioscos registrados"
-                />
-              </div>
+              {(() => {
+                const productKioscos = kioscos.filter(k => k.active && (editForm.producto ? k.productIds?.includes(editForm.producto) : false));
+                if (!editForm.producto || productKioscos.length === 0) return null;
+                return (
+                  <div className="space-y-1.5">
+                    <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                    <Combobox
+                      options={productKioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
+                      value={editForm.assignedKiosko}
+                      onChange={v => setEditForm(f => ({ ...f, assignedKiosko: v }))}
+                      placeholder="Seleccionar kiosko…"
+                      searchPlaceholder="Buscar kiosko…"
+                      emptyLabel="No hay kioscos para este producto"
+                    />
+                  </div>
+                );
+              })()}
 
               <div className="space-y-1.5">
                 <Label>Fecha de ingreso</Label>
@@ -815,33 +826,24 @@ export default function UsersPage() {
                 onChange={e => setInviteForm(f => ({ ...f, email: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Rol</Label>
-                <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
-                      <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-                <Combobox
-                  options={kioscos.filter(k => k.active).map(k => ({ value: k.name, label: k.name, description: k.location }))}
-                  value={inviteForm.assignedKiosko}
-                  onChange={v => setInviteForm(f => ({ ...f, assignedKiosko: v }))}
-                  placeholder="Seleccionar kiosko…"
-                  searchPlaceholder="Buscar kiosko…"
-                  emptyLabel="No hay kioscos registrados"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label>Rol</Label>
+              <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                    <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Producto asignado <span className="text-xs text-muted-foreground">(opcional)</span></Label>
-              <Select value={inviteForm.producto || '__none__'} onValueChange={v => setInviteForm(f => ({ ...f, producto: v === '__none__' ? '' : v }))}>
+              <Select value={inviteForm.producto || '__none__'} onValueChange={v => {
+                const newProducto = v === '__none__' ? '' : v;
+                const stillValid = kioscos.some(k => k.active && k.productIds?.includes(newProducto) && k.name === inviteForm.assignedKiosko);
+                setInviteForm(f => ({ ...f, producto: newProducto, assignedKiosko: stillValid ? f.assignedKiosko : '' }));
+              }}>
                 <SelectTrigger><SelectValue placeholder="Sin producto" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Sin producto</SelectItem>
@@ -856,6 +858,23 @@ export default function UsersPage() {
                 </SelectContent>
               </Select>
             </div>
+            {(() => {
+              const productKioscos = kioscos.filter(k => k.active && (inviteForm.producto ? k.productIds?.includes(inviteForm.producto) : false));
+              if (!inviteForm.producto || productKioscos.length === 0) return null;
+              return (
+                <div className="space-y-1.5">
+                  <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                  <Combobox
+                    options={productKioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
+                    value={inviteForm.assignedKiosko}
+                    onChange={v => setInviteForm(f => ({ ...f, assignedKiosko: v }))}
+                    placeholder="Seleccionar kiosko…"
+                    searchPlaceholder="Buscar kiosko…"
+                    emptyLabel="No hay kioscos para este producto"
+                  />
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancelar</Button>
