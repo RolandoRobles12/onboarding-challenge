@@ -600,9 +600,8 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
               );
             } else if (a.type === 'quiz' || a.type === 'challenge') {
               const assignedQuizId = a.config?.quizId;
-              const hasAttempt = assignedQuizId
-                ? completedAttempts.some(att => att.quizId === assignedQuizId)
-                : completedAttempts.length > 0;
+              const hasAttempt = !!assignedQuizId &&
+                completedAttempts.some(att => att.quizId === assignedQuizId);
               if (hasAttempt) {
                 ids.add(a.id);
                 markPromises.push(
