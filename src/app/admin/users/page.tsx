@@ -82,6 +82,7 @@ export default function UsersPage() {
     rol: 'seller' as UserRole,
     producto: '',
     assignedKiosko: '',
+    hub: '',
     trainerId: '',
     fechaIngreso: '',
   });
@@ -166,6 +167,7 @@ export default function UsersPage() {
       rol: user.rol,
       producto: user.producto || '',
       assignedKiosko: user.assignedKiosko || '',
+      hub: user.onboardingData?.['hub'] || '',
       trainerId: user.trainerId || '',
       fechaIngreso: user.fechaIngreso || '',
     });
@@ -194,6 +196,11 @@ export default function UsersPage() {
     if (!editingUser) return;
     setSaving(true);
     try {
+      const updatedOnboardingData = {
+        ...(editingUser.onboardingData || {}),
+        ...(editForm.hub ? { hub: editForm.hub } : {}),
+      };
+      if (!editForm.hub) delete updatedOnboardingData['hub'];
       const updates: Partial<UserProfile> = {
         nombre: editForm.nombre || editingUser.nombre,
         rol: editForm.rol,
@@ -201,6 +208,7 @@ export default function UsersPage() {
         assignedKiosko: editForm.assignedKiosko || undefined,
         trainerId: editForm.trainerId || undefined,
         fechaIngreso: editForm.fechaIngreso || undefined,
+        onboardingData: updatedOnboardingData,
       };
       await updateUserProfile(editingUser.uid, updates);
       setUsers(prev => prev.map(u => u.uid === editingUser.uid ? { ...u, ...updates } : u));
@@ -430,7 +438,8 @@ export default function UsersPage() {
             <p className="text-xs text-muted-foreground truncate">{user.email}</p>
             <div className="flex gap-3 mt-0.5 text-xs text-muted-foreground flex-wrap">
               {user.producto && <span>Producto: {getProductName(user.producto)}</span>}
-              {user.assignedKiosko && <span>Hub: {user.assignedKiosko}</span>}
+              {user.onboardingData?.['hub'] && <span>Hub: {user.onboardingData['hub']}</span>}
+              {user.assignedKiosko && <span>Kiosko: {user.assignedKiosko}</span>}
               {user.trainerId && <span>Capacitador: {getTrainerName(user.trainerId)}</span>}
               {user.fechaIngreso && <span>Ingreso: {user.fechaIngreso}</span>}
             </div>
@@ -623,7 +632,7 @@ export default function UsersPage() {
                       <th className="px-3 py-2 text-left font-semibold">Email</th>
                       <th className="px-3 py-2 text-left font-semibold">Nombre</th>
                       <th className="px-3 py-2 text-left font-semibold">Rol</th>
-                      <th className="px-3 py-2 text-left font-semibold">Hub</th>
+                      <th className="px-3 py-2 text-left font-semibold">Kiosko</th>
                       <th className="px-3 py-2 text-left font-semibold">Producto</th>
                       <th className="px-3 py-2 text-left font-semibold">Ingreso</th>
                     </tr>
@@ -721,12 +730,21 @@ export default function UsersPage() {
                 </Select>
               </div>
 
+              <div className="space-y-1.5">
+                <Label>Hub <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                <Input
+                  value={editForm.hub}
+                  onChange={e => setEditForm(f => ({ ...f, hub: e.target.value }))}
+                  placeholder="Ej: Hub CDMX Norte"
+                />
+              </div>
+
               {(() => {
                 const productKioscos = kioscos.filter(k => k.active && (editForm.producto ? k.productIds?.includes(editForm.producto) : false));
                 if (!editForm.producto || productKioscos.length === 0) return null;
                 return (
                   <div className="space-y-1.5">
-                    <Label>Hub / Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
+                    <Label>Kiosko <span className="text-muted-foreground font-normal text-xs">(opcional)</span></Label>
                     <Combobox
                       options={productKioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
                       value={editForm.assignedKiosko}
@@ -924,7 +942,7 @@ export default function UsersPage() {
               if (!inviteForm.producto || productKioscos.length === 0) return null;
               return (
                 <div className="space-y-1.5">
-                  <Label>Hub / Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+                  <Label>Kiosko <span className="text-xs text-muted-foreground">(opcional)</span></Label>
                   <Combobox
                     options={productKioscos.map(k => ({ value: k.name, label: k.name, description: k.location }))}
                     value={inviteForm.assignedKiosko}
