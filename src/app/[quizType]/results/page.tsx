@@ -158,7 +158,13 @@ function ResultsContent() {
 
           const markPromises: Promise<void>[] = [];
           allSteps.forEach(step => {
-            if (step.type === 'quiz' || step.type === 'challenge' || step.type === 'results') {
+            if (step.type === 'results') {
+              // Mark results-summary steps whenever a quiz is completed
+              markPromises.push(
+                markJourneyStepComplete(userId, journey.id, productId, step.id).catch(console.error)
+              );
+            } else if ((step.type === 'quiz' || step.type === 'challenge') && quizId && step.config?.quizId === quizId) {
+              // Only mark the specific step whose assigned quizId matches the completed quiz
               markPromises.push(
                 markJourneyStepComplete(userId, journey.id, productId, step.id).catch(console.error)
               );
