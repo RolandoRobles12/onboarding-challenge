@@ -87,6 +87,7 @@ function QuizComponent() {
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
   const [quizId, setQuizId] = useState('');
   const [loadingQuiz, setLoadingQuiz] = useState(true);
+  const [quizNotAvailable, setQuizNotAvailable] = useState(false);
   const [assessmentCfg, setAssessmentCfg] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT_CONFIG);
   // Countdown timer (seconds remaining, only when timeLimit > 0)
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
@@ -140,8 +141,18 @@ function QuizComponent() {
         }
         // Allow caller to specify a particular quiz via ?quizId=...
         const requestedQuizId = searchParams.get('quizId');
-        const q = (requestedQuizId && firestoreQuizzes.find(q => q.id === requestedQuizId))
-          || firestoreQuizzes[0];
+        let q: typeof firestoreQuizzes[0] | undefined;
+        if (requestedQuizId) {
+          q = firestoreQuizzes.find(quiz => quiz.id === requestedQuizId);
+          if (!q) {
+            // The specific quiz assigned in the journey is not published yet
+            setQuizNotAvailable(true);
+            setLoadingQuiz(false);
+            return;
+          }
+        } else {
+          q = firestoreQuizzes[0];
+        }
         setQuizId(q.id);
 
         // Cargar todas las preguntas de todas las misiones
@@ -522,6 +533,22 @@ function QuizComponent() {
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (quizNotAvailable) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-destructive">Evaluación no disponible</CardTitle>
+          <CardDescription>
+            Esta evaluación aún no está lista. Por favor contacta a tu Hub Manager o capacitador para que la habilite.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => router.push('/')}>Volver al inicio</Button>
         </CardContent>
       </Card>
     );

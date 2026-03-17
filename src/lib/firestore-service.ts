@@ -667,6 +667,26 @@ export async function getQuizLeaderboard(
   }
 }
 
+/** Returns all completed QuizAttempts for the org, optionally filtered by productId. */
+export async function getAllQuizAttempts(
+  productId?: string,
+  orgId: string = DEFAULT_ORG_ID
+): Promise<QuizAttempt[]> {
+  try {
+    const constraints: QueryConstraint[] = [
+      where('organizationId', '==', orgId),
+      where('status', '==', 'completed'),
+    ];
+    if (productId) constraints.push(where('productId', '==', productId));
+    const q = query(getCollectionRef(COLLECTIONS.ATTEMPTS), ...constraints);
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as QuizAttempt));
+  } catch (error) {
+    console.error('Error getting all quiz attempts:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // LEADERBOARD
 // ============================================================================

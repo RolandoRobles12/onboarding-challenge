@@ -7,11 +7,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   BarChart3, TrendingUp, TrendingDown, Users, Target, Clock, Zap, Radio,
   BookOpen, X, Plus, Timer, AlertTriangle, CheckCircle2, Circle,
-  ChevronDown, ChevronRight, Search, ArrowUpDown, Download,
+  ChevronDown, ChevronRight, Search, ArrowUpDown, Download, HelpCircle,
 } from 'lucide-react';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
-import { getDailyPulses, getPulseAttemptsByDateRange, getQuestions, getAllUsers } from '@/lib/firestore-service';
-import type { PulseAttempt, DailyPulse, Question, KnowledgeModule, UserProfile } from '@/lib/types-scalable';
+import { getDailyPulses, getPulseAttemptsByDateRange, getQuestions, getAllUsers, getAllQuizAttempts } from '@/lib/firestore-service';
+import type { PulseAttempt, DailyPulse, Question, KnowledgeModule, UserProfile, QuizAttempt } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { cn } from '@/lib/utils';
 
@@ -551,6 +551,106 @@ function buildSegmentMetrics(
     .sort((a, b) => b.avgPct - a.avgPct);
 }
 
+// ── Evaluaciones (QuizAttempt) metrics ─────────────────────────────────────
+
+interface EvalUserScore {
+  userId: string;
+  userName: string;
+  hub: string;
+  cosecha: string | undefined;
+  vertical: string;
+  attempts: number;
+  avgScore: number;
+  lastAttemptDate: string | null;
+}
+
+function buildEvalUserScores(
+  attempts: QuizAttempt[],
+  userMap: Map<string, UserProfile>,
+  selectedQuizIds: Set<string>,
+): EvalUserScore[] {
+  const filtered = selectedQuizIds.size > 0
+    ? attempts.filter(a => selectedQuizIds.has(a.quizId))
+    : attempts;
+
+  const acc: Record<string, { userName: string; hub: string; cosecha: string | undefined; vertical: string; totalPct: number; count: number; lastDate: string | null }> = {};
+
+  for (const a of filtered) {
+    const u = userMap.get(a.userId);
+    if (!acc[a.userId]) {
+      acc[a.userId] = {
+        userName: u?.nombre || a.userId,
+        hub: a.assignedKiosko || u?.assignedKiosko || '-',
+        cosecha: u?.fechaIngreso,
+        vertical: u?.onboardingData?.['vertical'] || '-',
+        totalPct: 0, count: 0, lastDate: null,
+      };
+    }
+    acc[a.userId].totalPct += a.percentage;
+    acc[a.userId].count++;
+    const ts = a.completedAt as unknown as { toDate?: () => Date; seconds?: number } | undefined;
+    const dateStr = ts
+      ? dateToStr(ts.toDate ? ts.toDate() : new Date((ts.seconds ?? 0) * 1000))
+      : null;
+    if (dateStr && (!acc[a.userId].lastDate || dateStr > acc[a.userId].lastDate!)) {
+      acc[a.userId].lastDate = dateStr;
+    }
+  }
+
+  return Object.entries(acc).map(([userId, d]) => ({
+    userId,
+    userName: d.userName,
+    hub: d.hub,
+    cosecha: d.cosecha,
+    vertical: d.vertical,
+    attempts: d.count,
+    avgScore: d.count > 0 ? Math.round(d.totalPct / d.count) : 0,
+    lastAttemptDate: d.lastDate,
+  })).sort((a, b) => a.avgScore - b.avgScore);
+}
+
+function buildEvalCosechaMetrics(
+  scores: EvalUserScore[],
+  granularity: CosechaGranularity,
+): { key: string; avgScore: number; count: number }[] {
+  const map: Record<string, { total: number; count: number }> = {};
+  for (const u of scores) {
+    const key = getCosechaGroup(u.cosecha, granularity);
+    if (!map[key]) map[key] = { total: 0, count: 0 };
+    map[key].total += u.avgScore;
+    map[key].count++;
+  }
+  return Object.entries(map)
+    .map(([key, { total, count }]) => ({ key, avgScore: Math.round(total / count), count }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function buildEvalProductMetrics(
+  attempts: QuizAttempt[],
+  selectedQuizIds: Set<string>,
+  productList: { id: string; name: string; color: string }[],
+): { productId: string; productName: string; color: string; avgScore: number; count: number }[] {
+  const filtered = selectedQuizIds.size > 0
+    ? attempts.filter(a => selectedQuizIds.has(a.quizId))
+    : attempts;
+  const map: Record<string, { total: number; count: number }> = {};
+  for (const a of filtered) {
+    if (!map[a.productId]) map[a.productId] = { total: 0, count: 0 };
+    map[a.productId].total += a.percentage;
+    map[a.productId].count++;
+  }
+  return Object.entries(map).map(([productId, { total, count }]) => {
+    const prod = productList.find(p => p.id === productId);
+    return {
+      productId,
+      productName: prod?.name ?? productId,
+      color: prod?.color ?? '#94a3b8',
+      avgScore: count > 0 ? Math.round(total / count) : 0,
+      count,
+    };
+  }).sort((a, b) => a.avgScore - b.avgScore);
+}
+
 // ── Components ─────────────────────────────────────────────────────────────
 
 function StatCard({ title, value, description, icon: Icon, color, delta }: {
@@ -634,6 +734,16 @@ export default function AnalyticsPage() {
 
   const [activeTab, setActiveTab] = useState('platform');
   const [pulseSubTab, setPulseSubTab] = useState('resumen');
+
+  // ── Evaluaciones tab state ─────────────────────────────────────────────
+  const [loadingEval, setLoadingEval] = useState(false);
+  const [evalAttempts, setEvalAttempts] = useState<QuizAttempt[]>([]);
+  const [evalUsers, setEvalUsers] = useState<UserProfile[]>([]);
+  const [selectedQuizIds, setSelectedQuizIds] = useState<Set<string>>(new Set());
+  const [evalCosechaGranularity, setEvalCosechaGranularity] = useState<CosechaGranularity>('mes');
+  const [evalSearch, setEvalSearch] = useState('');
+  const [evalHubFilter, setEvalHubFilter] = useState('');
+  const [evalProductFilter, setEvalProductFilter] = useState('');
   const [loadingPulse, setLoadingPulse] = useState(false);
   const [pulseAttempts, setPulseAttempts] = useState<PulseAttempt[]>([]);
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
@@ -736,6 +846,19 @@ export default function AnalyticsPage() {
       setPrevPulseAttempts(prevAttempts);
     }).finally(() => setLoadingPulse(false));
   }, [activeTab, periodDays]);
+
+  // ── Load evaluaciones data ────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeTab !== 'evaluaciones') return;
+    setLoadingEval(true);
+    Promise.all([
+      getAllQuizAttempts(),
+      getAllUsers(),
+    ]).then(([attempts, users]) => {
+      setEvalAttempts(attempts);
+      setEvalUsers(users.filter(u => u.active !== false));
+    }).finally(() => setLoadingEval(false));
+  }, [activeTab]);
 
   const totalUsers = allUsers.length;
 
@@ -918,6 +1041,62 @@ export default function AnalyticsPage() {
     });
   }
 
+  // ── Evaluaciones derived metrics ─────────────────────────────────────────
+
+  const evalUserMap = useMemo(() => new Map(evalUsers.map(u => [u.uid, u])), [evalUsers]);
+
+  const evalFilteredAttempts = useMemo(() => {
+    let list = evalAttempts;
+    if (evalProductFilter) list = list.filter(a => a.productId === evalProductFilter);
+    return list;
+  }, [evalAttempts, evalProductFilter]);
+
+  const evalUserScores = useMemo(
+    () => buildEvalUserScores(evalFilteredAttempts, evalUserMap, selectedQuizIds),
+    [evalFilteredAttempts, evalUserMap, selectedQuizIds],
+  );
+
+  const evalFilteredScores = useMemo(() => {
+    let list = evalUserScores;
+    if (evalHubFilter) list = list.filter(s => s.hub === evalHubFilter);
+    if (evalSearch) {
+      const q = evalSearch.toLowerCase();
+      list = list.filter(s => s.userName.toLowerCase().includes(q) || s.hub.toLowerCase().includes(q));
+    }
+    return list;
+  }, [evalUserScores, evalHubFilter, evalSearch]);
+
+  const evalCosechaMetrics = useMemo(
+    () => buildEvalCosechaMetrics(evalFilteredScores, evalCosechaGranularity),
+    [evalFilteredScores, evalCosechaGranularity],
+  );
+
+  const evalProductMetrics = useMemo(
+    () => buildEvalProductMetrics(evalFilteredAttempts, selectedQuizIds, products),
+    [evalFilteredAttempts, selectedQuizIds, products],
+  );
+
+  const evalHubs = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of evalUserScores) if (s.hub && s.hub !== '-') set.add(s.hub);
+    return Array.from(set).sort();
+  }, [evalUserScores]);
+
+  const evalOverallAvg = evalFilteredScores.length > 0
+    ? Math.round(evalFilteredScores.reduce((s, u) => s + u.avgScore, 0) / evalFilteredScores.length)
+    : 0;
+
+  const evalTotalAttempts = useMemo(() => {
+    const filtered = selectedQuizIds.size > 0
+      ? evalFilteredAttempts.filter(a => selectedQuizIds.has(a.quizId))
+      : evalFilteredAttempts;
+    return filtered.length;
+  }, [evalFilteredAttempts, selectedQuizIds]);
+
+  const evalParticipation = evalUsers.length > 0
+    ? Math.round((evalFilteredScores.length / evalUsers.length) * 100)
+    : 0;
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -931,6 +1110,7 @@ export default function AnalyticsPage() {
         <TabsList>
           <TabsTrigger value="platform"><BarChart3 className="h-4 w-4 mr-1.5" />Plataforma</TabsTrigger>
           <TabsTrigger value="pulse"><Radio className="h-4 w-4 mr-1.5" />Pulso de Conocimiento</TabsTrigger>
+          <TabsTrigger value="evaluaciones"><HelpCircle className="h-4 w-4 mr-1.5" />Evaluaciones</TabsTrigger>
         </TabsList>
 
         {/* ── PLATFORM TAB ────────────────────────────────────────────────── */}
@@ -1727,6 +1907,271 @@ export default function AnalyticsPage() {
               )}
             </TabsContent>
           </Tabs>
+        </TabsContent>
+
+        {/* ── EVALUACIONES TAB ─────────────────────────────────────────── */}
+        <TabsContent value="evaluaciones" className="mt-4 space-y-6">
+          {loadingEval ? (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}</div>
+              <Skeleton className="h-40" /><Skeleton className="h-80" />
+            </div>
+          ) : (
+            <>
+              {/* ── Filter bar ─────────────────────────────────────────────── */}
+              <div className="flex flex-wrap items-start gap-3">
+                {/* Quiz selector */}
+                <div className="space-y-1.5 min-w-[260px]">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evaluaciones a medir</p>
+                  <div className="border rounded-xl p-3 bg-background space-y-1.5 max-h-48 overflow-y-auto">
+                    {quizzes.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No hay evaluaciones</p>
+                    ) : (
+                      <>
+                        <label className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={selectedQuizIds.size === 0}
+                            onChange={() => setSelectedQuizIds(new Set())}
+                            className="accent-primary"
+                          />
+                          <span className="text-xs font-medium">Todas las evaluaciones</span>
+                        </label>
+                        <div className="border-t my-1" />
+                        {quizzes.filter(q => q.published).map(q => (
+                          <label key={q.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={selectedQuizIds.has(q.id)}
+                              onChange={() => {
+                                setSelectedQuizIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(q.id)) next.delete(q.id); else next.add(q.id);
+                                  return next;
+                                });
+                              }}
+                              className="accent-primary"
+                            />
+                            <span className="text-xs truncate max-w-[200px]" title={q.title}>{q.title}</span>
+                          </label>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Other filters */}
+                <div className="flex flex-wrap gap-2 items-end flex-1">
+                  <FilterChip
+                    label="Producto" value={evalProductFilter} removable={false}
+                    options={[{ value: '', label: 'Todos' }, ...products.map(p => ({ value: p.id, label: p.name }))]}
+                    onChange={setEvalProductFilter}
+                  />
+                  <FilterChip
+                    label="Hub" value={evalHubFilter} removable={false}
+                    options={[{ value: '', label: 'Todos' }, ...evalHubs.map(h => ({ value: h, label: h }))]}
+                    onChange={setEvalHubFilter}
+                  />
+                  <FilterChip
+                    label="Cosecha" value={evalCosechaGranularity} removable={false}
+                    options={(Object.entries(GRANULARITY_LABELS) as [CosechaGranularity, string][]).map(([v, l]) => ({ value: v, label: l }))}
+                    onChange={v => setEvalCosechaGranularity(v as CosechaGranularity)}
+                  />
+                  <div className="relative flex-1 min-w-[180px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Buscar vendedor..."
+                      value={evalSearch}
+                      onChange={e => setEvalSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 h-8 text-sm border rounded-full bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* ── KPIs ─────────────────────────────────────────────────────── */}
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <StatCard
+                  title="Score promedio"
+                  value={`${evalOverallAvg}%`}
+                  description="Promedio de todas las evaluaciones seleccionadas"
+                  icon={Target}
+                  color={evalOverallAvg >= 70 ? 'text-green-500' : evalOverallAvg >= 50 ? 'text-orange-500' : 'text-red-500'}
+                />
+                <StatCard
+                  title="Intentos totales"
+                  value={evalTotalAttempts}
+                  description="Evaluaciones completadas"
+                  icon={CheckCircle2}
+                  color="text-blue-500"
+                />
+                <StatCard
+                  title="Vendedores evaluados"
+                  value={evalFilteredScores.length}
+                  description={`de ${evalUsers.length} usuarios activos`}
+                  icon={Users}
+                  color="text-purple-500"
+                />
+                <StatCard
+                  title="Participación"
+                  value={`${evalParticipation}%`}
+                  description="Vendedores que completaron al menos 1 evaluación"
+                  icon={TrendingUp}
+                  color={evalParticipation >= 70 ? 'text-green-500' : evalParticipation >= 40 ? 'text-orange-500' : 'text-red-500'}
+                />
+              </div>
+
+              <div className="grid gap-6 lg:grid-cols-2">
+                {/* ── Score por cosecha ──────────────────────────────────────── */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" />Score por Cosecha</CardTitle>
+                    <CardDescription>Score promedio agrupado por fecha de ingreso</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {evalCosechaMetrics.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-8">Sin datos para mostrar</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {evalCosechaMetrics.map(cm => (
+                          <div key={cm.key} className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-xs">{cm.key}</span>
+                                <span className="text-[10px] text-muted-foreground">({cm.count} vendedores)</span>
+                              </div>
+                              <span className={cn('text-sm font-bold', pctColor(cm.avgScore))}>{cm.avgScore}%</span>
+                            </div>
+                            <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                              <div className={cn('h-full rounded-full transition-all', barColor(cm.avgScore))} style={{ width: `${cm.avgScore}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* ── Score por producto ─────────────────────────────────────── */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Target className="h-4 w-4" />Score por Producto</CardTitle>
+                    <CardDescription>Score promedio en evaluaciones de cada producto</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {evalProductMetrics.length === 0 ? (
+                      <p className="text-sm text-muted-foreground text-center py-8">Sin datos para mostrar</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {evalProductMetrics.map(pm => (
+                          <div key={pm.productId} className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <div className="flex items-center gap-2">
+                                <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                                <span className="font-medium">{pm.productName}</span>
+                                <span className="text-[10px] text-muted-foreground">({pm.count} intentos)</span>
+                              </div>
+                              <span className={cn('text-sm font-bold', pctColor(pm.avgScore))}>{pm.avgScore}%</span>
+                            </div>
+                            <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                              <div className={cn('h-full rounded-full transition-all', barColor(pm.avgScore))} style={{ width: `${pm.avgScore}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* ── Score por vendedor ─────────────────────────────────────────── */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2"><Users className="h-4 w-4" />Score por Vendedor</CardTitle>
+                    <CardDescription>Promedio de evaluaciones completadas · ordenado de menor a mayor score</CardDescription>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const headers = ['Vendedor', 'Hub', 'Vertical', 'Cosecha', 'Score promedio (%)', 'Intentos', 'Último intento'];
+                      const escape = (v: string | number) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+                      const lines = evalFilteredScores.map(s => [
+                        s.userName, s.hub, s.vertical, s.cosecha ?? '', s.avgScore, s.attempts, s.lastAttemptDate ?? '',
+                      ].map(escape).join(','));
+                      const csv = '\uFEFF' + [headers.join(','), ...lines].join('\r\n');
+                      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = `evaluaciones-${dateToStr(new Date())}.csv`; a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border rounded-lg px-3 py-1.5 transition-colors"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Exportar CSV
+                  </button>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {evalFilteredScores.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-10">
+                      {evalAttempts.length === 0
+                        ? 'No hay evaluaciones completadas aún.'
+                        : 'No hay resultados con los filtros aplicados.'}
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b bg-muted/40">
+                            <th className="text-left px-4 py-2.5 font-medium text-xs text-muted-foreground">Vendedor</th>
+                            <th className="text-left px-3 py-2.5 font-medium text-xs text-muted-foreground">Hub</th>
+                            <th className="text-left px-3 py-2.5 font-medium text-xs text-muted-foreground">Cosecha</th>
+                            <th className="text-right px-3 py-2.5 font-medium text-xs text-muted-foreground">Score</th>
+                            <th className="text-right px-3 py-2.5 font-medium text-xs text-muted-foreground">Intentos</th>
+                            <th className="text-right px-4 py-2.5 font-medium text-xs text-muted-foreground">Último intento</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {evalFilteredScores.map((s, i) => (
+                            <tr key={s.userId} className={cn('border-b last:border-0 hover:bg-muted/30 transition-colors', i % 2 === 0 ? 'bg-background' : 'bg-muted/10')}>
+                              <td className="px-4 py-2.5">
+                                <div className="font-medium leading-tight">{s.userName}</div>
+                                {s.vertical !== '-' && <div className="text-[10px] text-muted-foreground">{s.vertical}</div>}
+                              </td>
+                              <td className="px-3 py-2.5 text-xs text-muted-foreground">{s.hub}</td>
+                              <td className="px-3 py-2.5 text-xs text-muted-foreground">{s.cosecha ? getCosechaGroup(s.cosecha, evalCosechaGranularity) : '—'}</td>
+                              <td className="px-3 py-2.5 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                                    <div className={cn('h-full rounded-full', barColor(s.avgScore))} style={{ width: `${s.avgScore}%` }} />
+                                  </div>
+                                  <span className={cn('font-bold text-sm w-10 text-right tabular-nums', pctColor(s.avgScore))}>{s.avgScore}%</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-xs text-muted-foreground tabular-nums">{s.attempts}</td>
+                              <td className="px-4 py-2.5 text-right text-xs text-muted-foreground">{s.lastAttemptDate ?? '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        {evalFilteredScores.length > 0 && (
+                          <tfoot>
+                            <tr className="border-t bg-muted/40">
+                              <td className="px-4 py-2 text-xs font-semibold" colSpan={3}>Promedio general</td>
+                              <td className="px-3 py-2 text-right">
+                                <span className={cn('font-bold text-sm tabular-nums', pctColor(evalOverallAvg))}>{evalOverallAvg}%</span>
+                              </td>
+                              <td className="px-3 py-2 text-right text-xs font-semibold tabular-nums">{evalTotalAttempts}</td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>

@@ -586,15 +586,29 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
           });
         }
 
-        // Auto-mark quiz/challenge/results steps if the user has a completed attempt for this product
-        const hasCompletedAttempt = (attempts as QuizAttempt[]).some(a => a.productId === productId);
-        if (hasCompletedAttempt) {
+        // Auto-mark quiz/challenge/results steps based on completed attempts
+        // For quiz/challenge steps: only mark complete if the specific assigned quiz was attempted
+        // For results steps: mark complete if any attempt exists for the product
+        const completedAttempts = (attempts as QuizAttempt[]).filter(a => a.productId === productId);
+        if (completedAttempts.length > 0) {
           allActions.forEach(a => {
-            if ((a.type === 'quiz' || a.type === 'challenge' || a.type === 'results') && !ids.has(a.id)) {
+            if (ids.has(a.id)) return;
+            if (a.type === 'results') {
               ids.add(a.id);
               markPromises.push(
                 markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
               );
+            } else if (a.type === 'quiz' || a.type === 'challenge') {
+              const assignedQuizId = a.config?.quizId;
+              const hasAttempt = assignedQuizId
+                ? completedAttempts.some(att => att.quizId === assignedQuizId)
+                : completedAttempts.length > 0;
+              if (hasAttempt) {
+                ids.add(a.id);
+                markPromises.push(
+                  markJourneyStepComplete(userId, foundJourney.id, productId, a.id).catch(console.error)
+                );
+              }
             }
           });
         }
