@@ -539,6 +539,7 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
       if (foundJourney && !isTestMode) {
         // In test mode we start with a clean slate so admins can test the full flow
         const prog = await getUserJourneyProgress(userId, foundJourney.id).catch(() => null);
+        console.debug('[Journey] prog from Firestore:', prog);
         (prog?.completedStepIds ?? []).forEach((id: string) => ids.add(id));
       }
 
@@ -546,10 +547,14 @@ function JourneyDashboard({ userId, profile, testStageId, isTestMode, onStagesLo
         ? (foundJourney.stages?.length ? foundJourney.stages.flatMap(s => s.actions ?? []) : foundJourney.steps ?? [])
         : [];
 
+      console.debug('[Journey] allActions types:', allActions.map(a => ({ id: a.id, type: a.type, title: a.title })));
+
       // Auto-mark info_form if onboarding done (skip in test mode so admins can test the form flow)
       if (!isTestMode) {
         allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
       }
+
+      console.debug('[Journey] ids after auto-marks:', [...ids]);
 
       // Fetch course data for all course steps (for module breakdown display)
       const courseStepIds = allActions
