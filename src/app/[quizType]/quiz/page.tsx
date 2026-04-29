@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getQuizzes, getQuestionsByIds } from '@/lib/firestore-service';
+import { getQuizzes, getQuiz, getQuestionsByIds } from '@/lib/firestore-service';
 import type { AssessmentConfig } from '@/lib/types-scalable';
 import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
 
@@ -134,23 +134,24 @@ function QuizComponent() {
 
     async function loadQuiz() {
       try {
-        const firestoreQuizzes = await getQuizzes(quizType, true);
-        if (!firestoreQuizzes.length) {
-          setLoadingQuiz(false);
-          return;
-        }
         // Allow caller to specify a particular quiz via ?quizId=...
         const requestedQuizId = searchParams.get('quizId');
-        let q: typeof firestoreQuizzes[0] | undefined;
+        let q;
         if (requestedQuizId) {
-          q = firestoreQuizzes.find(quiz => quiz.id === requestedQuizId);
+          // Fetch by ID directly — bypasses the published/productId filter so
+          // journey-assigned quizzes always load even if not yet "published"
+          q = await getQuiz(requestedQuizId);
           if (!q) {
-            // The specific quiz assigned in the journey is not published yet
             setQuizNotAvailable(true);
             setLoadingQuiz(false);
             return;
           }
         } else {
+          const firestoreQuizzes = await getQuizzes(quizType, true);
+          if (!firestoreQuizzes.length) {
+            setLoadingQuiz(false);
+            return;
+          }
           q = firestoreQuizzes[0];
         }
         setQuizId(q.id);
