@@ -57,6 +57,7 @@ function ResultsContent() {
   const startTimeStr = searchParams.get('startTime');
   const quizId = searchParams.get('quizId') || '';
   const showFeedback = searchParams.get('showFeedback') || 'after_attempt';
+  const returnTo = searchParams.get('returnTo') || '/';
 
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [animationReady, setAnimationReady] = useState(false);
@@ -124,7 +125,7 @@ function ResultsContent() {
           // 1. Save quiz attempt to Firestore
           if (quizId) {
             await createQuizAttempt({
-              organizationId: 'default',
+              organizationId: 'aviva-credito',
               userId,
               quizId,
               productId,
@@ -352,7 +353,7 @@ function ResultsContent() {
               transition={{ delay: 1.1 }}
             >
               <Button asChild size="lg" className="w-full rounded-xl shadow-md font-semibold">
-                <Link href="/">Finalizar y volver al inicio</Link>
+                <Link href={returnTo}>Finalizar y volver al inicio</Link>
               </Button>
             </motion.div>
           </CardContent>

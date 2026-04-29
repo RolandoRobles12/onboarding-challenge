@@ -336,19 +336,20 @@ function ActionCard({
                 <SelectValue placeholder="Selecciona un curso..." />
               </SelectTrigger>
               <SelectContent>
-                {courses.filter(c => c.status === 'published').length === 0 ? (
-                  <SelectItem value="none" disabled>No hay cursos publicados</SelectItem>
+                {courses.length === 0 ? (
+                  <SelectItem value="none" disabled>No hay cursos disponibles</SelectItem>
                 ) : (
-                  courses
-                    .filter(c => c.status === 'published')
-                    .map(c => (
-                      <SelectItem key={c.id} value={c.id}>
-                        <span className="flex items-center gap-2">
-                          <BookOpen className="h-3 w-3 text-emerald-600" />
-                          {c.title}
-                        </span>
-                      </SelectItem>
-                    ))
+                  courses.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <span className="flex items-center gap-2">
+                        <BookOpen className="h-3 w-3 text-emerald-600" />
+                        {c.title}
+                        {c.status !== 'published' && (
+                          <span className="text-[10px] text-muted-foreground">({c.status})</span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))
                 )}
               </SelectContent>
             </Select>
