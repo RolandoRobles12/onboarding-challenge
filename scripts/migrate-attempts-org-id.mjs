@@ -22,7 +22,7 @@ import { resolve } from 'path';
 
 // ─── Configuración ────────────────────────────────────────────────────────────
 
-const PROJECT_ID   = 'aviva-lms';       // <-- cambia si tu project ID es diferente
+const PROJECT_ID   = 'aviva-onb-app';
 const FROM_ORG     = 'default';
 const TO_ORG       = 'aviva-credito';
 const COLLECTION   = 'attempts';
