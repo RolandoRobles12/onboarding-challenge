@@ -2,12 +2,18 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { getCourses, getCourseEnrollments, adminEnrollUserInCourse, getAllUsers } from '@/lib/firestore-service';
+import {
+  getCourses, getCourseEnrollments, adminEnrollUserInCourse, getAllUsers,
+  getJourneyByProduct, getJourneyProgressByJourney,
+} from '@/lib/firestore-service';
+import { useProducts } from '@/hooks/use-firestore';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -27,10 +33,14 @@ import {
   UserPlus,
   Award,
   TrendingUp,
+  Route,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { Course } from '@/lib/types-lms';
 import type { CourseEnrollment, EnrollmentStatus } from '@/lib/types-lms';
-import type { UserProfile } from '@/lib/types-scalable';
+import type { UserProfile, Journey, UserJourneyProgress, JourneyStep } from '@/lib/types-scalable';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -54,10 +64,17 @@ function formatDate(ts: import('firebase/firestore').Timestamp | undefined): str
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+const STEP_TYPE_LABELS: Record<string, string> = {
+  course: 'Curso', quiz: 'Quiz', challenge: 'Desafío', info_form: 'Formulario',
+  results: 'Resultados', certificate: 'Certificado', badge: 'Insignia', checklist: 'Checklist',
+};
+
 export default function EnrollmentsPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const { products } = useProducts();
 
+  // ── Course tab state ──────────────────────────────────────────────────────
   const [courses, setCourses] = useState<Course[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState('');
@@ -70,6 +87,13 @@ export default function EnrollmentsPage() {
   const [enrollUserId, setEnrollUserId] = useState('');
   const [enrolling, setEnrolling] = useState(false);
 
+  // ── Journey tab state ─────────────────────────────────────────────────────
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [journey, setJourney] = useState<Journey | null>(null);
+  const [journeyProgress, setJourneyProgress] = useState<UserJourneyProgress[]>([]);
+  const [loadingJourney, setLoadingJourney] = useState(false);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+
   // Load courses + users once
   useEffect(() => {
     Promise.all([getCourses(), getAllUsers()])
@@ -79,6 +103,20 @@ export default function EnrollmentsPage() {
       })
       .finally(() => setLoadingBase(false));
   }, []);
+
+  // Load journey when product changes
+  useEffect(() => {
+    if (!selectedProductId) { setJourney(null); setJourneyProgress([]); return; }
+    setLoadingJourney(true);
+    getJourneyByProduct(selectedProductId)
+      .then(async j => {
+        setJourney(j);
+        if (!j) return;
+        const progress = await getJourneyProgressByJourney(j.id);
+        setJourneyProgress(progress);
+      })
+      .finally(() => setLoadingJourney(false));
+  }, [selectedProductId]);
 
   const loadEnrollments = useCallback(async () => {
     if (!selectedCourseId) return;
@@ -130,6 +168,13 @@ export default function EnrollmentsPage() {
   // Already-enrolled user IDs for this course
   const enrolledUserIds = new Set(enrollments.map(e => e.userId));
 
+  // Journey derived data
+  const allSteps: JourneyStep[] = journey
+    ? (journey.stages?.length ? journey.stages.flatMap(s => s.actions ?? []) : journey.steps ?? [])
+    : [];
+  const progressMap = Object.fromEntries(journeyProgress.map(p => [p.userId, p]));
+  const productUsers = users.filter(u => !selectedProductId || u.producto === selectedProductId);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -149,6 +194,14 @@ export default function EnrollmentsPage() {
         )}
       </div>
 
+      <Tabs defaultValue="curso">
+        <TabsList>
+          <TabsTrigger value="curso"><BookOpen className="h-4 w-4 mr-1.5" />Por Curso</TabsTrigger>
+          <TabsTrigger value="journey"><Route className="h-4 w-4 mr-1.5" />Por Producto / Journey</TabsTrigger>
+        </TabsList>
+
+        {/* ── COURSE TAB ────────────────────────────────────────────────── */}
+        <TabsContent value="curso" className="mt-4 space-y-6">
       {/* Course selector */}
       <Card>
         <CardContent className="pt-6">
@@ -330,6 +383,206 @@ export default function EnrollmentsPage() {
           </CardContent>
         </Card>
       )}
+
+        </TabsContent>
+
+        {/* ── JOURNEY TAB ──────────────────────────────────────────────── */}
+        <TabsContent value="journey" className="mt-4 space-y-6">
+          {/* Product selector */}
+          <Card>
+            <CardContent className="pt-6">
+              <div className="space-y-2 max-w-sm">
+                <Label>Selecciona el producto</Label>
+                <Select value={selectedProductId} onValueChange={setSelectedProductId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Elige un producto..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {products.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          {selectedProductId && (
+            <>
+              {loadingJourney ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map(i => <div key={i} className="h-16 rounded-lg bg-muted animate-pulse" />)}
+                </div>
+              ) : !journey ? (
+                <Card>
+                  <CardContent className="py-12 text-center">
+                    <Route className="h-10 w-10 mx-auto text-muted-foreground opacity-40 mb-3" />
+                    <p className="text-muted-foreground font-medium">Este producto no tiene un journey configurado</p>
+                    <p className="text-sm text-muted-foreground mt-1">Crea uno en Admin → Rutas del Jaguar</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  {/* Journey stats */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {[
+                      { label: 'Usuarios del producto', value: productUsers.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+                      { label: 'Con progreso', value: journeyProgress.length, icon: TrendingUp, color: 'text-amber-600', bg: 'bg-amber-50' },
+                      { label: 'Completaron todo', value: journeyProgress.filter(p => p.completedStepIds.length >= allSteps.length && allSteps.length > 0).length, icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                      { label: 'Pasos del journey', value: allSteps.length, icon: Route, color: 'text-purple-600', bg: 'bg-purple-50' },
+                    ].map(s => {
+                      const Icon = s.icon;
+                      return (
+                        <Card key={s.label}>
+                          <CardContent className="py-4 flex items-center gap-3">
+                            <div className={`h-10 w-10 rounded-lg ${s.bg} flex items-center justify-center shrink-0`}>
+                              <Icon className={`h-5 w-5 ${s.color}`} />
+                            </div>
+                            <div>
+                              <p className="text-2xl font-bold">{s.value}</p>
+                              <p className="text-xs text-muted-foreground leading-tight">{s.label}</p>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  {/* User journey table */}
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Route className="h-4 w-4 text-emerald-600" />
+                            {journey.name || 'Journey del producto'}
+                          </CardTitle>
+                          <CardDescription>
+                            {journey.stages?.length ?? 0} etapa{(journey.stages?.length ?? 0) !== 1 ? 's' : ''} · {allSteps.length} pasos · {productUsers.length} usuarios asignados
+                          </CardDescription>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => {
+                          setLoadingJourney(true);
+                          getJourneyProgressByJourney(journey.id)
+                            .then(p => setJourneyProgress(p))
+                            .finally(() => setLoadingJourney(false));
+                        }}>
+                          <RefreshCw className="h-4 w-4 mr-1" /> Actualizar
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {productUsers.length === 0 ? (
+                        <div className="py-10 text-center">
+                          <Users className="h-10 w-10 mx-auto text-muted-foreground mb-3 opacity-40" />
+                          <p className="text-muted-foreground font-medium">Sin usuarios asignados a este producto</p>
+                        </div>
+                      ) : (
+                        <div>
+                          {/* Table header */}
+                          <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide border-b bg-muted/30">
+                            <span className="col-span-4">Usuario</span>
+                            <span className="col-span-4">Progreso general</span>
+                            <span className="col-span-2">Pasos</span>
+                            <span className="col-span-2">Última actividad</span>
+                          </div>
+                          {productUsers.map(u => {
+                            const prog = progressMap[u.uid];
+                            const completedIds = new Set(prog?.completedStepIds ?? []);
+                            const completedCount = allSteps.filter(s => completedIds.has(s.id)).length;
+                            const pct = allSteps.length > 0 ? Math.round((completedCount / allSteps.length) * 100) : 0;
+                            const isExpanded = expandedUserId === u.uid;
+                            const lastActivity = prog?.updatedAt
+                              ? new Date(prog.updatedAt.seconds * 1000).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })
+                              : '—';
+
+                            return (
+                              <div key={u.uid} className="border-b last:border-0">
+                                <button
+                                  className="w-full grid grid-cols-12 gap-2 px-4 py-3 hover:bg-muted/30 transition-colors items-center text-left"
+                                  onClick={() => setExpandedUserId(isExpanded ? null : u.uid)}
+                                >
+                                  {/* User */}
+                                  <div className="col-span-4 flex items-center gap-2 min-w-0">
+                                    <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                      <span className="text-xs font-bold text-primary">{u.nombre.charAt(0).toUpperCase()}</span>
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium truncate">{u.nombre}</p>
+                                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                                    </div>
+                                  </div>
+                                  {/* Progress bar */}
+                                  <div className="col-span-4 flex items-center gap-2">
+                                    <Progress value={pct} className="h-2 flex-1" />
+                                    <span className="text-xs font-semibold w-8 text-right">{pct}%</span>
+                                  </div>
+                                  {/* Steps count */}
+                                  <div className="col-span-2">
+                                    <span className={cn('text-sm font-medium', completedCount === allSteps.length && allSteps.length > 0 ? 'text-emerald-600' : 'text-foreground')}>
+                                      {completedCount}/{allSteps.length}
+                                    </span>
+                                    {completedCount === allSteps.length && allSteps.length > 0 && (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 inline ml-1" />
+                                    )}
+                                  </div>
+                                  {/* Last activity */}
+                                  <div className="col-span-2 flex items-center justify-between">
+                                    <span className="text-xs text-muted-foreground">{lastActivity}</span>
+                                    {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                                  </div>
+                                </button>
+
+                                {/* Expanded: stage detail */}
+                                {isExpanded && (
+                                  <div className="px-4 pb-3 pt-1 bg-muted/20 space-y-3">
+                                    {(journey.stages ?? []).map(stage => {
+                                      const stageSteps = stage.actions ?? [];
+                                      const stageDone = stageSteps.filter(s => completedIds.has(s.id)).length;
+                                      return (
+                                        <div key={stage.id}>
+                                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                                            {stage.title} ({stageDone}/{stageSteps.length})
+                                          </p>
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {stageSteps.map(step => {
+                                              const done = completedIds.has(step.id);
+                                              return (
+                                                <span
+                                                  key={step.id}
+                                                  className={cn(
+                                                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium border',
+                                                    done
+                                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                      : 'bg-muted text-muted-foreground border-muted-foreground/20'
+                                                  )}
+                                                >
+                                                  {done ? <CheckCircle2 className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                                                  {step.title || STEP_TYPE_LABELS[step.type] || step.type}
+                                                </span>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Enroll user dialog */}
       <Dialog open={enrollDialogOpen} onOpenChange={setEnrollDialogOpen}>

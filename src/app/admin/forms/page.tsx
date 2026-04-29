@@ -9,6 +9,7 @@ import {
   deleteJourneyForm,
   getFormResponses,
   getAllUsers,
+  getKioscos,
 } from '@/lib/firestore-service';
 import type {
   JourneyForm,
@@ -18,6 +19,7 @@ import type {
   FormRespondent,
   FormResponse,
   UserProfile,
+  Kiosko,
 } from '@/lib/types-scalable';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +27,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge as UiBadge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -68,6 +72,10 @@ import {
   Users,
   MapPin,
   Inbox,
+  Search,
+  TrendingUp,
+  FileText,
+  Download,
 } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -682,113 +690,479 @@ function FormPreview({ form, onClose }: { form: JourneyForm; onClose: () => void
   );
 }
 
+// ─── Helpers de resolución de valores ────────────────────────────────────────
+
+function resolveFieldValue(
+  field: FormField,
+  value: string | string[] | number,
+  usersMap: Record<string, UserProfile>,
+  kioscos: Kiosko[]
+): string {
+  if (field.type === 'single_choice') {
+    const id = String(value);
+    return field.options?.find(o => o.id === id)?.label ?? id;
+  }
+  if (field.type === 'multiple_choice') {
+    const ids = Array.isArray(value) ? value.map(String) : [String(value)];
+    return ids.map(id => field.options?.find(o => o.id === id)?.label ?? id).join(', ');
+  }
+  if (field.type === 'trainer_select') {
+    const u = usersMap[String(value)];
+    return u?.nombre ?? String(value);
+  }
+  if (field.type === 'kiosk_select') {
+    const k = kioscos.find(k => k.id === String(value) || k.name === String(value));
+    return k?.name ?? String(value);
+  }
+  if (Array.isArray(value)) return value.join(', ');
+  return String(value);
+}
+
+function formatDate(ts: import('firebase/firestore').Timestamp | undefined): string {
+  if (!ts) return '—';
+  return new Date(ts.seconds * 1000).toLocaleString('es-MX', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+// ─── Analítica por campo ──────────────────────────────────────────────────────
+
+function FieldAnalytics({ field, responses, usersMap, kioscos }: {
+  field: FormField;
+  responses: FormResponse[];
+  usersMap: Record<string, UserProfile>;
+  kioscos: Kiosko[];
+}) {
+  const answers = responses
+    .flatMap(r => r.answers.filter(a => a.fieldId === field.id))
+    .filter(a => a.value !== '' && a.value !== null && a.value !== undefined);
+
+  if (answers.length === 0) return (
+    <p className="text-xs text-muted-foreground italic">Sin respuestas</p>
+  );
+
+  // Rating fields → average
+  if (field.type === 'rating_stars' || field.type === 'rating_nps' || field.type === 'rating_scale') {
+    const nums = answers.map(a => Number(a.value)).filter(n => !isNaN(n));
+    const avg = nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+    const max = field.type === 'rating_stars' ? 5 : field.type === 'rating_nps' ? 10 : (field.maxValue ?? 10);
+    const pct = Math.round((avg / max) * 100);
+    // NPS: promoters (9-10), detractors (0-6)
+    let npsScore: number | null = null;
+    if (field.type === 'rating_nps' && nums.length) {
+      const promoters = nums.filter(n => n >= 9).length / nums.length;
+      const detractors = nums.filter(n => n <= 6).length / nums.length;
+      npsScore = Math.round((promoters - detractors) * 100);
+    }
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl font-bold text-primary">{avg.toFixed(1)}</span>
+          <span className="text-sm text-muted-foreground">/ {max} · {nums.length} respuestas</span>
+          {npsScore !== null && (
+            <span className={`text-sm font-semibold px-2 py-0.5 rounded-full ${npsScore >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              NPS: {npsScore > 0 ? '+' : ''}{npsScore}
+            </span>
+          )}
+        </div>
+        <Progress value={pct} className="h-2 max-w-xs" />
+        {field.type === 'rating_stars' && (
+          <div className="flex gap-0.5">
+            {[1,2,3,4,5].map(n => (
+              <Star key={n} className={`h-4 w-4 ${n <= Math.round(avg) ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground/30'}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Choice fields → frequency bars
+  if (field.type === 'single_choice' || field.type === 'multiple_choice' ||
+      field.type === 'kiosk_select' || field.type === 'trainer_select') {
+    const counts: Record<string, number> = {};
+    answers.forEach(a => {
+      const resolved = resolveFieldValue(field, a.value, usersMap, kioscos);
+      const parts = resolved.split(', ');
+      parts.forEach(p => { counts[p] = (counts[p] ?? 0) + 1; });
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const max = sorted[0]?.[1] ?? 1;
+    return (
+      <div className="space-y-2">
+        {sorted.map(([label, count]) => (
+          <div key={label} className="space-y-0.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium truncate max-w-[260px]">{label}</span>
+              <span className="text-muted-foreground ml-2 shrink-0">{count} ({Math.round(count / answers.length * 100)}%)</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.round(count / max * 100)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Text/textarea/date/number → list of values
+  const unique = [...new Set(answers.map(a => String(a.value)).filter(Boolean))].slice(0, 8);
+  return (
+    <div className="space-y-1">
+      {unique.map((v, i) => (
+        <p key={i} className="text-xs bg-muted/50 rounded px-2 py-1 truncate">{v}</p>
+      ))}
+      {answers.length > 8 && <p className="text-xs text-muted-foreground">+{answers.length - 8} más…</p>}
+    </div>
+  );
+}
+
 // ─── Vista de respuestas ──────────────────────────────────────────────────────
 
 function FormResponsesView({ form, onClose }: { form: JourneyForm; onClose: () => void }) {
   const [responses, setResponses] = useState<FormResponse[]>([]);
   const [usersMap, setUsersMap] = useState<Record<string, UserProfile>>({});
+  const [kioscos, setKioscos] = useState<Kiosko[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [resp, users] = await Promise.all([
+      const [resp, users, kioscoList] = await Promise.all([
         getFormResponses(form.id),
         getAllUsers(),
+        getKioscos(),
       ]);
       setResponses(resp);
       const map: Record<string, UserProfile> = {};
       users.forEach(u => { map[u.uid] = u; });
       setUsersMap(map);
+      setKioscos(kioscoList);
       setLoading(false);
     })();
   }, [form.id]);
 
-  const fieldMap = Object.fromEntries(form.fields.map(f => [f.id, f]));
+  const dataFields = form.fields.filter(f => f.type !== 'section_header');
 
-  function formatValue(value: string | string[] | number): string {
-    if (Array.isArray(value)) return value.join(', ');
-    return String(value);
-  }
-
-  function formatDate(ts: import('firebase/firestore').Timestamp | undefined): string {
-    if (!ts) return '—';
-    return new Date(ts.seconds * 1000).toLocaleString('es-MX', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit',
+  const filteredResponses = responses.filter(r => {
+    if (!search.trim()) return true;
+    const respondent = usersMap[r.respondentId];
+    const name = (respondent?.nombre || r.respondentId).toLowerCase();
+    if (name.includes(search.toLowerCase())) return true;
+    return r.answers.some(a => {
+      const field = form.fields.find(f => f.id === a.fieldId);
+      if (!field) return false;
+      return resolveFieldValue(field, a.value, usersMap, kioscos).toLowerCase().includes(search.toLowerCase());
     });
-  }
+  });
+
+  // Summary stats
+  const uniqueRespondents = new Set(responses.map(r => r.respondentId)).size;
+  const lastDate = responses[0]?.submittedAt;
+  const firstDate = responses[responses.length - 1]?.submittedAt;
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" onClick={onClose}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div>
-          <h2 className="text-xl font-bold">Respuestas: {form.title}</h2>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-xl font-bold truncate">{form.title}</h2>
           <p className="text-sm text-muted-foreground">
-            {loading ? 'Cargando...' : `${responses.length} respuesta${responses.length !== 1 ? 's' : ''}`}
+            {loading ? 'Cargando...' : `${responses.length} respuesta${responses.length !== 1 ? 's' : ''} · ${uniqueRespondents} respondente${uniqueRespondents !== 1 ? 's' : ''}`}
           </p>
         </div>
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-muted-foreground">Cargando respuestas...</div>
+        <div className="text-center py-16 text-muted-foreground">Cargando datos...</div>
       ) : responses.length === 0 ? (
         <Card>
           <CardContent className="py-16 text-center">
             <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
             <p className="text-muted-foreground font-medium">Sin respuestas todavía</p>
-            <p className="text-sm text-muted-foreground mt-1">
-              Las respuestas aparecerán aquí cuando los usuarios completen este formulario.
-            </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {responses.map((resp, i) => {
-            const respondent = usersMap[resp.respondentId];
-            const displayName = respondent?.nombre || resp.respondentId;
-            const subject = resp.subjectId ? usersMap[resp.subjectId] : undefined;
-            const dataFields = form.fields.filter(f => f.type !== 'section_header');
-            return (
-              <Card key={resp.id}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <CardTitle className="text-sm font-semibold">
-                        Respuesta #{responses.length - i}
-                      </CardTitle>
-                      <CardDescription className="text-xs mt-0.5">
-                        <span className="font-medium">{displayName}</span>
-                        {subject && <span> · Evaluado: <span className="font-medium">{subject.nombre || resp.subjectId}</span></span>}
-                        <span className="ml-2 text-muted-foreground">{formatDate(resp.submittedAt)}</span>
-                      </CardDescription>
+        <Tabs defaultValue="analitica">
+          <TabsList>
+            <TabsTrigger value="analitica"><BarChart2 className="h-4 w-4 mr-1.5" />Analítica</TabsTrigger>
+            <TabsTrigger value="respuestas"><FileText className="h-4 w-4 mr-1.5" />Respuestas ({responses.length})</TabsTrigger>
+          </TabsList>
+
+          {/* ── ANALÍTICA ─────────────────────────────────────────── */}
+          <TabsContent value="analitica" className="mt-4 space-y-4">
+            {/* Summary cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: 'Total respuestas', value: responses.length, icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: 'Respondentes únicos', value: uniqueRespondents, icon: Users, color: 'text-purple-600', bg: 'bg-purple-50' },
+                { label: 'Primera respuesta', value: firstDate ? new Date(firstDate.seconds * 1000).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) : '—', icon: Calendar, color: 'text-slate-600', bg: 'bg-slate-50' },
+                { label: 'Última respuesta', value: lastDate ? new Date(lastDate.seconds * 1000).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }) : '—', icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+              ].map(s => {
+                const Icon = s.icon;
+                return (
+                  <Card key={s.label}>
+                    <CardContent className="py-3 flex items-center gap-2.5">
+                      <div className={`h-9 w-9 rounded-lg ${s.bg} flex items-center justify-center shrink-0`}>
+                        <Icon className={`h-4 w-4 ${s.color}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-lg font-bold leading-tight truncate">{s.value}</p>
+                        <p className="text-[10px] text-muted-foreground leading-tight">{s.label}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Per-field analytics */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              {dataFields.map(field => (
+                <Card key={field.id}>
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="text-sm font-semibold leading-tight">{field.label || '(campo sin título)'}</CardTitle>
+                    <CardDescription className="text-xs">{FIELD_TYPE_CONFIG[field.type]?.label}</CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4 pt-0">
+                    <FieldAnalytics field={field} responses={responses} usersMap={usersMap} kioscos={kioscos} />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </TabsContent>
+
+          {/* ── RESPUESTAS INDIVIDUALES ──────────────────────────── */}
+          <TabsContent value="respuestas" className="mt-4 space-y-4">
+            {/* Search */}
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre o valor..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full h-9 rounded-md border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            {filteredResponses.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Sin resultados para "{search}"</p>
+            ) : (
+              filteredResponses.map((resp, i) => {
+                const respondent = usersMap[resp.respondentId];
+                const displayName = respondent?.nombre || resp.respondentId;
+                const subject = resp.subjectId ? usersMap[resp.subjectId] : undefined;
+                return (
+                  <Card key={resp.id}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <span className="text-xs font-bold text-primary">{displayName.charAt(0).toUpperCase()}</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-semibold">{displayName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatDate(resp.submittedAt)}
+                              {subject && <> · Evaluado: <span className="font-medium">{subject.nombre}</span></>}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground shrink-0">#{filteredResponses.length - i}</span>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <div className="divide-y">
+                        {resp.answers.map(ans => {
+                          const field = form.fields.find(f => f.id === ans.fieldId);
+                          if (!field || field.type === 'section_header') return null;
+                          const resolved = resolveFieldValue(field, ans.value, usersMap, kioscos);
+                          if (!resolved) return null;
+                          return (
+                            <div key={ans.fieldId} className="grid grid-cols-[2fr_3fr] gap-3 py-2 text-sm">
+                              <p className="text-muted-foreground text-xs leading-snug">{field.label}</p>
+                              <p className="text-foreground text-xs leading-snug font-medium">{resolved}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </TabsContent>
+        </Tabs>
+      )}
+    </div>
+  );
+}
+
+// ─── Vista de Reportería global ───────────────────────────────────────────────
+
+function FormsReportingView({ forms, onClose }: { forms: JourneyForm[]; onClose: () => void }) {
+  const [allResponses, setAllResponses] = useState<Record<string, FormResponse[]>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const results = await Promise.all(
+        forms.map(f => getFormResponses(f.id).then(r => [f.id, r] as [string, FormResponse[]]))
+      );
+      const map: Record<string, FormResponse[]> = {};
+      results.forEach(([id, r]) => { map[id] = r; });
+      setAllResponses(map);
+      setLoading(false);
+    })();
+  }, [forms]);
+
+  const totalResponses = Object.values(allResponses).reduce((s, r) => s + r.length, 0);
+  const allUniqueRespondents = new Set(
+    Object.values(allResponses).flatMap(r => r.map(x => x.respondentId))
+  ).size;
+  const formsWithResponses = Object.values(allResponses).filter(r => r.length > 0).length;
+
+  // Sorted forms by response count
+  const formStats = forms.map(f => {
+    const resp = allResponses[f.id] ?? [];
+    const lastTs = resp[0]?.submittedAt;
+    return {
+      form: f,
+      count: resp.length,
+      lastDate: lastTs ? new Date(lastTs.seconds * 1000) : null,
+    };
+  }).sort((a, b) => b.count - a.count);
+
+  const maxCount = formStats[0]?.count ?? 1;
+
+  // Responses by purpose
+  const byPurpose: Record<string, number> = {};
+  forms.forEach(f => {
+    byPurpose[f.purpose] = (byPurpose[f.purpose] ?? 0) + (allResponses[f.id]?.length ?? 0);
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={onClose}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-primary" />
+            Reportería global
+          </h2>
+          <p className="text-sm text-muted-foreground">Resumen de respuestas en todos los formularios</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16 text-muted-foreground">Cargando datos...</div>
+      ) : (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Total respuestas', value: totalResponses, icon: FileText, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Respondentes únicos', value: allUniqueRespondents, icon: Users, color: 'text-purple-600', bg: 'bg-purple-50' },
+              { label: 'Formularios activos', value: forms.length, icon: ClipboardList, color: 'text-slate-600', bg: 'bg-slate-50' },
+              { label: 'Con respuestas', value: formsWithResponses, icon: BarChart2, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+            ].map(s => {
+              const Icon = s.icon;
+              return (
+                <Card key={s.label}>
+                  <CardContent className="py-3 flex items-center gap-2.5">
+                    <div className={`h-9 w-9 rounded-lg ${s.bg} flex items-center justify-center shrink-0`}>
+                      <Icon className={`h-4 w-4 ${s.color}`} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-lg font-bold leading-tight">{s.value}</p>
+                      <p className="text-[10px] text-muted-foreground leading-tight">{s.label}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Responses by purpose */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Respuestas por propósito</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              {(Object.entries(PURPOSE_CONFIG) as [FormPurpose, typeof PURPOSE_CONFIG[FormPurpose]][])
+                .filter(([key]) => byPurpose[key] > 0)
+                .sort((a, b) => (byPurpose[b[0]] ?? 0) - (byPurpose[a[0]] ?? 0))
+                .map(([key, cfg]) => {
+                  const count = byPurpose[key] ?? 0;
+                  const pct = totalResponses ? Math.round(count / totalResponses * 100) : 0;
+                  return (
+                    <div key={key} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium">{cfg.emoji} {cfg.label}</span>
+                        <span className="text-muted-foreground">{count} ({pct}%)</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              {totalResponses === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Sin respuestas registradas</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Per-form breakdown */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Detalle por formulario</CardTitle>
+              <CardDescription className="text-xs">Ordenado por número de respuestas</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {formStats.map(({ form, count, lastDate }) => {
+                const purpose = PURPOSE_CONFIG[form.purpose];
+                const pct = maxCount > 0 ? Math.round(count / maxCount * 100) : 0;
+                return (
+                  <div key={form.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base shrink-0">{purpose.emoji}</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium truncate">{form.title}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {lastDate
+                              ? `Última resp.: ${lastDate.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                              : 'Sin respuestas'}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-bold shrink-0 tabular-nums">{count}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${count > 0 ? 'bg-primary' : 'bg-muted'}`}
+                        style={{ width: `${pct}%` }}
+                      />
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="space-y-2">
-                    {resp.answers.map(ans => {
-                      const field = fieldMap[ans.fieldId];
-                      if (!field) return null;
-                      return (
-                        <div key={ans.fieldId} className="grid grid-cols-[1fr_2fr] gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
-                          <p className="text-muted-foreground font-medium text-xs leading-snug">{field.label || ans.fieldId}</p>
-                          <p className="text-foreground text-xs leading-snug">{formatValue(ans.value)}</p>
-                        </div>
-                      );
-                    })}
-                    {dataFields.length > 0 && resp.answers.length === 0 && (
-                      <p className="text-xs text-muted-foreground italic">Sin respuestas registradas</p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                );
+              })}
+              {forms.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">Sin formularios</p>
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   );
@@ -796,7 +1170,7 @@ function FormResponsesView({ form, onClose }: { form: JourneyForm; onClose: () =
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 
-type ViewMode = 'list' | 'editor' | 'preview' | 'responses';
+type ViewMode = 'list' | 'editor' | 'preview' | 'responses' | 'reporting';
 
 export default function AdminFormsPage() {
   const { user, profile } = useAuth();
@@ -920,6 +1294,10 @@ export default function AdminFormsPage() {
     return <FormResponsesView form={responsesForm} onClose={() => setView('list')} />;
   }
 
+  if (view === 'reporting') {
+    return <FormsReportingView forms={forms.filter(f => f.active)} onClose={() => setView('list')} />;
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -933,10 +1311,16 @@ export default function AdminFormsPage() {
             Diseña formularios para capturar datos de vendedores, evaluar capacitadores o registrar evaluaciones.
           </p>
         </div>
-        <Button onClick={handleNew}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nuevo formulario
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setView('reporting')}>
+            <TrendingUp className="h-4 w-4 mr-2" />
+            Reportería
+          </Button>
+          <Button onClick={handleNew}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo formulario
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}

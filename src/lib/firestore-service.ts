@@ -1070,6 +1070,20 @@ export async function resetUserJourneyProgress(userId: string, journeyId: string
   }
 }
 
+export async function getJourneyProgressByJourney(journeyId: string): Promise<UserJourneyProgress[]> {
+  try {
+    const q = query(
+      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      where('journeyId', '==', journeyId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as UserJourneyProgress));
+  } catch (error) {
+    console.error('Error getting journey progress by journey:', error);
+    return [];
+  }
+}
+
 export async function markJourneyStepComplete(
   userId: string,
   journeyId: string,
