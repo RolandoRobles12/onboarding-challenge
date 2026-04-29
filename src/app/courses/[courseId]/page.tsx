@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -500,6 +500,7 @@ export default function CourseDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   // Tracks the in-flight Firestore write so Finalizar can await it
   const savePromiseRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -545,14 +546,16 @@ export default function CourseDetailPage() {
       setCompletedModuleIds(new Set(enr.completedModuleIds));
 
       const allLessons = data.modules.flatMap(m => m.lessons);
+      const lessonParam = searchParams?.get('lesson');
+      const targetLesson = lessonParam ? allLessons.find(l => l.id === lessonParam) : null;
       const firstIncomplete = allLessons.find(l => !enr!.completedLessonIds.includes(l.id));
-      setSelectedLesson(firstIncomplete ?? allLessons[0] ?? null);
+      setSelectedLesson(targetLesson ?? firstIncomplete ?? allLessons[0] ?? null);
     } catch {
       setNotFound(true);
     } finally {
       setLoading(false);
     }
-  }, [courseId, profile]);
+  }, [courseId, profile, searchParams]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -561,6 +564,16 @@ export default function CourseDetailPage() {
   const prevLesson = currentIdx > 0 ? allLessons[currentIdx - 1] : null;
   const nextLesson = currentIdx < allLessons.length - 1 ? allLessons[currentIdx + 1] : null;
   const isDone = selectedLesson ? completedLessonIds.has(selectedLesson.id) : false;
+
+  // Builds the quiz URL when the current lesson has an assessmentQuizId configured
+  const getAssessmentUrl = (returnTo: string): string | null => {
+    if (!selectedLesson?.assessmentQuizId || !profile?.producto) return null;
+    const params = new URLSearchParams({
+      quizId: selectedLesson.assessmentQuizId,
+      returnTo,
+    });
+    return `/${profile.producto}/quiz?${params.toString()}`;
+  };
 
   const pct = allLessons.length > 0
     ? Math.round((completedLessonIds.size / allLessons.length) * 100)
@@ -765,9 +778,15 @@ export default function CourseDetailPage() {
                       {nextLesson ? (
                         <Button
                           size="sm"
-                          onClick={() => {
+                          onClick={async () => {
                             if (!isDone) handleAutoComplete();
-                            setSelectedLesson(nextLesson);
+                            const quizUrl = getAssessmentUrl(`/courses/${courseId}?lesson=${nextLesson.id}`);
+                            if (quizUrl && !isDone) {
+                              await savePromiseRef.current;
+                              router.push(quizUrl);
+                            } else {
+                              setSelectedLesson(nextLesson);
+                            }
                           }}
                           className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                         >
@@ -781,8 +800,14 @@ export default function CourseDetailPage() {
                           className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                           onClick={async () => {
                             if (!isDone) handleAutoComplete();
-                            await savePromiseRef.current;
-                            router.push('/');
+                            const quizUrl = getAssessmentUrl('/');
+                            if (quizUrl && !isDone) {
+                              await savePromiseRef.current;
+                              router.push(quizUrl);
+                            } else {
+                              await savePromiseRef.current;
+                              router.push('/');
+                            }
                           }}
                         >
                           <CheckCircle2 className="h-4 w-4" />

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
 import { getDailyPulses, getPulseAttemptsByDateRange, getQuestions, getAllUsers, getAllQuizAttempts } from '@/lib/firestore-service';
+import { collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import type { PulseAttempt, DailyPulse, Question, KnowledgeModule, UserProfile, QuizAttempt } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { cn } from '@/lib/utils';
@@ -738,6 +740,8 @@ export default function AnalyticsPage() {
   // ── Evaluaciones tab state ─────────────────────────────────────────────
   const [loadingEval, setLoadingEval] = useState(false);
   const [evalAttempts, setEvalAttempts] = useState<QuizAttempt[]>([]);
+  const [migrationCount, setMigrationCount] = useState<number | null>(null);
+  const [migrating, setMigrating] = useState(false);
   const [evalUsers, setEvalUsers] = useState<UserProfile[]>([]);
   const [selectedQuizIds, setSelectedQuizIds] = useState<Set<string>>(new Set());
   const [evalCosechaGranularity, setEvalCosechaGranularity] = useState<CosechaGranularity>('mes');
@@ -857,11 +861,36 @@ export default function AnalyticsPage() {
     Promise.all([
       getAllQuizAttempts(),
       getAllUsers(),
-    ]).then(([attempts, users]) => {
+      // Check for legacy attempts saved with wrong organizationId
+      db ? getDocs(query(collection(db, 'attempts'), where('organizationId', '==', 'default'))).catch(() => null) : Promise.resolve(null),
+    ]).then(([attempts, users, legacySnap]) => {
       setEvalAttempts(attempts);
       setEvalUsers(users.filter(u => u.active !== false));
+      if (legacySnap && !legacySnap.empty) setMigrationCount(legacySnap.size);
+      else setMigrationCount(0);
     }).finally(() => setLoadingEval(false));
   }, [activeTab]);
+
+  const handleMigrateAttempts = async () => {
+    if (!db) return;
+    setMigrating(true);
+    try {
+      const snap = await getDocs(query(collection(db, 'attempts'), where('organizationId', '==', 'default')));
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < snap.docs.length; i += BATCH_SIZE) {
+        const batch = writeBatch(db);
+        snap.docs.slice(i, i + BATCH_SIZE).forEach(d => batch.update(d.ref, { organizationId: 'aviva-credito' }));
+        await batch.commit();
+      }
+      setMigrationCount(0);
+      // Reload attempts to show the recovered data
+      const [attempts, users] = await Promise.all([getAllQuizAttempts(), getAllUsers()]);
+      setEvalAttempts(attempts);
+      setEvalUsers(users.filter(u => u.active !== false));
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   const totalUsers = allUsers.length;
 
@@ -1916,6 +1945,28 @@ export default function AnalyticsPage() {
 
         {/* ── EVALUACIONES TAB ─────────────────────────────────────────── */}
         <TabsContent value="evaluaciones" className="mt-4 space-y-6">
+          {/* ── Migration banner ─────────────────────────────────────────── */}
+          {migrationCount !== null && migrationCount > 0 && (
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm text-amber-800">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>Se encontraron <strong>{migrationCount} evaluaciones históricas</strong> que no son visibles por un error previo. Recupéralas con un clic.</span>
+              </div>
+              <button
+                onClick={handleMigrateAttempts}
+                disabled={migrating}
+                className="shrink-0 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60 transition-colors"
+              >
+                {migrating ? 'Recuperando...' : 'Recuperar datos'}
+              </button>
+            </div>
+          )}
+          {migrationCount === 0 && evalAttempts.length > 0 && (
+            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-800">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>Todos los datos de evaluaciones están correctamente registrados.</span>
+            </div>
+          )}
           {loadingEval ? (
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}</div>

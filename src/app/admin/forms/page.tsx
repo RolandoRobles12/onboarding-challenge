@@ -7,6 +7,8 @@ import {
   createJourneyForm,
   updateJourneyForm,
   deleteJourneyForm,
+  getFormResponses,
+  getAllUsers,
 } from '@/lib/firestore-service';
 import type {
   JourneyForm,
@@ -14,6 +16,8 @@ import type {
   FormFieldType,
   FormPurpose,
   FormRespondent,
+  FormResponse,
+  UserProfile,
 } from '@/lib/types-scalable';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,6 +67,7 @@ import {
   Upload,
   Users,
   MapPin,
+  Inbox,
 } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -677,9 +682,121 @@ function FormPreview({ form, onClose }: { form: JourneyForm; onClose: () => void
   );
 }
 
+// ─── Vista de respuestas ──────────────────────────────────────────────────────
+
+function FormResponsesView({ form, onClose }: { form: JourneyForm; onClose: () => void }) {
+  const [responses, setResponses] = useState<FormResponse[]>([]);
+  const [usersMap, setUsersMap] = useState<Record<string, UserProfile>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const [resp, users] = await Promise.all([
+        getFormResponses(form.id),
+        getAllUsers(),
+      ]);
+      setResponses(resp);
+      const map: Record<string, UserProfile> = {};
+      users.forEach(u => { map[u.uid] = u; });
+      setUsersMap(map);
+      setLoading(false);
+    })();
+  }, [form.id]);
+
+  const fieldMap = Object.fromEntries(form.fields.map(f => [f.id, f]));
+
+  function formatValue(value: string | string[] | number): string {
+    if (Array.isArray(value)) return value.join(', ');
+    return String(value);
+  }
+
+  function formatDate(ts: import('firebase/firestore').Timestamp | undefined): string {
+    if (!ts) return '—';
+    return new Date(ts.seconds * 1000).toLocaleString('es-MX', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" onClick={onClose}>
+          <ArrowLeft className="h-5 w-5" />
+        </Button>
+        <div>
+          <h2 className="text-xl font-bold">Respuestas: {form.title}</h2>
+          <p className="text-sm text-muted-foreground">
+            {loading ? 'Cargando...' : `${responses.length} respuesta${responses.length !== 1 ? 's' : ''}`}
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-16 text-muted-foreground">Cargando respuestas...</div>
+      ) : responses.length === 0 ? (
+        <Card>
+          <CardContent className="py-16 text-center">
+            <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-muted-foreground font-medium">Sin respuestas todavía</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Las respuestas aparecerán aquí cuando los usuarios completen este formulario.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {responses.map((resp, i) => {
+            const respondent = usersMap[resp.respondentId];
+            const displayName = respondent?.nombre || resp.respondentId;
+            const subject = resp.subjectId ? usersMap[resp.subjectId] : undefined;
+            const dataFields = form.fields.filter(f => f.type !== 'section_header');
+            return (
+              <Card key={resp.id}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <CardTitle className="text-sm font-semibold">
+                        Respuesta #{responses.length - i}
+                      </CardTitle>
+                      <CardDescription className="text-xs mt-0.5">
+                        <span className="font-medium">{displayName}</span>
+                        {subject && <span> · Evaluado: <span className="font-medium">{subject.nombre || resp.subjectId}</span></span>}
+                        <span className="ml-2 text-muted-foreground">{formatDate(resp.submittedAt)}</span>
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="space-y-2">
+                    {resp.answers.map(ans => {
+                      const field = fieldMap[ans.fieldId];
+                      if (!field) return null;
+                      return (
+                        <div key={ans.fieldId} className="grid grid-cols-[1fr_2fr] gap-2 text-sm border-b last:border-0 pb-2 last:pb-0">
+                          <p className="text-muted-foreground font-medium text-xs leading-snug">{field.label || ans.fieldId}</p>
+                          <p className="text-foreground text-xs leading-snug">{formatValue(ans.value)}</p>
+                        </div>
+                      );
+                    })}
+                    {dataFields.length > 0 && resp.answers.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic">Sin respuestas registradas</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 
-type ViewMode = 'list' | 'editor' | 'preview';
+type ViewMode = 'list' | 'editor' | 'preview' | 'responses';
 
 export default function AdminFormsPage() {
   const { user, profile } = useAuth();
@@ -691,6 +808,7 @@ export default function AdminFormsPage() {
   const [view, setView] = useState<ViewMode>('list');
   const [editingForm, setEditingForm] = useState<(Omit<JourneyForm, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { id?: string }) | null>(null);
   const [previewForm, setPreviewForm] = useState<JourneyForm | null>(null);
+  const [responsesForm, setResponsesForm] = useState<JourneyForm | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<JourneyForm | null>(null);
   const [filterPurpose, setFilterPurpose] = useState<FormPurpose | 'all'>('all');
   const [filterRespondent, setFilterRespondent] = useState<FormRespondent | 'all'>('all');
@@ -719,6 +837,11 @@ export default function AdminFormsPage() {
   const handlePreview = (form: JourneyForm) => {
     setPreviewForm(form);
     setView('preview');
+  };
+
+  const handleViewResponses = (form: JourneyForm) => {
+    setResponsesForm(form);
+    setView('responses');
   };
 
   const handleDuplicate = async (form: JourneyForm) => {
@@ -791,6 +914,10 @@ export default function AdminFormsPage() {
 
   if (view === 'preview' && previewForm) {
     return <FormPreview form={previewForm} onClose={() => setView('list')} />;
+  }
+
+  if (view === 'responses' && responsesForm) {
+    return <FormResponsesView form={responsesForm} onClose={() => setView('list')} />;
   }
 
   return (
@@ -910,8 +1037,11 @@ export default function AdminFormsPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={() => handlePreview(form)}>
-                      <Eye className="h-3.5 w-3.5 mr-1" /> Vista previa
+                    <Button variant="outline" size="sm" className="flex-1 h-8 text-xs" onClick={() => handleViewResponses(form)}>
+                      <Inbox className="h-3.5 w-3.5 mr-1" /> Respuestas
+                    </Button>
+                    <Button variant="outline" size="sm" className="h-8 text-xs px-2.5" onClick={() => handlePreview(form)}>
+                      <Eye className="h-3.5 w-3.5" />
                     </Button>
                     <Button variant="outline" size="sm" className="h-8 text-xs px-2.5" onClick={() => handleEdit(form)}>
                       <Pencil className="h-3.5 w-3.5" />
