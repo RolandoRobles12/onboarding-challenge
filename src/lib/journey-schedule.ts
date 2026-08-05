@@ -296,8 +296,10 @@ export function buildJourneySummary(
   isStageComplete: (stage: JourneyStage) => boolean,
   today: Date = new Date(),
 ): JourneyScheduleSummary {
-  const milestones = journey.anchorToEntryDate ? sortMilestones(journey.milestones ?? []) : [];
+  // El plan por tiempo sólo existe si la ruta está anclada Y conocemos la fecha
+  // de ingreso: sin esa fecha no hay plazos que calcular ni tramos que mostrar.
   const anchored = journey.anchorToEntryDate ? entryDate : null;
+  const milestones = anchored ? sortMilestones(journey.milestones ?? []) : [];
 
   const overdueStageIds = anchored
     ? stages

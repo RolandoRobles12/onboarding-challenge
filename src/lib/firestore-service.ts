@@ -992,10 +992,28 @@ export async function getAllJourneys(orgId: string = DEFAULT_ORG_ID): Promise<Jo
  * Rutas que un vendedor puede explorar libremente para conocer otros productos.
  * Excluye borradores e inactivas. Si `explorable` no está definido, la ruta se
  * considera explorable (comportamiento por defecto para rutas ya existentes).
+ *
+ * Devuelve **una sola ruta por producto**: en la base hay productos con varias
+ * rutas acumuladas y al vendedor sólo le corresponde una. Se conserva la más
+ * recientemente actualizada.
  */
 export async function getExplorableJourneys(orgId: string = DEFAULT_ORG_ID): Promise<Journey[]> {
   const journeys = await getAllJourneys(orgId);
-  return journeys.filter(j => j.active && j.status !== 'draft' && j.explorable !== false);
+  const visible = journeys.filter(j => j.active && j.status !== 'draft' && j.explorable !== false);
+
+  const millis = (j: Journey) => {
+    const ts = j.updatedAt ?? j.createdAt;
+    return ts && typeof ts.toMillis === 'function' ? ts.toMillis() : 0;
+  };
+
+  const newestByProduct = new Map<string, Journey>();
+  for (const journey of visible) {
+    const current = newestByProduct.get(journey.productId);
+    if (!current || millis(journey) > millis(current)) {
+      newestByProduct.set(journey.productId, journey);
+    }
+  }
+  return [...newestByProduct.values()];
 }
 
 export async function saveJourney(

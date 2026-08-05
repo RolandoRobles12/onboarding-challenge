@@ -83,7 +83,15 @@ export default function LearningPathsCatalogPage() {
           })
           .filter((c): c is RouteCard => c !== null)
           .sort((a, b) => Number(b.isMine) - Number(a.isMine) || a.product.name.localeCompare(b.product.name));
-        setCards(built);
+
+        // Productos duplicados en la base con el mismo nombre: se muestra uno solo
+        const seen = new Set<string>();
+        setCards(built.filter(c => {
+          const key = c.product.name.trim().toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }));
       })
       .catch(() => setError(true))
       .finally(() => { if (!cancelled) setLoading(false); });

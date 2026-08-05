@@ -1236,7 +1236,6 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
     );
   };
 
-  const needsEntryDate = !isExploring && journey.anchorToEntryDate && !entryDate;
 
   return (
     <div className="space-y-4 pb-24">
@@ -1248,16 +1247,6 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
           <Compass className="h-4 w-4 text-teal-600 shrink-0" />
           <p className="text-xs text-teal-800 flex-1 leading-snug">
             Estás <strong>explorando</strong> la ruta de {product?.name ?? 'otro producto'}. Tu progreso no se registra aquí.
-          </p>
-        </div>
-      )}
-
-      {needsEntryDate && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-start gap-2">
-          <CalendarDays className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-xs text-amber-800 flex-1 leading-snug">
-            Esta ruta se organiza por fechas desde tu <strong>día de ingreso</strong>, pero aún no tenemos esa fecha
-            registrada. Pídele a tu capacitador que la capture para ver tus plazos.
           </p>
         </div>
       )}
@@ -1315,7 +1304,8 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
 
           {unassigned.length > 0 && (
             <div className="space-y-2">
-              {milestones.length > 0 && (
+              {/* El encabezado sólo aporta si hay etapas repartidas en tramos */}
+              {groups.some(g => g.stages.length > 0) && (
                 <div className="flex items-center gap-2 px-1">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                     Sin tramo asignado
@@ -1440,7 +1430,17 @@ function LMSDashboard() {
           .filter((o): o is RouteOption => o !== null)
           // La ruta propia siempre primero
           .sort((a, b) => Number(b.isMine) - Number(a.isMine) || a.productName.localeCompare(b.productName));
-        setRouteOptions(options);
+
+        // Hay productos duplicados en la base con el mismo nombre: para el
+        // vendedor son indistinguibles, así que se muestra sólo uno (el suyo
+        // si aplica, por el orden anterior).
+        const seen = new Set<string>();
+        setRouteOptions(options.filter(o => {
+          const key = o.productName.trim().toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        }));
       })
       .catch(() => setRouteOptions([]));
     return () => { cancelled = true; };
