@@ -712,7 +712,67 @@ export interface JourneyStage {
    */
   deadlineDays?: number;
   deadlineUnit?: 'días' | 'semanas' | 'meses'; // unidad del plazo (default: 'días')
+  /**
+   * Hito temporal al que pertenece esta etapa (ver Journey.milestones).
+   * Si no tiene deadlineDays propio, la etapa vence junto con su hito.
+   */
+  milestoneId?: string;
 }
+
+// ============================================================================
+// HITOS TEMPORALES (30 / 60 / 90 DÍAS — PERSONALIZABLES)
+// ============================================================================
+
+/**
+ * Tramo temporal de una ruta, anclado a la fecha de ingreso del vendedor.
+ * Los clásicos 30/60/90 son sólo el preset por defecto: el admin puede definir
+ * los tramos que quiera (7, 15, 45, 120 días…) con la etiqueta que prefiera.
+ */
+export interface JourneyMilestone {
+  id: string;
+  order: number;
+  /** Etiqueta larga, ej. "Primeros 30 días". */
+  label: string;
+  /** Etiqueta corta para chips, ej. "30d". */
+  shortLabel?: string;
+  /** Días transcurridos desde la fecha de ingreso en los que vence el tramo. */
+  dayOffset: number;
+  description?: string;
+  emoji?: string;
+  /** Color hex para la línea de tiempo. */
+  color?: string;
+}
+
+/** Preset clásico 30/60/90 usado al activar los hitos por primera vez. */
+export const DEFAULT_MILESTONE_PRESET: Omit<JourneyMilestone, 'id'>[] = [
+  {
+    order: 0,
+    label: 'Primeros 30 días',
+    shortLabel: '30d',
+    dayOffset: 30,
+    emoji: '🌱',
+    color: '#8B5CF6',
+    description: 'Fundamentos: conoce el producto, la marca y tus herramientas.',
+  },
+  {
+    order: 1,
+    label: 'Días 31 a 60',
+    shortLabel: '60d',
+    dayOffset: 60,
+    emoji: '⚡',
+    color: '#3B82F6',
+    description: 'Práctica en piso: aplica lo aprendido con acompañamiento.',
+  },
+  {
+    order: 2,
+    label: 'Días 61 a 90',
+    shortLabel: '90d',
+    dayOffset: 90,
+    emoji: '🏆',
+    color: '#10B981',
+    description: 'Autonomía: demuestra dominio y certifícate.',
+  },
+];
 
 // ============================================================================
 // FIRMANTES DE CERTIFICADO
@@ -814,6 +874,20 @@ export interface Journey {
   active: boolean;
   /** 'draft' = solo visible para admins; 'published' = visible para usuarios. */
   status?: 'draft' | 'published';
+
+  /**
+   * Si es true, los plazos de la ruta se calculan desde la fecha de ingreso
+   * del vendedor (profile.fechaIngreso). Si es false u omitido, la ruta es
+   * puramente secuencial y no muestra fechas límite.
+   */
+  anchorToEntryDate?: boolean;
+  /** Tramos temporales de la ruta (30/60/90 por defecto, personalizables). */
+  milestones?: JourneyMilestone[];
+  /**
+   * Si es true, cualquier vendedor puede explorar esta ruta aunque no sea la
+   * de su producto asignado (modo sólo lectura / catálogo).
+   */
+  explorable?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdBy: string;

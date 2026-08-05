@@ -23,12 +23,13 @@ import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
   BookOpen, Swords, Medal, Info, ListChecks, Pencil, X, ClipboardList,
-  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock,
+  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock, CalendarClock, Flag, Compass,
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
-  ChecklistItem, JourneyForm,
+  ChecklistItem, JourneyForm, JourneyMilestone,
 } from '@/lib/types-scalable';
+import { DEFAULT_MILESTONE_PRESET } from '@/lib/types-scalable';
 import type { Quiz, Badge as BadgeType } from '@/lib/types-scalable';
 import type { Course } from '@/lib/types-lms';
 
@@ -465,7 +466,7 @@ const STAGE_COLORS = [
 ];
 
 function StageCard({
-  stage, stageIndex, totalStages, quizzes, courses, badges, forms,
+  stage, stageIndex, totalStages, quizzes, courses, badges, forms, milestones,
   onUpdate, onRemove, onMoveUp, onMoveDown,
 }: {
   stage: JourneyStage;
@@ -475,6 +476,7 @@ function StageCard({
   courses: Course[];
   badges: BadgeType[];
   forms: JourneyForm[];
+  milestones: JourneyMilestone[];
   onUpdate: (s: JourneyStage) => void;
   onRemove: () => void;
   onMoveUp: () => void;
@@ -484,6 +486,7 @@ function StageCard({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(stage.title);
   const color = STAGE_COLORS[stageIndex % STAGE_COLORS.length];
+  const stageMilestone = milestones.find(m => m.id === stage.milestoneId);
 
   const saveTitle = () => {
     onUpdate({ ...stage, title: titleInput.trim() || stage.title });
@@ -566,6 +569,19 @@ function StageCard({
         <Badge variant="secondary" className="text-xs shrink-0">
           {stage.actions.length} {stage.actions.length === 1 ? 'acción' : 'acciones'}
         </Badge>
+        {stageMilestone && (
+          <Badge
+            variant="outline"
+            className="text-xs shrink-0 gap-1"
+            style={{
+              borderColor: `${stageMilestone.color ?? '#64748B'}66`,
+              color: stageMilestone.color ?? '#475569',
+              backgroundColor: `${stageMilestone.color ?? '#64748B'}12`,
+            }}
+          >
+            <Flag className="h-3 w-3" /> {stageMilestone.shortLabel ?? `${stageMilestone.dayOffset}d`}
+          </Badge>
+        )}
         {stage.deadlineDays && (
           <Badge variant="outline" className="text-xs shrink-0 border-sky-300 text-sky-600 bg-sky-50 gap-1">
             <Clock className="h-3 w-3" /> {stage.deadlineDays} {stage.deadlineUnit ?? 'días'}
@@ -623,10 +639,35 @@ function StageCard({
             className="h-7 text-xs border-0 border-b rounded-none px-0 bg-transparent focus-visible:ring-0 focus-visible:border-primary text-muted-foreground"
           />
 
+          {/* Milestone assignment */}
+          {milestones.length > 0 && (
+            <div className="flex items-center gap-2 pt-1 flex-wrap">
+              <Flag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground shrink-0">Tramo:</span>
+              <select
+                value={stage.milestoneId ?? ''}
+                onChange={e => onUpdate({ ...stage, milestoneId: e.target.value || undefined })}
+                className="h-6 rounded border border-dashed border-muted bg-transparent px-1 text-xs focus:outline-none focus:border-primary"
+              >
+                <option value="">Sin tramo</option>
+                {milestones.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.emoji ? `${m.emoji} ` : ''}{m.label} (día {m.dayOffset})
+                  </option>
+                ))}
+              </select>
+              {stageMilestone && !stage.deadlineDays && (
+                <span className="text-xs text-muted-foreground">
+                  vence el día {stageMilestone.dayOffset} desde el ingreso
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Deadline */}
           <div className="flex items-center gap-2 pt-1">
             <Clock className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground shrink-0">Plazo:</span>
+            <span className="text-xs text-muted-foreground shrink-0">Plazo propio:</span>
             <input
               type="number"
               min={1}
@@ -717,6 +758,191 @@ function StageCard({
   );
 }
 
+// ─── Milestone editor ─────────────────────────────────────────────────────────
+
+const MILESTONE_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EC4899', '#06B6D4'];
+const MILESTONE_EMOJIS = ['🌱', '⚡', '🏆', '🚀', '🎯', '💎', '🔥', '⭐'];
+
+function MilestonesEditor({
+  anchored, milestones, onToggleAnchor, onChange,
+}: {
+  anchored: boolean;
+  milestones: JourneyMilestone[];
+  onToggleAnchor: (v: boolean) => void;
+  onChange: (m: JourneyMilestone[]) => void;
+}) {
+  const sorted = [...milestones].sort((a, b) => a.order - b.order || a.dayOffset - b.dayOffset);
+
+  const applyPreset = () => {
+    onChange(DEFAULT_MILESTONE_PRESET.map(m => ({ ...m, id: crypto.randomUUID() })));
+  };
+
+  const addMilestone = () => {
+    const last = sorted[sorted.length - 1];
+    const nextOffset = last ? last.dayOffset + 30 : 30;
+    onChange([
+      ...sorted,
+      {
+        id: crypto.randomUUID(),
+        order: sorted.length,
+        label: `Días ${last ? last.dayOffset + 1 : 1} a ${nextOffset}`,
+        shortLabel: `${nextOffset}d`,
+        dayOffset: nextOffset,
+        emoji: MILESTONE_EMOJIS[sorted.length % MILESTONE_EMOJIS.length],
+        color: MILESTONE_COLORS[sorted.length % MILESTONE_COLORS.length],
+      },
+    ]);
+  };
+
+  const update = (id: string, patch: Partial<JourneyMilestone>) => {
+    onChange(sorted.map(m => (m.id === id ? { ...m, ...patch } : m)));
+  };
+
+  const remove = (id: string) => {
+    onChange(sorted.filter(m => m.id !== id).map((m, i) => ({ ...m, order: i })));
+  };
+
+  const move = (index: number, dir: 'up' | 'down') => {
+    const target = dir === 'up' ? index - 1 : index + 1;
+    if (target < 0 || target >= sorted.length) return;
+    const next = [...sorted];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next.map((m, i) => ({ ...m, order: i })));
+  };
+
+  return (
+    <Card className="border-violet-200 bg-violet-50/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="space-y-1">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-violet-600" />
+              Plan por tiempo (30 / 60 / 90 días)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Ancla la ruta a la <strong>fecha de ingreso</strong> de cada vendedor. Los tramos son
+              totalmente personalizables: cambia los días, agrega o quita los que necesites.
+            </CardDescription>
+          </div>
+          <button
+            type="button"
+            onClick={() => onToggleAnchor(!anchored)}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border font-medium transition-colors shrink-0 ${
+              anchored
+                ? 'bg-violet-100 border-violet-300 text-violet-700 hover:bg-violet-200'
+                : 'bg-muted border-muted-foreground/20 text-muted-foreground hover:bg-muted/70'
+            }`}
+          >
+            <CalendarClock className="h-3.5 w-3.5" />
+            {anchored ? 'Anclado a fecha de ingreso' : 'Sin anclar (ruta libre)'}
+          </button>
+        </div>
+      </CardHeader>
+
+      {anchored && (
+        <CardContent className="space-y-2">
+          {sorted.length === 0 ? (
+            <div className="border-2 border-dashed rounded-lg py-6 text-center space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Aún no hay tramos configurados.
+              </p>
+              <Button size="sm" variant="outline" onClick={applyPreset}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> Usar preset 30 / 60 / 90
+              </Button>
+            </div>
+          ) : (
+            <>
+              {sorted.map((m, i) => {
+                const startDay = i === 0 ? 1 : sorted[i - 1].dayOffset + 1;
+                return (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 flex-wrap"
+                    style={{ borderLeftWidth: 4, borderLeftColor: m.color ?? '#8B5CF6' }}
+                  >
+                    <select
+                      value={m.emoji ?? ''}
+                      onChange={e => update(m.id, { emoji: e.target.value || undefined })}
+                      className="h-7 w-12 rounded border bg-transparent text-center text-sm focus:outline-none focus:border-primary"
+                    >
+                      <option value="">—</option>
+                      {MILESTONE_EMOJIS.map(e => <option key={e} value={e}>{e}</option>)}
+                    </select>
+
+                    <Input
+                      value={m.label}
+                      onChange={e => update(m.id, { label: e.target.value })}
+                      placeholder="Nombre del tramo"
+                      className="h-7 text-xs flex-1 min-w-[150px]"
+                    />
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[11px] text-muted-foreground">día</span>
+                      <input
+                        type="number"
+                        min={1}
+                        value={m.dayOffset}
+                        onChange={e => {
+                          const v = Math.max(1, parseInt(e.target.value, 10) || 1);
+                          update(m.id, { dayOffset: v, shortLabel: `${v}d` });
+                        }}
+                        className="h-7 w-16 rounded border bg-transparent px-2 text-xs text-center focus:outline-none focus:border-primary"
+                      />
+                    </div>
+
+                    <span className="text-[11px] text-muted-foreground shrink-0">
+                      (del día {startDay} al {m.dayOffset})
+                    </span>
+
+                    <div className="flex items-center gap-1 shrink-0 ml-auto">
+                      {MILESTONE_COLORS.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => update(m.id, { color: c })}
+                          className={`h-4 w-4 rounded-full border-2 transition-transform ${m.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                          style={{ backgroundColor: c }}
+                          title={c}
+                        />
+                      ))}
+                      <button onClick={() => move(i, 'up')} disabled={i === 0}
+                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30">
+                        <ChevronUp className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => move(i, 'down')} disabled={i === sorted.length - 1}
+                        className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30">
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
+                      <button onClick={() => remove(m.id)} className="p-1 text-destructive hover:text-destructive/80">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="border-dashed text-xs h-8" onClick={addMilestone}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Agregar tramo
+                </Button>
+                <Button variant="ghost" size="sm" className="text-xs h-8 text-muted-foreground" onClick={applyPreset}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Restaurar 30 / 60 / 90
+                </Button>
+              </div>
+            </>
+          )}
+
+          <p className="text-[11px] text-muted-foreground flex items-start gap-1.5 pt-1">
+            <Info className="h-3 w-3 mt-0.5 shrink-0" />
+            Asigna cada etapa a un tramo desde su tarjeta. Si el vendedor no tiene fecha de ingreso
+            capturada, la ruta se muestra sin fechas límite.
+          </p>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function JourneyPage() {
@@ -732,6 +958,9 @@ export default function JourneyPage() {
   const [forms, setForms] = useState<JourneyForm[]>([]);
   const [journeyName, setJourneyName] = useState('');
   const [journeyStatus, setJourneyStatus] = useState<'draft' | 'published'>('published');
+  const [anchorToEntryDate, setAnchorToEntryDate] = useState(false);
+  const [milestones, setMilestones] = useState<JourneyMilestone[]>([]);
+  const [explorable, setExplorable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
@@ -762,6 +991,11 @@ export default function JourneyPage() {
           setJourney(existingJourney);
           setJourneyName(existingJourney.name);
           setJourneyStatus((existingJourney as any).status ?? 'published');
+          setAnchorToEntryDate(existingJourney.anchorToEntryDate ?? false);
+          setMilestones(
+            [...(existingJourney.milestones ?? [])].sort((a, b) => a.order - b.order || a.dayOffset - b.dayOffset)
+          );
+          setExplorable(existingJourney.explorable !== false);
 
           // Backward compat: if stages[], use them; if steps[], wrap in one stage
           const anyJ = existingJourney as any;
@@ -789,16 +1023,28 @@ export default function JourneyPage() {
           setJourney(null);
           const product = products.find(p => p.id === selectedProductId);
           setJourneyName(`Ruta de ${product?.name || 'Producto'}`);
-          // Default 3-stage structure
+          setExplorable(true);
+
+          // Nuevas rutas arrancan ancladas al ingreso con el plan 30/60/90
+          const defaultMilestones: JourneyMilestone[] = DEFAULT_MILESTONE_PRESET.map(m => ({
+            ...m,
+            id: crypto.randomUUID(),
+          }));
+          setAnchorToEntryDate(true);
+          setMilestones(defaultMilestones);
+
+          // Default 3-stage structure, una etapa por tramo
           setStages([
             {
               id: crypto.randomUUID(), order: 0, title: 'Bienvenida', required: true,
+              milestoneId: defaultMilestones[0]?.id,
               actions: [
                 { id: crypto.randomUUID(), type: 'info_form', order: 0, title: 'Datos del vendedor', required: true, config: {} },
               ],
             },
             {
               id: crypto.randomUUID(), order: 1, title: 'Capacitación', required: true,
+              milestoneId: defaultMilestones[1]?.id,
               actions: [
                 { id: crypto.randomUUID(), type: 'challenge', order: 0, title: 'Desafío de producto', required: true, config: {} },
                 { id: crypto.randomUUID(), type: 'results', order: 1, title: 'Ver resultados', required: true, config: {} },
@@ -806,6 +1052,7 @@ export default function JourneyPage() {
             },
             {
               id: crypto.randomUUID(), order: 2, title: 'Cierre', required: false,
+              milestoneId: defaultMilestones[2]?.id,
               actions: [
                 { id: crypto.randomUUID(), type: 'certificate', order: 0, title: 'Obtener certificado', required: false, config: {} },
               ],
@@ -879,7 +1126,7 @@ export default function JourneyPage() {
     if (!initialLoadDoneRef.current || !selectedProductId) return;
     setHasUnsaved(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stages, journeyName, journeyStatus]);
+  }, [stages, journeyName, journeyStatus, anchorToEntryDate, milestones, explorable]);
 
   // ── Auto-save debounce (3s after last change) ────────────────────────────
 
@@ -893,12 +1140,18 @@ export default function JourneyPage() {
 
     if (!silent) setSaving(true); else setAutoSaving(true);
     try {
+      const milestoneIds = new Set(milestones.map(m => m.id));
       const stagesWithOrder = stages.map((s, i) => ({
         ...s,
         order: i,
+        // Descarta referencias a tramos eliminados
+        milestoneId: s.milestoneId && milestoneIds.has(s.milestoneId) ? s.milestoneId : undefined,
         actions: s.actions.map((a, j) => ({ ...a, order: j })),
       }));
       const flatSteps = stagesWithOrder.flatMap(s => s.actions);
+      const orderedMilestones = [...milestones]
+        .sort((a, b) => a.order - b.order || a.dayOffset - b.dayOffset)
+        .map((m, i) => ({ ...m, order: i }));
 
       await saveJourney(
         {
@@ -909,6 +1162,9 @@ export default function JourneyPage() {
           steps: flatSteps,
           active: true,
           status: journeyStatus,
+          anchorToEntryDate,
+          milestones: orderedMilestones,
+          explorable,
         } as any,
         userId,
         journey?.id
@@ -922,7 +1178,7 @@ export default function JourneyPage() {
     } finally {
       if (!silent) setSaving(false); else setAutoSaving(false);
     }
-  }, [selectedProductId, profile?.uid, journeyName, stages, journeyStatus, journey?.id]);
+  }, [selectedProductId, profile?.uid, journeyName, stages, journeyStatus, journey?.id, anchorToEntryDate, milestones, explorable]);
 
   useEffect(() => {
     if (!hasUnsaved || !selectedProductId) return;
@@ -1084,14 +1340,37 @@ export default function JourneyPage() {
 
               <CardContent className="space-y-4">
                 {/* Journey name */}
-                <div className="space-y-2 max-w-sm">
-                  <Label>Nombre de la ruta</Label>
-                  <Input
-                    value={journeyName}
-                    onChange={(e) => setJourneyName(e.target.value)}
-                    placeholder="Ej: Ruta Aviva Tu Compra"
-                  />
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="space-y-2 max-w-sm flex-1 min-w-[220px]">
+                    <Label>Nombre de la ruta</Label>
+                    <Input
+                      value={journeyName}
+                      onChange={(e) => setJourneyName(e.target.value)}
+                      placeholder="Ej: Ruta Aviva Tu Compra"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExplorable(v => !v)}
+                    className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border font-medium transition-colors ${
+                      explorable
+                        ? 'bg-teal-50 border-teal-300 text-teal-700 hover:bg-teal-100'
+                        : 'bg-muted border-muted-foreground/20 text-muted-foreground hover:bg-muted/70'
+                    }`}
+                    title="Permite que cualquier vendedor consulte esta ruta para conocer el producto"
+                  >
+                    <Compass className="h-3.5 w-3.5" />
+                    {explorable ? 'Explorable por todos' : 'Solo para asignados'}
+                  </button>
                 </div>
+
+                {/* Milestones (30/60/90 personalizables) */}
+                <MilestonesEditor
+                  anchored={anchorToEntryDate}
+                  milestones={milestones}
+                  onToggleAnchor={setAnchorToEntryDate}
+                  onChange={setMilestones}
+                />
 
                 {/* Stages */}
                 <div className="space-y-2">
@@ -1113,6 +1392,7 @@ export default function JourneyPage() {
                             courses={courses}
                             badges={badges}
                             forms={forms}
+                            milestones={anchorToEntryDate ? milestones : []}
                             onUpdate={(s) => updateStage(stageIdx, s)}
                             onRemove={() => removeStage(stageIdx)}
                             onMoveUp={() => moveStage(stageIdx, 'up')}
