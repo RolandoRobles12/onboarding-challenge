@@ -988,6 +988,16 @@ export async function getAllJourneys(orgId: string = DEFAULT_ORG_ID): Promise<Jo
   }
 }
 
+/**
+ * Rutas que un vendedor puede explorar libremente para conocer otros productos.
+ * Excluye borradores e inactivas. Si `explorable` no está definido, la ruta se
+ * considera explorable (comportamiento por defecto para rutas ya existentes).
+ */
+export async function getExplorableJourneys(orgId: string = DEFAULT_ORG_ID): Promise<Journey[]> {
+  const journeys = await getAllJourneys(orgId);
+  return journeys.filter(j => j.active && j.status !== 'draft' && j.explorable !== false);
+}
+
 export async function saveJourney(
   journey: Omit<Journey, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>,
   userId: string,
