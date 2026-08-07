@@ -39,6 +39,8 @@ import {
   CheckCheck,
   Clock,
   ExternalLink,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -123,6 +125,68 @@ function TimerAutoComplete({
           Ya terminé de leer — marcar como completada
         </button>
       )}
+    </div>
+  );
+}
+
+// ─── Expandable iframe (slides / embedded / documento / scorm) ──────────────
+// En celular el recuadro es chico y el pellizco-para-zoom no siempre
+// funciona dentro de un iframe ajeno — se agrega un botón de pantalla
+// completa real (Fullscreen API) para no depender de que el contenido
+// embebido (ej. Figma) tenga su propio control que funcione en todos los
+// navegadores móviles.
+function ExpandableIframe({
+  src,
+  title,
+  style,
+}: {
+  src: string;
+  title: string;
+  style: React.CSSProperties;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    const el = containerRef.current as (HTMLDivElement & { webkitRequestFullscreen?: () => void }) | null;
+    if (!el) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else if (el.requestFullscreen) {
+      el.requestFullscreen();
+    } else if (el.webkitRequestFullscreen) {
+      el.webkitRequestFullscreen();
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative rounded-xl overflow-hidden border w-full bg-background"
+      style={isFullscreen ? undefined : style}
+    >
+      <iframe
+        key={src}
+        src={src}
+        className="w-full h-full"
+        allowFullScreen
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+        title={title}
+      />
+      <button
+        type="button"
+        onClick={toggleFullscreen}
+        className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-black/60 text-white flex items-center justify-center backdrop-blur-sm hover:bg-black/80 transition-colors"
+        title={isFullscreen ? 'Salir de pantalla completa' : 'Ver en pantalla completa'}
+      >
+        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
@@ -331,16 +395,7 @@ function LessonViewer({
         {/* EMBEDDED — auto-complete via timer */}
         {lesson.type === 'embedded' && content.embedUrl && (
           <>
-            <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
-              <iframe
-                key={lesson.id}
-                src={content.embedUrl}
-                className="w-full h-full"
-                allowFullScreen
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                title={lesson.title}
-              />
-            </div>
+            <ExpandableIframe src={content.embedUrl} title={lesson.title} style={iframeStyle} />
             <TimerAutoComplete
               key={lesson.id}
               seconds={timerSeconds}
@@ -353,16 +408,7 @@ function LessonViewer({
         {/* SLIDES — auto-complete via timer */}
         {lesson.type === 'slides' && content.slidesUrl && (
           <>
-            <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
-              <iframe
-                key={lesson.id}
-                src={content.slidesUrl}
-                className="w-full h-full"
-                allowFullScreen
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                title={lesson.title}
-              />
-            </div>
+            <ExpandableIframe src={content.slidesUrl} title={lesson.title} style={iframeStyle} />
             <TimerAutoComplete
               key={lesson.id}
               seconds={timerSeconds}
@@ -397,14 +443,7 @@ function LessonViewer({
               {canPreviewInline ? (
                 <>
                   {/* Desktop PDF: native browser renderer works perfectly */}
-                  <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
-                    <iframe
-                      key={lesson.id}
-                      src={rawUrl}
-                      className="w-full h-full"
-                      title={lesson.title}
-                    />
-                  </div>
+                  <ExpandableIframe src={rawUrl} title={lesson.title} style={iframeStyle} />
                   <a
                     href={rawUrl}
                     target="_blank"
@@ -453,14 +492,7 @@ function LessonViewer({
         {/* SCORM — auto-complete via timer */}
         {lesson.type === 'scorm' && content.scormPackageUrl && (
           <>
-            <div className="rounded-xl overflow-hidden border w-full" style={iframeStyle}>
-              <iframe
-                key={lesson.id}
-                src={content.scormPackageUrl}
-                className="w-full h-full"
-                title={lesson.title}
-              />
-            </div>
+            <ExpandableIframe src={content.scormPackageUrl} title={lesson.title} style={iframeStyle} />
             <TimerAutoComplete
               key={lesson.id}
               seconds={timerSeconds}

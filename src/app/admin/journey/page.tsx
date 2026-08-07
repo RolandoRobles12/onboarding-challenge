@@ -23,7 +23,7 @@ import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
   BookOpen, Swords, Medal, Info, ListChecks, Pencil, X, ClipboardList,
-  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock, CalendarClock, Flag, Compass,
+  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock, CalendarClock, Flag, Compass, Layers,
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
@@ -764,12 +764,14 @@ const MILESTONE_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EC4899',
 const MILESTONE_EMOJIS = ['🌱', '⚡', '🏆', '🚀', '🎯', '💎', '🔥', '⭐'];
 
 function MilestonesEditor({
-  anchored, milestones, onToggleAnchor, onChange,
+  anchored, milestones, stages, onToggleAnchor, onChange, onAssignStage,
 }: {
   anchored: boolean;
   milestones: JourneyMilestone[];
+  stages: JourneyStage[];
   onToggleAnchor: (v: boolean) => void;
   onChange: (m: JourneyMilestone[]) => void;
+  onAssignStage: (stageId: string, milestoneId: string | undefined) => void;
 }) {
   const sorted = [...milestones].sort((a, b) => a.order - b.order || a.dayOffset - b.dayOffset);
 
@@ -854,12 +856,15 @@ function MilestonesEditor({
             <>
               {sorted.map((m, i) => {
                 const startDay = i === 0 ? 1 : sorted[i - 1].dayOffset + 1;
+                const stagesHere = stages.filter(s => s.milestoneId === m.id);
+                const actionsHere = stagesHere.reduce((n, s) => n + s.actions.length, 0);
                 return (
                   <div
                     key={m.id}
-                    className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 flex-wrap"
+                    className="rounded-lg border bg-background px-3 py-2"
                     style={{ borderLeftWidth: 4, borderLeftColor: m.color ?? '#8B5CF6' }}
                   >
+                  <div className="flex items-center gap-2 flex-wrap">
                     <select
                       value={m.emoji ?? ''}
                       onChange={e => update(m.id, { emoji: e.target.value || undefined })}
@@ -894,7 +899,8 @@ function MilestonesEditor({
                       (del día {startDay} al {m.dayOffset})
                     </span>
 
-                    <div className="flex items-center gap-1 shrink-0 ml-auto">
+                    <div className="flex items-center gap-1 shrink-0 ml-auto" title="Color del tramo en la línea de tiempo">
+                      <span className="text-[10px] text-muted-foreground mr-0.5">color:</span>
                       {MILESTONE_COLORS.map(c => (
                         <button
                           key={c}
@@ -917,6 +923,72 @@ function MilestonesEditor({
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
+                  </div>
+
+                  {/* Asigna/quita etapas de este tramo con un clic — la edición
+                      vive en el mismo lugar que la vista, no solo abajo en
+                      cada tarjeta de etapa (que sigue funcionando también). */}
+                  <div className="flex items-start gap-1.5 flex-wrap pt-2 mt-2 border-t border-dashed">
+                    <Layers className="h-3 w-3 text-muted-foreground shrink-0 mt-1" />
+                    {stages.length === 0 ? (
+                      <span className="text-[11px] text-muted-foreground italic">
+                        Aún no hay etapas — créalas más abajo y luego asígnalas aquí.
+                      </span>
+                    ) : (
+                      <div className="flex-1 space-y-1">
+                        {stagesHere.length === 0 ? (
+                          <p className="text-[11px] text-amber-600">
+                            Sin etapas asignadas — este tramo se verá vacío para el vendedor.
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground">
+                            {stagesHere.length} {stagesHere.length === 1 ? 'etapa' : 'etapas'} · {actionsHere} {actionsHere === 1 ? 'acción' : 'acciones'} en este tramo
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-1.5">
+                          {stages.map(s => {
+                            const assignedHere = s.milestoneId === m.id;
+                            const otherMilestone = !assignedHere && s.milestoneId
+                              ? milestones.find(mm => mm.id === s.milestoneId)
+                              : null;
+                            return (
+                              <button
+                                key={s.id}
+                                type="button"
+                                onClick={() => onAssignStage(s.id, assignedHere ? undefined : m.id)}
+                                title={
+                                  assignedHere
+                                    ? 'En este tramo — clic para quitar'
+                                    : otherMilestone
+                                      ? `Actualmente en "${otherMilestone.label}" — clic para mover aquí`
+                                      : 'Clic para asignar a este tramo'
+                                }
+                                className="text-[11px] px-2 py-0.5 rounded-full border transition-colors"
+                                style={assignedHere ? {
+                                  backgroundColor: m.color ?? '#8B5CF6',
+                                  borderColor: m.color ?? '#8B5CF6',
+                                  color: '#fff',
+                                } : otherMilestone ? {
+                                  borderColor: `${otherMilestone.color ?? '#64748B'}66`,
+                                  color: otherMilestone.color ?? '#475569',
+                                  backgroundColor: `${otherMilestone.color ?? '#64748B'}12`,
+                                } : {
+                                  borderColor: 'hsl(var(--border))',
+                                  borderStyle: 'dashed',
+                                  color: 'hsl(var(--muted-foreground))',
+                                }}
+                              >
+                                {s.title}
+                                {otherMilestone && (
+                                  <span className="opacity-70"> · {otherMilestone.shortLabel ?? otherMilestone.label}</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   </div>
                 );
               })}
@@ -1368,8 +1440,12 @@ export default function JourneyPage() {
                 <MilestonesEditor
                   anchored={anchorToEntryDate}
                   milestones={milestones}
+                  stages={stages}
                   onToggleAnchor={setAnchorToEntryDate}
                   onChange={setMilestones}
+                  onAssignStage={(stageId, milestoneId) =>
+                    setStages(prev => prev.map(s => s.id === stageId ? { ...s, milestoneId } : s))
+                  }
                 />
 
                 {/* Stages */}
