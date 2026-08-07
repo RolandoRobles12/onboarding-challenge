@@ -8,6 +8,7 @@ import {
   BarChart3, TrendingUp, TrendingDown, Users, Target, Clock, Zap, Radio,
   BookOpen, X, Plus, Timer, AlertTriangle, CheckCircle2, Circle,
   ChevronDown, ChevronRight, Search, ArrowUpDown, Download, HelpCircle,
+  ClipboardList,
 } from 'lucide-react';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
 import { getDailyPulses, getPulseAttemptsByDateRange, getQuestions, getAllUsers, getAllQuizAttempts } from '@/lib/firestore-service';
@@ -56,6 +57,7 @@ const MODULE_BAR_COLORS: Record<string, string> = {
 };
 
 type OptFilter = 'dimension' | 'filterValue' | 'cosechaGranularity' | 'cosechaFrom' | 'cosechaTo';
+type EvalOptFilter = 'hub' | 'cosechaGranularity' | 'cosechaFrom' | 'cosechaTo';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -114,6 +116,39 @@ function getCosechaGroup(cosecha: string | undefined, granularity: CosechaGranul
     case 'año':
       return `${date.getFullYear()}`;
   }
+}
+
+const MONTH_NAMES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+];
+
+/** Mínimo de registros para que un promedio sea representativo. Debajo de esto
+ *  el dato se atenúa y se marca — un 90% de un solo vendedor no dice nada, y
+ *  antes se veía con el mismo peso visual que un 85% de catorce. */
+const MIN_SAMPLE = 3;
+
+function LowSampleTag() {
+  return (
+    <span
+      className="text-[9px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-200 rounded px-1 py-0.5 shrink-0"
+      title={`Menos de ${MIN_SAMPLE} registros — el promedio no es representativo`}
+    >
+      muestra baja
+    </span>
+  );
+}
+
+/** Convierte la clave técnica de una cosecha en algo legible:
+ *  "2024-08" → "Agosto 2024", "2024-Q3" → "Q3 2024", "2024-S32" → "Semana 32, 2024". */
+function formatCosechaLabel(key: string): string {
+  const month = key.match(/^(\d{4})-(\d{2})$/);
+  if (month) return `${MONTH_NAMES[parseInt(month[2], 10) - 1]} ${month[1]}`;
+  const quarter = key.match(/^(\d{4})-Q(\d)$/);
+  if (quarter) return `Q${quarter[2]} ${quarter[1]}`;
+  const week = key.match(/^(\d{4})-S(\d{2})$/);
+  if (week) return `Semana ${parseInt(week[2], 10)}, ${week[1]}`;
+  return key;
 }
 
 function getDimensionValue(a: PulseAttempt, dim: SegmentDimension, granularity: CosechaGranularity = 'mes'): string {
@@ -655,10 +690,13 @@ function buildEvalProductMetrics(
 
 // ── Components ─────────────────────────────────────────────────────────────
 
-function StatCard({ title, value, description, icon: Icon, color, delta }: {
+function StatCard({ title, value, description, icon: Icon, color, delta, deltaLabel }: {
   title: string; value: string | number; description?: string;
   icon: React.ElementType; color: string;
   delta?: { value: number; positive: boolean } | null;
+  /** Texto bajo el delta. Por defecto "vs período anterior"; conviene ser
+   *  explícito cuando el número principal no es del mismo período. */
+  deltaLabel?: string;
 }) {
   return (
     <Card>
@@ -677,7 +715,7 @@ function StatCard({ title, value, description, icon: Icon, color, delta }: {
           )}
         </div>
         {description && <p className="text-xs text-muted-foreground mt-1">{description}</p>}
-        {delta && <p className="text-[10px] text-muted-foreground">vs período anterior</p>}
+        {delta && <p className="text-[10px] text-muted-foreground">{deltaLabel ?? 'vs período anterior'}</p>}
       </CardContent>
     </Card>
   );
@@ -751,6 +789,13 @@ export default function AnalyticsPage() {
   const [evalHubFilter, setEvalHubFilter] = useState('');
   const [evalProductFilter, setEvalProductFilter] = useState('');
   const [quizSelectorSearch, setQuizSelectorSearch] = useState('');
+  // Filtros opcionales de Evaluaciones: se agregan bajo demanda (mismo patrón
+  // de chips que ya usa la pestaña de Pulso) en vez de mostrar los 6 siempre.
+  const [evalOptFilters, setEvalOptFilters] = useState<Set<EvalOptFilter>>(new Set());
+  const [evalAddFilterOpen, setEvalAddFilterOpen] = useState(false);
+  const [quizSelectorOpen, setQuizSelectorOpen] = useState(false);
+  const evalAddFilterRef = useRef<HTMLDivElement>(null);
+  const quizSelectorRef = useRef<HTMLDivElement>(null);
   const [loadingPulse, setLoadingPulse] = useState(false);
   const [pulseAttempts, setPulseAttempts] = useState<PulseAttempt[]>([]);
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
@@ -782,10 +827,45 @@ export default function AnalyticsPage() {
       if (addFilterRef.current && !addFilterRef.current.contains(e.target as Node)) {
         setAddFilterOpen(false);
       }
+      if (evalAddFilterRef.current && !evalAddFilterRef.current.contains(e.target as Node)) {
+        setEvalAddFilterOpen(false);
+      }
+      if (quizSelectorRef.current && !quizSelectorRef.current.contains(e.target as Node)) {
+        setQuizSelectorOpen(false);
+      }
     }
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, []);
+
+  const addEvalFilter = (key: EvalOptFilter) => {
+    setEvalOptFilters(prev => new Set([...prev, key]));
+    setEvalAddFilterOpen(false);
+  };
+
+  /** Al quitar un chip también se limpia su valor, para que la gráfica no
+   *  siga filtrada por algo que ya no está visible en pantalla. */
+  const removeEvalFilter = (key: EvalOptFilter) => {
+    setEvalOptFilters(prev => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    if (key === 'hub') setEvalHubFilter('');
+    if (key === 'cosechaGranularity') setEvalCosechaGranularity('mes');
+    if (key === 'cosechaFrom') setEvalCosechaFrom('');
+    if (key === 'cosechaTo') setEvalCosechaTo('');
+  };
+
+  const evalAvailableToAdd = useMemo((): { key: EvalOptFilter; label: string }[] => {
+    const all: { key: EvalOptFilter; label: string }[] = [
+      { key: 'hub', label: 'Hub' },
+      { key: 'cosechaGranularity', label: 'Agrupar cosecha' },
+      { key: 'cosechaFrom', label: 'Cosecha desde' },
+      { key: 'cosechaTo', label: 'Cosecha hasta' },
+    ];
+    return all.filter(f => !evalOptFilters.has(f.key));
+  }, [evalOptFilters]);
 
   const addFilter = (key: OptFilter) => {
     setActiveOptFilters(prev => new Set([...prev, key]));
@@ -1130,6 +1210,63 @@ export default function AnalyticsPage() {
   const evalParticipation = evalUsers.length > 0
     ? Math.round((evalFilteredScores.length / evalUsers.length) * 100)
     : 0;
+
+  /** Umbral de refuerzo: mismo 70% que usa pctColor/barColor en toda la página,
+   *  para que "verde" y "aprobado" signifiquen lo mismo en cada gráfica. */
+  const EVAL_MIN_SCORE = 70;
+
+  /** Vendedores evaluados que quedaron por debajo del umbral — es la métrica
+   *  sobre la que el admin puede actuar (a quién dar seguimiento), a diferencia
+   *  de "Participación", que era el mismo dato que "Vendedores evaluados". */
+  const evalBelowMin = useMemo(
+    () => evalFilteredScores.filter(s => s.avgScore < EVAL_MIN_SCORE).length,
+    [evalFilteredScores],
+  );
+
+  /** Tendencia últimos 30 días vs los 30 previos. Los KPIs muestran el
+   *  acumulado histórico; esto agrega la dirección del movimiento, que es lo
+   *  que faltaba para saber si un 88% es una buena o mala noticia. */
+  const evalTrend = useMemo(() => {
+    const attemptMillis = (a: QuizAttempt): number => {
+      const ts = a.completedAt as unknown as { toMillis?: () => number; seconds?: number } | undefined;
+      if (!ts) return 0;
+      if (typeof ts.toMillis === 'function') return ts.toMillis();
+      return (ts.seconds ?? 0) * 1000;
+    };
+    const scoped = selectedQuizIds.size > 0
+      ? evalFilteredAttempts.filter(a => selectedQuizIds.has(a.quizId))
+      : evalFilteredAttempts;
+
+    const now = Date.now();
+    const day = 86400000;
+    const currentFrom = now - 30 * day;
+    const previousFrom = now - 60 * day;
+
+    const current: QuizAttempt[] = [];
+    const previous: QuizAttempt[] = [];
+    for (const a of scoped) {
+      const ms = attemptMillis(a);
+      if (!ms) continue;
+      if (ms >= currentFrom) current.push(a);
+      else if (ms >= previousFrom) previous.push(a);
+    }
+
+    const avg = (list: QuizAttempt[]) =>
+      list.length > 0 ? Math.round(list.reduce((s, a) => s + a.percentage, 0) / list.length) : null;
+
+    const currentAvg = avg(current);
+    const previousAvg = avg(previous);
+
+    // Sin base de comparación no se inventa una tendencia
+    const scoreDelta = currentAvg !== null && previousAvg !== null
+      ? { value: Math.abs(currentAvg - previousAvg), positive: currentAvg >= previousAvg }
+      : null;
+    const attemptsDelta = previous.length > 0
+      ? { value: Math.abs(current.length - previous.length), positive: current.length >= previous.length }
+      : null;
+
+    return { scoreDelta, attemptsDelta };
+  }, [evalFilteredAttempts, selectedQuizIds]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1961,12 +2098,9 @@ export default function AnalyticsPage() {
               </button>
             </div>
           )}
-          {migrationCount === 0 && evalAttempts.length > 0 && (
-            <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2.5 text-sm text-green-800">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>Todos los datos de evaluaciones están correctamente registrados.</span>
-            </div>
-          )}
+          {/* Nota: el estado "todo correcto" no se anuncia — un mensaje de éxito
+              permanente es ruido y deja de comunicar. Solo se avisa cuando hay
+              algo que el admin debe resolver (banner ámbar de arriba). */}
           {loadingEval ? (
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28" />)}</div>
@@ -1975,32 +2109,53 @@ export default function AnalyticsPage() {
           ) : (
             <>
               {/* ── Filter bar ─────────────────────────────────────────────── */}
-              <div className="flex flex-wrap items-start gap-4">
-                {/* Quiz selector */}
-                <div className="space-y-1.5 w-[300px] shrink-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evaluaciones a medir</p>
-                    {selectedQuizIds.size > 0 && (
-                      <button onClick={() => setSelectedQuizIds(new Set())} className="text-[10px] text-primary hover:underline">
-                        Limpiar ({selectedQuizIds.size})
-                      </button>
-                    )}
-                  </div>
-                  <div className="border rounded-xl bg-background overflow-hidden">
+              {/* Una sola fila de controles: el selector de evaluaciones pasa a
+                  ser un desplegable (antes era un panel fijo de 300px con su
+                  propio scroll dentro de una página que ya scrollea) y los
+                  filtros secundarios se agregan bajo demanda como chips. */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Quiz selector — desplegable */}
+                <div className="relative shrink-0" ref={quizSelectorRef}>
+                  <button
+                    onClick={() => setQuizSelectorOpen(o => !o)}
+                    className="flex items-center gap-1.5 h-8 border rounded-full px-3 bg-background text-sm shadow-sm hover:border-primary/40 transition-colors"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <span className="text-muted-foreground text-xs font-medium">Evaluaciones:</span>
+                    <span className="font-semibold max-w-[180px] truncate">
+                      {selectedQuizIds.size === 0
+                        ? 'Todas'
+                        : selectedQuizIds.size === 1
+                          ? (quizzes.find(q => selectedQuizIds.has(q.id))?.title ?? '1 seleccionada')
+                          : `${selectedQuizIds.size} seleccionadas`}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  </button>
+                  {quizSelectorOpen && (
+                  <div className="absolute top-10 left-0 z-50 w-[320px] border rounded-xl bg-background shadow-lg overflow-hidden">
                     {/* Search within quizzes */}
-                    <div className="p-2 border-b">
-                      <div className="relative">
+                    <div className="p-2 border-b flex items-center gap-2">
+                      <div className="relative flex-1">
                         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
                         <input
                           type="text"
                           placeholder="Buscar evaluación..."
                           value={quizSelectorSearch}
                           onChange={e => setQuizSelectorSearch(e.target.value)}
+                          autoFocus
                           className="w-full pl-6 pr-2 py-1 text-xs bg-muted/40 rounded-md outline-none focus:ring-1 focus:ring-primary/40"
                         />
                       </div>
+                      {selectedQuizIds.size > 0 && (
+                        <button
+                          onClick={() => setSelectedQuizIds(new Set())}
+                          className="text-[10px] text-primary hover:underline shrink-0"
+                        >
+                          Limpiar ({selectedQuizIds.size})
+                        </button>
+                      )}
                     </div>
-                    <div className="p-2 space-y-0.5 max-h-52 overflow-y-auto">
+                    <div className="p-2 space-y-0.5 max-h-72 overflow-y-auto">
                       {quizzes.length === 0 ? (
                         <p className="text-xs text-muted-foreground italic px-1">No hay evaluaciones</p>
                       ) : (
@@ -2086,70 +2241,75 @@ export default function AnalyticsPage() {
                       )}
                     </div>
                   </div>
+                  )}
                 </div>
 
-                {/* Right-side filters */}
-                <div className="flex flex-col gap-3 flex-1 min-w-[240px]">
-                  {/* Row 1: product + hub + search */}
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <FilterChip
-                      label="Producto" value={evalProductFilter} removable={false}
-                      options={[{ value: '', label: 'Todos' }, ...products.map(p => ({ value: p.id, label: p.name }))]}
-                      onChange={v => { setEvalProductFilter(v); setSelectedQuizIds(new Set()); }}
-                    />
-                    <FilterChip
-                      label="Hub" value={evalHubFilter} removable={false}
-                      options={[{ value: '', label: 'Todos' }, ...evalHubs.map(h => ({ value: h, label: h }))]}
-                      onChange={setEvalHubFilter}
-                    />
-                    <div className="relative flex-1 min-w-[160px]">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                      <input
-                        type="text"
-                        placeholder="Buscar vendedor..."
-                        value={evalSearch}
-                        onChange={e => setEvalSearch(e.target.value)}
-                        className="w-full pl-8 pr-3 h-8 text-sm border rounded-full bg-background outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
-                  </div>
+                {/* Producto — siempre visible: define qué evaluaciones existen */}
+                <FilterChip
+                  label="Producto" value={evalProductFilter} removable={false}
+                  options={[{ value: '', label: 'Todos' }, ...products.map(p => ({ value: p.id, label: p.name }))]}
+                  onChange={v => { setEvalProductFilter(v); setSelectedQuizIds(new Set()); }}
+                />
 
-                  {/* Row 2: cosecha filters */}
-                  <div className="flex flex-wrap gap-2 items-center">
-                    <FilterChip
-                      label="Agrupar cosecha" value={evalCosechaGranularity} removable={false}
-                      options={(Object.entries(GRANULARITY_LABELS) as [CosechaGranularity, string][]).map(([v, l]) => ({ value: v, label: l }))}
-                      onChange={v => setEvalCosechaGranularity(v as CosechaGranularity)}
-                    />
-                    <div className="flex items-center gap-1.5 h-8 border rounded-full px-3 bg-background text-sm shadow-sm hover:border-primary/40 transition-colors">
-                      <span className="text-muted-foreground text-xs shrink-0 font-medium">Cosecha desde:</span>
-                      <input
-                        type="month"
-                        value={evalCosechaFrom}
-                        onChange={e => setEvalCosechaFrom(e.target.value)}
-                        className="bg-transparent border-none outline-none text-xs font-semibold cursor-pointer"
-                      />
-                      {evalCosechaFrom && (
-                        <button onClick={() => setEvalCosechaFrom('')} className="text-muted-foreground hover:text-foreground ml-0.5">
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 h-8 border rounded-full px-3 bg-background text-sm shadow-sm hover:border-primary/40 transition-colors">
-                      <span className="text-muted-foreground text-xs shrink-0 font-medium">hasta:</span>
-                      <input
-                        type="month"
-                        value={evalCosechaTo}
-                        onChange={e => setEvalCosechaTo(e.target.value)}
-                        className="bg-transparent border-none outline-none text-xs font-semibold cursor-pointer"
-                      />
-                      {evalCosechaTo && (
-                        <button onClick={() => setEvalCosechaTo('')} className="text-muted-foreground hover:text-foreground ml-0.5">
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </div>
+                {/* Filtros opcionales, agregados bajo demanda */}
+                {evalOptFilters.has('hub') && (
+                  <FilterChip
+                    label="Hub" value={evalHubFilter}
+                    options={[{ value: '', label: 'Todos' }, ...evalHubs.map(h => ({ value: h, label: h }))]}
+                    onChange={setEvalHubFilter}
+                    onRemove={() => removeEvalFilter('hub')}
+                  />
+                )}
+                {evalOptFilters.has('cosechaGranularity') && (
+                  <FilterChip
+                    label="Agrupar cosecha" value={evalCosechaGranularity}
+                    options={(Object.entries(GRANULARITY_LABELS) as [CosechaGranularity, string][]).map(([v, l]) => ({ value: v, label: l }))}
+                    onChange={v => setEvalCosechaGranularity(v as CosechaGranularity)}
+                    onRemove={() => removeEvalFilter('cosechaGranularity')}
+                  />
+                )}
+                {evalOptFilters.has('cosechaFrom') && (
+                  <DateFilterChip
+                    label="Cosecha desde" value={evalCosechaFrom}
+                    onChange={setEvalCosechaFrom}
+                    onRemove={() => removeEvalFilter('cosechaFrom')}
+                  />
+                )}
+                {evalOptFilters.has('cosechaTo') && (
+                  <DateFilterChip
+                    label="Cosecha hasta" value={evalCosechaTo}
+                    onChange={setEvalCosechaTo}
+                    onRemove={() => removeEvalFilter('cosechaTo')}
+                  />
+                )}
+
+                {evalAvailableToAdd.length > 0 && (
+                  <div className="relative shrink-0" ref={evalAddFilterRef}>
+                    <button onClick={() => setEvalAddFilterOpen(v => !v)}
+                      className="flex items-center gap-1.5 h-8 border border-dashed rounded-full px-3 text-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
+                      <Plus className="h-3.5 w-3.5" /> Agregar filtro
+                    </button>
+                    {evalAddFilterOpen && (
+                      <div className="absolute top-10 left-0 z-50 bg-background border rounded-xl shadow-lg py-1 min-w-[200px]">
+                        {evalAvailableToAdd.map(f => (
+                          <button key={f.key} onClick={() => addEvalFilter(f.key)}
+                            className="w-full text-left px-4 py-2 text-sm hover:bg-muted/60 transition-colors">{f.label}</button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                )}
+
+                {/* Búsqueda de vendedor — al final y con ancho flexible */}
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Buscar vendedor..."
+                    value={evalSearch}
+                    onChange={e => setEvalSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 h-8 text-sm border rounded-full bg-background outline-none focus:ring-2 focus:ring-primary/30"
+                  />
                 </div>
               </div>
 
@@ -2158,9 +2318,11 @@ export default function AnalyticsPage() {
                 <StatCard
                   title="Score promedio"
                   value={`${evalOverallAvg}%`}
-                  description="Promedio de todas las evaluaciones seleccionadas"
+                  description={`Mínimo esperado: ${EVAL_MIN_SCORE}%`}
                   icon={Target}
                   color={evalOverallAvg >= 70 ? 'text-green-500' : evalOverallAvg >= 50 ? 'text-orange-500' : 'text-red-500'}
+                  delta={evalTrend.scoreDelta}
+                  deltaLabel="últimos 30 días vs 30 previos"
                 />
                 <StatCard
                   title="Intentos totales"
@@ -2168,20 +2330,22 @@ export default function AnalyticsPage() {
                   description="Evaluaciones completadas"
                   icon={CheckCircle2}
                   color="text-blue-500"
-                />
-                <StatCard
-                  title="Vendedores evaluados"
-                  value={evalFilteredScores.length}
-                  description={`de ${evalUsers.length} usuarios activos`}
-                  icon={Users}
-                  color="text-purple-500"
+                  delta={evalTrend.attemptsDelta}
+                  deltaLabel="últimos 30 días vs 30 previos"
                 />
                 <StatCard
                   title="Participación"
                   value={`${evalParticipation}%`}
-                  description="Vendedores que completaron al menos 1 evaluación"
-                  icon={TrendingUp}
+                  description={`${evalFilteredScores.length} de ${evalUsers.length} vendedores con al menos 1 evaluación`}
+                  icon={Users}
                   color={evalParticipation >= 70 ? 'text-green-500' : evalParticipation >= 40 ? 'text-orange-500' : 'text-red-500'}
+                />
+                <StatCard
+                  title="Requieren refuerzo"
+                  value={evalBelowMin}
+                  description={`Vendedores con promedio bajo ${EVAL_MIN_SCORE}%`}
+                  icon={AlertTriangle}
+                  color={evalBelowMin === 0 ? 'text-green-500' : 'text-red-500'}
                 />
               </div>
 
@@ -2197,20 +2361,26 @@ export default function AnalyticsPage() {
                       <p className="text-sm text-muted-foreground text-center py-8">Sin datos para mostrar</p>
                     ) : (
                       <div className="space-y-3">
-                        {evalCosechaMetrics.map(cm => (
-                          <div key={cm.key} className="space-y-1">
-                            <div className="flex justify-between text-sm">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-xs">{cm.key}</span>
-                                <span className="text-[10px] text-muted-foreground">({cm.count} vendedores)</span>
+                        {evalCosechaMetrics.map(cm => {
+                          const lowSample = cm.count < MIN_SAMPLE;
+                          return (
+                            <div key={cm.key} className={cn('space-y-1', lowSample && 'opacity-60')}>
+                              <div className="flex justify-between text-sm">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="font-medium text-xs">{formatCosechaLabel(cm.key)}</span>
+                                  <span className="text-[10px] text-muted-foreground shrink-0">
+                                    ({cm.count} {cm.count === 1 ? 'vendedor' : 'vendedores'})
+                                  </span>
+                                  {lowSample && <LowSampleTag />}
+                                </div>
+                                <span className={cn('text-sm font-bold', pctColor(cm.avgScore))}>{cm.avgScore}%</span>
                               </div>
-                              <span className={cn('text-sm font-bold', pctColor(cm.avgScore))}>{cm.avgScore}%</span>
+                              <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                                <div className={cn('h-full rounded-full transition-all', barColor(cm.avgScore))} style={{ width: `${cm.avgScore}%` }} />
+                              </div>
                             </div>
-                            <div className="h-2.5 bg-muted rounded-full overflow-hidden">
-                              <div className={cn('h-full rounded-full transition-all', barColor(cm.avgScore))} style={{ width: `${cm.avgScore}%` }} />
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </CardContent>
@@ -2227,21 +2397,27 @@ export default function AnalyticsPage() {
                       <p className="text-sm text-muted-foreground text-center py-8">Sin datos para mostrar</p>
                     ) : (
                       <div className="space-y-3">
-                        {evalProductMetrics.map(pm => (
-                          <div key={pm.productId} className="space-y-1">
-                            <div className="flex justify-between text-sm">
-                              <div className="flex items-center gap-2">
-                                <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
-                                <span className="font-medium">{pm.productName}</span>
-                                <span className="text-[10px] text-muted-foreground">({pm.count} intentos)</span>
+                        {evalProductMetrics.map(pm => {
+                          const lowSample = pm.count < MIN_SAMPLE;
+                          return (
+                            <div key={pm.productId} className={cn('space-y-1', lowSample && 'opacity-60')}>
+                              <div className="flex justify-between text-sm">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <div className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: pm.color }} />
+                                  <span className="font-medium truncate">{pm.productName}</span>
+                                  <span className="text-[10px] text-muted-foreground shrink-0">
+                                    ({pm.count} {pm.count === 1 ? 'intento' : 'intentos'})
+                                  </span>
+                                  {lowSample && <LowSampleTag />}
+                                </div>
+                                <span className={cn('text-sm font-bold', pctColor(pm.avgScore))}>{pm.avgScore}%</span>
                               </div>
-                              <span className={cn('text-sm font-bold', pctColor(pm.avgScore))}>{pm.avgScore}%</span>
+                              <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                                <div className={cn('h-full rounded-full transition-all', barColor(pm.avgScore))} style={{ width: `${pm.avgScore}%` }} />
+                              </div>
                             </div>
-                            <div className="h-2.5 bg-muted rounded-full overflow-hidden">
-                              <div className={cn('h-full rounded-full transition-all', barColor(pm.avgScore))} style={{ width: `${pm.avgScore}%` }} />
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </CardContent>

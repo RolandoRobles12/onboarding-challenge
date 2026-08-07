@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   Store,
   ImageIcon,
+  Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -99,6 +100,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { profile, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [allowedPaths, setAllowedPaths] = useState<Set<string> | null>(null);
+  const [navSearch, setNavSearch] = useState('');
 
   useEffect(() => {
     if (!profile) return;
@@ -127,6 +129,25 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     if ('section' in entry) return entry.items.length > 0;
     return true;
   });
+
+  // Búsqueda de secciones — con 20+ entradas escanear la lista deja de ser
+  // viable, así que se filtra por nombre (también contra el de la sección,
+  // p.ej. "pulso" encuentra todo ese grupo).
+  const search = navSearch.trim().toLowerCase();
+  const visibleNavigation = !search
+    ? filteredNavigation
+    : filteredNavigation
+        .map(entry => {
+          if (!('section' in entry)) {
+            return entry.name.toLowerCase().includes(search) ? entry : null;
+          }
+          const sectionMatches = entry.section.toLowerCase().includes(search);
+          const items = sectionMatches
+            ? entry.items
+            : entry.items.filter(i => i.name.toLowerCase().includes(search));
+          return items.length > 0 ? { ...entry, items } : null;
+        })
+        .filter((e): e is NonNullable<typeof e> => e !== null);
 
   const handleLogout = async () => {
     await logout();
@@ -185,9 +206,38 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </div>
             </div>
 
+            {/* Buscador de secciones */}
+            <div className="px-4 pt-3 pb-1">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/50 pointer-events-none" />
+                <input
+                  type="text"
+                  value={navSearch}
+                  onChange={e => setNavSearch(e.target.value)}
+                  placeholder="Buscar sección…"
+                  aria-label="Buscar sección del panel"
+                  className="w-full rounded-lg bg-white/10 pl-8 pr-7 py-1.5 text-sm text-white placeholder:text-white/50 outline-none focus:bg-white/15 focus:ring-1 focus:ring-white/30 transition-colors"
+                />
+                {navSearch && (
+                  <button
+                    onClick={() => setNavSearch('')}
+                    aria-label="Limpiar búsqueda"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Navigation */}
-            <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-              {filteredNavigation.map((entry) => {
+            <nav className="flex-1 overflow-y-auto p-4 pt-2 space-y-1">
+              {visibleNavigation.length === 0 && (
+                <p className="text-xs text-white/50 px-3 py-4 text-center">
+                  Sin resultados para &ldquo;{navSearch}&rdquo;
+                </p>
+              )}
+              {visibleNavigation.map((entry) => {
                 if ('section' in entry) {
                   return (
                     <div key={entry.section} className="pt-3 first:pt-0">
