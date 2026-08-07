@@ -21,8 +21,48 @@ import {
   markJourneyStepComplete,
   getJourneyByProduct,
   createQuizAttempt,
+  getQuiz,
 } from '@/lib/firestore-service';
+import type { GamificationConfig } from '@/lib/types-scalable';
 import { Timestamp } from 'firebase/firestore';
+
+// Usados cuando el quiz no tiene gamificationConfig propio (quizzes legacy)
+const DEFAULT_GAMIFICATION_CONFIG: GamificationConfig = {
+  enableLives: true,
+  maxLives: 3,
+  enableBonusLives: true,
+  pointsPerCorrectAnswer: 10,
+  pointsPerTrickyQuestion: 20,
+  penaltyPerError: 0,
+  timeBonus: false,
+  enableBadges: true,
+  badgeIds: [],
+};
+
+/** Calcula el XP real usando la configuración de gamificación del quiz en vez
+ * de un porcentaje redondeado — así lo que el admin configura (puntos por
+ * acierto, bonus por pregunta trampa, penalización por error) sí llega al
+ * vendedor. */
+function calcGamifiedXp(
+  gc: GamificationConfig,
+  score: number,
+  totalQuestions: number,
+  questionResults: { isCorrect: boolean; isTricky: boolean }[],
+): number {
+  const incorrectCount = Math.max(0, totalQuestions - score);
+  if (questionResults.length > 0) {
+    const trickyCorrect = questionResults.filter(r => r.isTricky && r.isCorrect).length;
+    const normalCorrect = Math.max(0, score - trickyCorrect);
+    return Math.max(0, Math.round(
+      normalCorrect * gc.pointsPerCorrectAnswer +
+      trickyCorrect * gc.pointsPerTrickyQuestion -
+      incorrectCount * gc.penaltyPerError
+    ));
+  }
+  // Sin desglose por pregunta disponible (p.ej. tiempo agotado): se aproxima
+  // con el conteo total de aciertos/errores.
+  return Math.max(0, Math.round(score * gc.pointsPerCorrectAnswer - incorrectCount * gc.penaltyPerError));
+}
 
 function getLevel(score: number, total: number): { name: string; description: string } {
   const percentage = total > 0 ? (score / total) * 100 : 0;
@@ -62,8 +102,21 @@ function ResultsContent() {
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [animationReady, setAnimationReady] = useState(false);
   const [timeTaken, setTimeTaken] = useState<number | null>(null);
-  const [questionResults, setQuestionResults] = useState<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string }[]>([]);
+  const [questionResults, setQuestionResults] = useState<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[]>([]);
   const [showDetail, setShowDetail] = useState(false);
+  const [quizGamificationConfig, setQuizGamificationConfig] = useState<GamificationConfig | null>(null);
+  const [quizPassingScore, setQuizPassingScore] = useState<number | null>(null);
+
+  // Config del quiz para mostrar el XP real y el estado de aprobado/reprobado
+  // (independiente del guardado del intento, que corre una sola vez más abajo).
+  useEffect(() => {
+    if (!quizId) return;
+    getQuiz(quizId).then(q => {
+      setQuizGamificationConfig(q?.gamificationConfig ?? null);
+      const ps = q?.assessmentConfig?.passingScore;
+      setQuizPassingScore(ps && ps > 0 ? ps : null);
+    }).catch(() => {});
+  }, [quizId]);
 
   useEffect(() => {
     if (!productId || !scoreStr || !totalQuestionsStr) {
@@ -82,16 +135,18 @@ function ResultsContent() {
       setTimeTaken(duration);
     }
 
-    // Load per-question results from sessionStorage
-    if (showFeedback !== 'never') {
-      try {
-        const raw = sessionStorage.getItem(`quiz_results_${productId}`);
-        if (raw) {
-          setQuestionResults(JSON.parse(raw));
-          sessionStorage.removeItem(`quiz_results_${productId}`);
-        }
-      } catch { /* ignore */ }
-    }
+    // Load per-question results from sessionStorage — always parsed (needed to
+    // compute gamified XP below), but only *shown* in the UI when showFeedback
+    // allows it (see the "Detalle de respuestas" section further down).
+    let parsedResults: { text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[] = [];
+    try {
+      const raw = sessionStorage.getItem(`quiz_results_${productId}`);
+      if (raw) {
+        parsedResults = JSON.parse(raw);
+        sessionStorage.removeItem(`quiz_results_${productId}`);
+      }
+    } catch { /* ignore */ }
+    setQuestionResults(parsedResults);
 
     // Animations
     setTimeout(() => setAnimationReady(true), 300);
@@ -124,6 +179,13 @@ function ResultsContent() {
         try {
           // 1. Save quiz attempt to Firestore
           if (quizId) {
+            // El XP real sale de la configuración de gamificación del quiz
+            // (puntos por acierto, bonus por pregunta trampa, penalización por
+            // error) en vez de un porcentaje redondeado sin relación con ella.
+            const quizDoc = await getQuiz(quizId).catch(() => null);
+            const gc = quizDoc?.gamificationConfig ?? DEFAULT_GAMIFICATION_CONFIG;
+            const xpEarned = calcGamifiedXp(gc, score, totalQuestions, parsedResults);
+
             await createQuizAttempt({
               organizationId: 'aviva-credito',
               userId,
@@ -143,7 +205,7 @@ function ResultsContent() {
               answers: [],
               levelAchieved: level.name,
               badgesEarned: [],
-              xpEarned: Math.round(percentage),
+              xpEarned,
               trainerName: resolvedName,
               assignedKiosko: resolvedKiosk,
             });
@@ -187,6 +249,10 @@ function ResultsContent() {
   const percentage = totalQuestions > 0 ? (score / totalQuestions) * 100 : 0;
   const level = getLevel(score, totalQuestions);
   const Avatar = getAvatarComponent(avatarKey);
+  const displayXp = quizGamificationConfig
+    ? calcGamifiedXp(quizGamificationConfig, score, totalQuestions, questionResults)
+    : Math.round(percentage);
+  const passed = quizPassingScore != null ? percentage >= quizPassingScore : null;
 
   const timeFormatted = timeTaken !== null
     ? `${Math.floor(timeTaken / 60)}m ${(timeTaken % 60).toString().padStart(2, '0')}s`
@@ -288,9 +354,28 @@ function ResultsContent() {
                 className="bg-yellow-400 text-yellow-900 rounded-full px-3 py-1.5 font-bold flex items-center gap-1"
               >
                 <Zap className="h-4 w-4" />
-                +{Math.round(percentage)} XP
+                +{displayXp} XP
               </motion.div>
             </motion.div>
+
+            {passed !== null && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.85 }}
+                className={cn(
+                  'rounded-xl px-5 py-3 border text-sm font-semibold flex items-center justify-center gap-2',
+                  passed
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-amber-50 border-amber-200 text-amber-700',
+                )}
+              >
+                {passed ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                {passed
+                  ? `Aprobado · puntaje mínimo ${quizPassingScore}%`
+                  : `No alcanzaste el puntaje mínimo (${quizPassingScore}%)`}
+              </motion.div>
+            )}
 
             {/* Feedback message */}
             <motion.div
@@ -353,7 +438,14 @@ function ResultsContent() {
               transition={{ delay: 1.1 }}
             >
               <Button asChild size="lg" className="w-full rounded-xl shadow-md font-semibold">
-                <Link href={returnTo}>Finalizar y volver al inicio</Link>
+                {/* Cuando el quiz se lanzó desde una lección/módulo de curso
+                    (returnTo apunta a /courses/...), se anexa el puntaje para
+                    que el curso pueda registrarlo contra su passingScore. */}
+                <Link href={returnTo.includes('/courses/')
+                  ? `${returnTo}${returnTo.includes('?') ? '&' : '?'}assessmentScore=${Math.round(percentage)}`
+                  : returnTo}>
+                  Finalizar y volver al inicio
+                </Link>
               </Button>
             </motion.div>
           </CardContent>

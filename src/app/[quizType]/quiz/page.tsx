@@ -25,9 +25,10 @@ import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getQuizzes, getQuiz, getQuestionsByIds } from '@/lib/firestore-service';
+import { getQuizzes, getQuiz, getQuestionsByIds, getUserAttempts } from '@/lib/firestore-service';
 import type { AssessmentConfig } from '@/lib/types-scalable';
 import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
+import { useAuth } from '@/context/AuthContext';
 
 /** Fisher-Yates shuffle — returns a new shuffled array */
 function shuffle<T>(arr: T[]): T[] {
@@ -66,6 +67,7 @@ interface RuntimeMission {
   title: string;
   narrative: string;
   questions: RuntimeQuestion[];
+  maxErrors: number;
 }
 interface RuntimeQuiz {
   title: string;
@@ -75,19 +77,22 @@ interface RuntimeQuiz {
 function QuizComponent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, profile } = useAuth();
+  const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
   // Per-question result tracking (stored in ref to avoid re-renders)
-  const questionResultsRef = useRef<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string }[]>([]);
+  const questionResultsRef = useRef<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[]>([]);
 
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
   const [quizId, setQuizId] = useState('');
   const [loadingQuiz, setLoadingQuiz] = useState(true);
   const [quizNotAvailable, setQuizNotAvailable] = useState(false);
+  const [attemptsExhausted, setAttemptsExhausted] = useState<{ count: number; limit: number } | null>(null);
   const [assessmentCfg, setAssessmentCfg] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT_CONFIG);
   // Countdown timer (seconds remaining, only when timeLimit > 0)
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
@@ -108,7 +113,7 @@ function QuizComponent() {
     specialFeedback: null as string | null,
     bonusLives: 0,
     lifeUsedMessage: null as string | null,
-    mistakeMadeInMission: false,
+    errorsInMission: 0,
     lastAnswerWasCorrect: false,
     streak: 0,
     showMissionComplete: false,
@@ -138,10 +143,11 @@ function QuizComponent() {
         const requestedQuizId = searchParams.get('quizId');
         let q;
         if (requestedQuizId) {
-          // Fetch by ID directly — bypasses the published/productId filter so
-          // journey-assigned quizzes always load even if not yet "published"
+          // Fetch by ID directly — journey-assigned quizzes can load without
+          // matching quizType/productId, but must still be published+active
+          // for anyone who isn't an admin/trainer previewing it.
           q = await getQuiz(requestedQuizId);
-          if (!q) {
+          if (!q || (!isAdmin && (!q.published || !q.active))) {
             setQuizNotAvailable(true);
             setLoadingQuiz(false);
             return;
@@ -156,14 +162,27 @@ function QuizComponent() {
         }
         setQuizId(q.id);
 
+        // Read assessment config (defaults if not set on the quiz doc)
+        const cfg: AssessmentConfig = { ...DEFAULT_ASSESSMENT_CONFIG, ...(q as any).assessmentConfig };
+        setAssessmentCfg(cfg);
+
+        // maxAttempts / allowRetry: cuenta los intentos completados previos del
+        // usuario para este quiz y bloquea si ya alcanzó el límite configurado.
+        if (user && !isAdmin) {
+          const previousAttempts = await getUserAttempts(user.uid, q.id).catch(() => []);
+          const count = previousAttempts.length;
+          const limit = !cfg.allowRetry ? 1 : cfg.maxAttempts > 0 ? cfg.maxAttempts : 0;
+          if (limit > 0 && count >= limit) {
+            setAttemptsExhausted({ count, limit });
+            setLoadingQuiz(false);
+            return;
+          }
+        }
+
         // Cargar todas las preguntas de todas las misiones
         const allIds = q.missions.flatMap((m) => m.questionIds);
         const allQuestions = await getQuestionsByIds(allIds);
         const qMap = Object.fromEntries(allQuestions.map((q) => [q.id, q]));
-
-        // Read assessment config (defaults if not set on the quiz doc)
-        const cfg: AssessmentConfig = { ...DEFAULT_ASSESSMENT_CONFIG, ...(q as any).assessmentConfig };
-        setAssessmentCfg(cfg);
 
         const buildOptions = (rawOptions: { text: string; isCorrect: boolean; order: number }[]) => {
           const sorted = rawOptions.sort((a, b) => a.order - b.order).map(o => ({ text: o.text, isCorrect: o.isCorrect }));
@@ -189,7 +208,13 @@ function QuizComponent() {
                 modelAnswer: q.modelAnswer,
               }));
             if (cfg.randomizeQuestions) questions = shuffle(questions);
-            return { id: mission.id, title: mission.title, narrative: mission.narrative, questions };
+            return {
+              id: mission.id,
+              title: mission.title,
+              narrative: mission.narrative,
+              questions,
+              maxErrors: mission.maxErrors && mission.maxErrors > 0 ? mission.maxErrors : 1,
+            };
           });
 
         setQuiz({ title: q.title, missions: runtimeMissions });
@@ -206,7 +231,8 @@ function QuizComponent() {
     }
 
     loadQuiz();
-  }, [quizType, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizType, router, user]);
 
   useEffect(() => {
     if (!startTime || gameState.showMissionFailedScreen || gameState.showMissionIntro) return;
@@ -299,13 +325,12 @@ function QuizComponent() {
     }
 
     let newMissionFailed = false;
-    let newMistakeMadeInMission = gameState.mistakeMadeInMission;
+    let newErrorsInMission = gameState.errorsInMission;
 
     if (!isCorrect) {
-      if (gameState.mistakeMadeInMission) {
+      newErrorsInMission = gameState.errorsInMission + 1;
+      if (newErrorsInMission > (currentMission?.maxErrors ?? 1)) {
         newMissionFailed = true;
-      } else {
-        newMistakeMadeInMission = true;
       }
     }
 
@@ -318,6 +343,7 @@ function QuizComponent() {
       isCorrect: !!isCorrect,
       userAnswer: userAnswerText,
       correctAnswer: correctAnswerText,
+      isTricky: !!currentQuestion?.isTricky,
     });
 
     setParticleType(isCorrect ? 'correct' : 'wrong');
@@ -330,7 +356,7 @@ function QuizComponent() {
       score: isCorrect ? prev.score + 1 : prev.score,
       missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
       missionFailed: newMissionFailed,
-      mistakeMadeInMission: newMistakeMadeInMission,
+      errorsInMission: newErrorsInMission,
       specialFeedback: feedback,
       bonusLives: prev.bonusLives + bonusLivesChange,
       lastAnswerWasCorrect: isCorrect,
@@ -418,7 +444,7 @@ function QuizComponent() {
           showMissionIntro: true,
           missionScore: 0,
           missionFailed: false,
-          mistakeMadeInMission: false,
+          errorsInMission: 0,
           bonusLives: bonusLivesLeft,
           ...commonReset,
         }));
@@ -460,6 +486,7 @@ function QuizComponent() {
       isCorrect,
       userAnswer: openTextAnswer,
       correctAnswer: currentQuestion?.validAnswers?.join(', ') ?? '',
+      isTricky: !!currentQuestion?.isTricky,
     });
 
     setParticleType(isCorrect ? 'correct' : 'wrong');
@@ -467,10 +494,10 @@ function QuizComponent() {
     setTimeout(() => setShowParticles(false), 1500);
 
     let newMissionFailed = false;
-    let newMistakeMade = gameState.mistakeMadeInMission;
+    let newErrorsInMission = gameState.errorsInMission;
     if (!isCorrect) {
-      if (gameState.mistakeMadeInMission) newMissionFailed = true;
-      else newMistakeMade = true;
+      newErrorsInMission = gameState.errorsInMission + 1;
+      if (newErrorsInMission > (currentMission?.maxErrors ?? 1)) newMissionFailed = true;
     }
     setGameState(prev => ({
       ...prev,
@@ -478,7 +505,7 @@ function QuizComponent() {
       score: isCorrect ? prev.score + 1 : prev.score,
       missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
       missionFailed: newMissionFailed,
-      mistakeMadeInMission: newMistakeMade,
+      errorsInMission: newErrorsInMission,
       lastAnswerWasCorrect: isCorrect,
       streak: isCorrect ? prev.streak + 1 : 0,
     }));
@@ -501,7 +528,7 @@ function QuizComponent() {
       showMissionIntro: true,
       showMissionFailedScreen: false,
       missionFailed: false,
-      mistakeMadeInMission: false,
+      errorsInMission: 0,
       missionScore: 0,
       initialSelection: null,
       specialFeedback: null,
@@ -546,6 +573,24 @@ function QuizComponent() {
           <CardTitle className="text-destructive">Evaluación no disponible</CardTitle>
           <CardDescription>
             Esta evaluación aún no está lista. Por favor contacta a tu Hub Manager o capacitador para que la habilite.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => router.push('/')}>Volver al inicio</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (attemptsExhausted) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-destructive">Alcanzaste el máximo de intentos</CardTitle>
+          <CardDescription>
+            Ya completaste esta evaluación {attemptsExhausted.count} {attemptsExhausted.count === 1 ? 'vez' : 'veces'}
+            {attemptsExhausted.limit > 1 ? ` (máximo permitido: ${attemptsExhausted.limit})` : ' y no admite reintentos'}.
+            Contacta a tu capacitador si necesitas otra oportunidad.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -22,8 +22,6 @@ export type CourseStatus = 'draft' | 'published' | 'archived';
 
 export type EnrollmentStatus = 'enrolled' | 'in_progress' | 'completed' | 'expired';
 
-export type LearningPathStatus = 'draft' | 'published' | 'archived';
-
 export type ContentNavigation = 'sequential' | 'free';
 
 export type RecurrenceType = 'none' | 'monthly' | 'quarterly' | 'biannual' | 'annual';
@@ -164,64 +162,6 @@ export interface LessonAttachment {
   url: string;
   type: string;
   sizeKb?: number;
-}
-
-// ============================================================================
-// RUTA DE APRENDIZAJE (Learning Path)
-// ============================================================================
-
-export interface LearningPath {
-  id: string;
-  organizationId: string;
-  productId?: string;
-
-  title: string;
-  description: string;
-  thumbnail?: string;
-
-  steps: LearningPathStep[];
-
-  navigation: ContentNavigation;
-
-  // Audiencia
-  targetRoles: string[];
-  branchIds: string[];
-
-  // Auto-asignación por reglas
-  autoAssignRules: AutoAssignRule[];
-
-  // Certificado al completar la ruta completa
-  certificateTemplate?: string;
-
-  status: LearningPathStatus;
-  authorId: string;
-
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
-
-export interface LearningPathStep {
-  id: string;
-  order: number;
-  type: 'course' | 'assessment' | 'challenge';
-  referenceId: string;          // courseId, quizId, etc.
-  title: string;
-  description?: string;
-  isRequired: boolean;
-
-  minimumScore?: number;        // % mínimo para avanzar al siguiente paso
-  unlocksAfterStepId?: string;
-}
-
-// ============================================================================
-// REGLAS DE AUTO-ASIGNACIÓN
-// ============================================================================
-
-export interface AutoAssignRule {
-  id: string;
-  trigger: 'role' | 'group' | 'branch' | 'registration';
-  value: string;
-  assignedAt?: Timestamp;
 }
 
 // ============================================================================

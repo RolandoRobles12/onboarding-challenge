@@ -6,18 +6,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Certificate } from '@/components/Certificate';
 import type { CertificateSignerData } from '@/components/Certificate';
-import { getJourneyByProduct, getCertificateSigners, getCertificateConfig } from '@/lib/firestore-service';
+import { getJourneyByProduct, getCertificateSigners, getCertificateConfig, markJourneyStepComplete } from '@/lib/firestore-service';
 import type { CertificateConfig } from '@/lib/types-scalable';
+import { useAuth } from '@/context/AuthContext';
 
 function CertificateContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { user, profile } = useAuth();
 
   const quizType = searchParams.get('quizType');
   const fullName = searchParams.get('fullName') || searchParams.get('nombre') || '';
   const quizTitle = searchParams.get('quizTitle') || 'Quiz';
   const scoreStr = searchParams.get('score');
   const totalQuestionsStr = searchParams.get('totalQuestions');
+  // Presentes cuando se llega desde un paso "certificate" de la Ruta —
+  // permiten marcar ese paso como completado al emitir el certificado.
+  const journeyId = searchParams.get('journeyId');
+  const stepId = searchParams.get('stepId');
 
   const [signers, setSigners] = useState<CertificateSignerData[]>([]);
   const [certConfig, setCertConfig] = useState<Partial<CertificateConfig>>({});
@@ -26,6 +32,13 @@ function CertificateContent() {
     if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
       router.push('/');
       return;
+    }
+
+    if (journeyId && stepId && user) {
+      markJourneyStepComplete(user.uid, journeyId, quizType, stepId, {
+        userName: profile?.nombre,
+        userEmail: profile?.email,
+      }).catch(console.error);
     }
 
     // Load signers configured for this product's certificate step
@@ -42,7 +55,10 @@ function CertificateContent() {
         setCertConfig(configRest);
 
         if (journey) {
-          const certStep = journey.steps.find(s => s.type === 'certificate');
+          const allSteps = journey.stages?.length
+            ? journey.stages.flatMap(s => s.actions ?? [])
+            : journey.steps ?? [];
+          const certStep = allSteps.find(s => s.type === 'certificate');
           const signerIds: string[] = certStep?.config?.signerIds ?? [];
 
           if (signerIds.length > 0) {
@@ -66,7 +82,8 @@ function CertificateContent() {
     }
 
     loadSigners();
-  }, [quizType, fullName, scoreStr, totalQuestionsStr, router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quizType, fullName, scoreStr, totalQuestionsStr, router, journeyId, stepId, user]);
 
   if (!quizType || !fullName || !scoreStr || !totalQuestionsStr) {
     return null;

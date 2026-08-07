@@ -25,11 +25,11 @@ import {
   getProducts,
   getCourse,
   getExplorableJourneys,
+  getQuizLeaderboard,
   type LevelConfig,
 } from '@/lib/firestore-service';
-import { getLeaderboard, type LeaderboardEntry } from '@/lib/leaderboard';
 import type {
-  Journey, JourneyStep, JourneyStage, JourneyMilestone, Product, QuizAttempt,
+  Journey, JourneyStep, JourneyStage, JourneyMilestone, Product, QuizAttempt, UserBadge,
 } from '@/lib/types-scalable';
 import type { Course } from '@/lib/types-lms';
 import {
@@ -49,7 +49,6 @@ import {
   AlertTriangle, Eye,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getAvatarComponent } from '@/lib/avatars';
 
 // ─── Narrative engine ─────────────────────────────────────────────────────────
 
@@ -103,17 +102,39 @@ interface CourseInfo {
   modules: { id: string; title: string; lessonIds: string[] }[];
 }
 
-function ActionRow({ action, status, productId, journeyId, isTestMode, isExploring, courseInfo, completedLessonIds, onMarkComplete }: {
+function ActionRow({ action, status, productId, journeyId, isTestMode, isExploring, courseInfo, completedLessonIds, onMarkComplete, userName, journeyName, overallDone, overallTotal }: {
   action: JourneyStep; status: 'completed' | 'active' | 'locked';
   productId: string; journeyId: string; isTestMode?: boolean; isExploring?: boolean;
   courseInfo?: CourseInfo;
   completedLessonIds?: string[];
   onMarkComplete: (id: string) => void;
+  userName?: string;
+  journeyName?: string;
+  overallDone?: number;
+  overallTotal?: number;
 }) {
   const meta = STEP_META[action.type] ?? STEP_META.quiz;
   const Icon = meta.icon;
   const done = status === 'completed';
   const active = status === 'active';
+
+  // El certificado necesita datos que STEP_META.href no tiene (nombre del
+  // vendedor, avance real) para llegar a una página funcional en vez de
+  // rebotar a "/" por falta de query params.
+  const certificateHref = () => {
+    const total = overallTotal && overallTotal > 0 ? overallTotal : 1;
+    const score = overallDone ?? total;
+    const params = new URLSearchParams({
+      quizType: productId,
+      fullName: userName || 'Promotor Aviva',
+      quizTitle: journeyName || 'tu Ruta Aviva',
+      score: String(score),
+      totalQuestions: String(total),
+      journeyId,
+      stepId: action.id,
+    });
+    return `/${productId}/certificate?${params.toString()}`;
+  };
 
   // ── Checklist state ──────────────────────────────────────────────────────
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -181,7 +202,7 @@ function ActionRow({ action, status, productId, journeyId, isTestMode, isExplori
               </Button>
             ) : (
             <Button size="sm" className="h-7 text-xs gap-1" asChild>
-              <Link href={meta.href(productId, action.config)}>
+              <Link href={action.type === 'certificate' ? certificateHref() : meta.href(productId, action.config)}>
                 <PlayCircle className="h-3 w-3" /> Ir
               </Link>
             </Button>
@@ -291,7 +312,7 @@ function DeadlineChip({ schedule, compact }: { schedule: ScheduleInfo; compact?:
 
 // ─── Stage card ───────────────────────────────────────────────────────────────
 
-function StageCard({ stage, index, status, schedule, completedIds, productId, journeyId, isTestMode, isExploring, coursesMap, enrollmentsMap, onMarkComplete }: {
+function StageCard({ stage, index, status, schedule, completedIds, productId, journeyId, isTestMode, isExploring, coursesMap, enrollmentsMap, onMarkComplete, userName, journeyName, overallDone, overallTotal }: {
   stage: JourneyStage; index: number; status: 'completed' | 'active' | 'locked';
   schedule?: ScheduleInfo;
   completedIds: Set<string>; productId: string; journeyId: string;
@@ -299,6 +320,10 @@ function StageCard({ stage, index, status, schedule, completedIds, productId, jo
   coursesMap?: Record<string, Course>;
   enrollmentsMap?: Record<string, string[]>; // courseId → completedLessonIds
   onMarkComplete: (id: string) => void;
+  userName?: string;
+  journeyName?: string;
+  overallDone?: number;
+  overallTotal?: number;
 }) {
   // Explorando, todas las etapas están abiertas: sólo se despliega la primera
   const [open, setOpen] = useState(status === 'active' && (!isExploring || index === 0));
@@ -390,7 +415,8 @@ function StageCard({ stage, index, status, schedule, completedIds, productId, jo
                   <ActionRow key={action.id} action={action} status={getActionStatus(action, i)}
                     productId={productId} journeyId={journeyId} isTestMode={isTestMode} isExploring={isExploring}
                     courseInfo={courseInfo} completedLessonIds={completedLessonIds}
-                    onMarkComplete={onMarkComplete} />
+                    onMarkComplete={onMarkComplete}
+                    userName={userName} journeyName={journeyName} overallDone={overallDone} overallTotal={overallTotal} />
                 );
               })}
         </div>
@@ -852,13 +878,13 @@ function PulseTodayCard({ userId }: { userId: string }) {
 // ─── Mini Leaderboard ─────────────────────────────────────────────────────────
 
 function MiniLeaderboard({ productId, currentUserName }: { productId: string; currentUserName: string }) {
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [entries, setEntries] = useState<QuizAttempt[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     setLoading(true);
-    getLeaderboard(productId).then(d => setEntries(d.slice(0, 5))).finally(() => setLoading(false));
+    getQuizLeaderboard(productId).then(d => setEntries(d.slice(0, 5))).finally(() => setLoading(false));
   }, [productId]);
 
   if (loading) return <Skeleton className="h-12 w-full rounded-xl" />;
@@ -879,17 +905,19 @@ function MiniLeaderboard({ productId, currentUserName }: { productId: string; cu
       {expanded && (
         <div className="border-t divide-y">
           {entries.map((entry, i) => {
-            const AvatarComp = getAvatarComponent(entry.avatar);
-            const isMe = entry.fullName?.toLowerCase() === currentUserName?.toLowerCase();
-            const mins = Math.floor(entry.time / 60);
-            const secs = entry.time % 60;
+            const name = entry.trainerName || 'Participante';
+            const isMe = name.toLowerCase() === currentUserName?.toLowerCase();
+            const mins = Math.floor((entry.timeTaken || 0) / 60);
+            const secs = (entry.timeTaken || 0) % 60;
             return (
               <div key={entry.id} className={cn('flex items-center gap-3 px-4 py-2.5 text-sm', i === 0 && 'bg-yellow-50/60', isMe && 'bg-primary/5')}>
                 <span className="w-5 shrink-0">{medals[i] ?? i + 1}</span>
-                <AvatarComp className="h-7 w-7 text-muted-foreground shrink-0" />
-                <p className="flex-1 font-medium truncate">{entry.fullName}{isMe && <span className="text-xs text-primary ml-1">(tú)</span>}</p>
+                <div className="h-7 w-7 rounded-full bg-muted flex items-center justify-center text-xs font-semibold text-muted-foreground shrink-0">
+                  {name.charAt(0).toUpperCase()}
+                </div>
+                <p className="flex-1 font-medium truncate">{name}{isMe && <span className="text-xs text-primary ml-1">(tú)</span>}</p>
                 <div className="text-right shrink-0">
-                  <p className="font-mono text-xs font-semibold">{entry.score}/{entry.totalQuestions}</p>
+                  <p className="font-mono text-xs font-semibold">{entry.score}/{entry.maxScore}</p>
                   <p className="text-[10px] text-muted-foreground">{mins}m {String(secs).padStart(2, '0')}s</p>
                 </div>
               </div>
@@ -962,9 +990,15 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
         ? (foundJourney.stages?.length ? foundJourney.stages.flatMap(s => s.actions ?? []) : foundJourney.steps ?? [])
         : [];
 
-      // Auto-mark info_form if onboarding done
+      // Auto-mark only the legacy "datos de ingreso" step (no specific
+      // JourneyForm attached) once the base onboarding is done. Steps that
+      // reference a real formId are only completed when the user actually
+      // submits that specific form — see forms/[formId]/page.tsx, which calls
+      // markJourneyStepComplete() and populates completedStepIds above.
       if (!readOnly) {
-        allActions.forEach(a => { if (a.type === 'info_form' && profile.onboardingCompleted) ids.add(a.id); });
+        allActions.forEach(a => {
+          if (a.type === 'info_form' && !a.config?.formId && profile.onboardingCompleted) ids.add(a.id);
+        });
       }
 
       // Fetch course data for all course steps (for module breakdown display)
@@ -1005,15 +1039,20 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
         // Note: quiz/challenge/results steps are marked complete via the quiz results
         // page (results/page.tsx) after the user finishes a quiz.
 
-        // Auto-mark badge steps if the user already has any badges
+        // Auto-mark badge steps once the user has earned the specific badge
+        // configured for that step (falls back to "any badge" only if the
+        // admin didn't pin a specific one for this step).
         if (bLen > 0) {
+          const earnedBadgeIds = new Set((badges as UserBadge[]).map(b => b.badgeId));
           allActions.forEach(a => {
-            if (a.type === 'badge' && !ids.has(a.id)) {
-              ids.add(a.id);
-              markPromises.push(
-                markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
-              );
-            }
+            if (a.type !== 'badge' || ids.has(a.id)) return;
+            const requiredBadgeId = a.config?.badgeId;
+            const earned = requiredBadgeId ? earnedBadgeIds.has(requiredBadgeId) : bLen > 0;
+            if (!earned) return;
+            ids.add(a.id);
+            markPromises.push(
+              markJourneyStepComplete(userId, foundJourney.id, productId, a.id, { userName: profile.nombre, userEmail: profile.email }).catch(console.error)
+            );
           });
         }
 
@@ -1232,6 +1271,10 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
         coursesMap={coursesMap}
         enrollmentsMap={enrollmentsMap}
         onMarkComplete={handleMarkComplete}
+        userName={profile.nombre}
+        journeyName={product?.name || journey.name}
+        overallDone={doneCount}
+        overallTotal={totalCount}
       />
     );
   };

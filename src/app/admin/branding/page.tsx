@@ -9,8 +9,45 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { Upload, Trash2, Image as ImageIcon, CheckCircle2 } from 'lucide-react';
+import { Upload, Trash2, Image as ImageIcon, CheckCircle2, Palette, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const DEFAULT_PRIMARY = '#16B877';
+const DEFAULT_ACCENT = '#074739';
+
+function ColorPicker({ label, description, value, defaultValue, onChange, onReset, saving }: {
+  label: string;
+  description: string;
+  value: string;
+  defaultValue: string;
+  onChange: (hex: string) => void;
+  onReset: () => void;
+  saving: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium">{label}</p>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="gap-1.5 text-muted-foreground" onClick={onReset} disabled={saving}>
+          <RotateCcw className="h-3 w-3" /> Usar default
+        </Button>
+      </div>
+      <div className="flex items-center gap-3">
+        <input
+          type="color"
+          value={value || defaultValue}
+          onChange={e => onChange(e.target.value)}
+          disabled={saving}
+          className="h-10 w-14 rounded-lg border cursor-pointer bg-transparent"
+        />
+        <span className="text-sm font-mono text-muted-foreground">{(value || defaultValue).toUpperCase()}</span>
+      </div>
+    </div>
+  );
+}
 
 type SlotKey = 'logoUrl' | 'iconUrl';
 
@@ -157,14 +194,25 @@ function UploadSlot({ slotKey, title, description, storageFolder, currentUrl, on
 }
 
 export default function BrandingSettingsPage() {
-  const { logoUrl, iconUrl, loading, refreshBranding } = useBranding();
+  const { logoUrl, iconUrl, primaryColor, accentColor, loading, refreshBranding } = useBranding();
   const [localUrls, setLocalUrls] = useState<{ logoUrl: string | null; iconUrl: string | null } | null>(null);
+  const [savingColors, setSavingColors] = useState(false);
 
   const urls = localUrls ?? { logoUrl, iconUrl };
 
   function handleUploaded(key: SlotKey, url: string | null) {
     setLocalUrls({ ...urls, [key]: url });
     refreshBranding();
+  }
+
+  async function handleColorChange(key: 'primaryColor' | 'accentColor', hex: string | null) {
+    setSavingColors(true);
+    try {
+      await saveBrandingConfig({ [key]: hex });
+      await refreshBranding();
+    } finally {
+      setSavingColors(false);
+    }
   }
 
   return (
@@ -197,6 +245,38 @@ export default function BrandingSettingsPage() {
         </div>
       )}
 
+      {/* Colores de marca */}
+      <Card className="rounded-xl">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-1.5">
+            <Palette className="h-4 w-4" /> Colores de marca
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Se aplican de inmediato a botones, encabezados y acentos en toda la plataforma (vendedor y admin).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-5 sm:grid-cols-2">
+          <ColorPicker
+            label="Color primario"
+            description="Botones, barra de progreso, acentos principales."
+            value={primaryColor ?? ''}
+            defaultValue={DEFAULT_PRIMARY}
+            saving={savingColors}
+            onChange={hex => handleColorChange('primaryColor', hex)}
+            onReset={() => handleColorChange('primaryColor', null)}
+          />
+          <ColorPicker
+            label="Color de acento"
+            description="Encabezados, sidebar del admin, fondos destacados."
+            value={accentColor ?? ''}
+            defaultValue={DEFAULT_ACCENT}
+            saving={savingColors}
+            onChange={hex => handleColorChange('accentColor', hex)}
+            onReset={() => handleColorChange('accentColor', null)}
+          />
+        </CardContent>
+      </Card>
+
       {/* Vista previa en contexto real */}
       <Card className="rounded-xl">
         <CardHeader className="pb-2">
@@ -206,11 +286,11 @@ export default function BrandingSettingsPage() {
           <CardDescription className="text-xs">Así se verá el logo en el encabezado de la app y en el panel de administración.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 pb-4">
-          <div className="rounded-lg px-4 py-3 flex items-center justify-between" style={{ backgroundColor: '#074739' }}>
+          <div className="rounded-lg px-4 py-3 flex items-center justify-between" style={{ backgroundColor: accentColor || DEFAULT_ACCENT }}>
             <AvivaLogo variant="full" className="h-8 w-auto" />
             <span className="text-white/60 text-xs">Header (vista vendedor)</span>
           </div>
-          <div className="rounded-lg px-4 py-3 flex items-center gap-2" style={{ backgroundColor: '#074739' }}>
+          <div className="rounded-lg px-4 py-3 flex items-center gap-2" style={{ backgroundColor: accentColor || DEFAULT_ACCENT }}>
             <AvivaLogo variant="icon" className="h-8 w-8" />
             <span className="text-white text-sm font-bold">Admin Panel</span>
             <span className="text-white/60 text-xs ml-auto">Sidebar (vista admin)</span>

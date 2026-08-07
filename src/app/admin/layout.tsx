@@ -44,6 +44,7 @@ type NavSection = { section: string; items: NavItem[] };
 
 const navigation: (NavItem | NavSection)[] = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+  { name: 'Mi Equipo', href: '/admin/team', icon: Users },
   {
     section: 'Catálogo de Contenido',
     items: [
@@ -58,7 +59,7 @@ const navigation: (NavItem | NavSection)[] = [
     section: 'Pulso de Conocimiento',
     items: [
       { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
-      { name: 'Categorías', href: '/admin/categories', icon: FolderKanban },
+      { name: 'Categorías del Pulso', href: '/admin/categories', icon: FolderKanban },
       { name: 'Configuración Slack', href: '/admin/slack', icon: MessageSquare },
     ],
   },
@@ -121,6 +122,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
     return entry;
   }).filter(entry => {
+    // "Mi Equipo" solo tiene sentido para el rol capacitador
+    if (!('section' in entry) && entry.href === '/admin/team') return profile?.rol === 'trainer';
     if ('section' in entry) return entry.items.length > 0;
     return true;
   });

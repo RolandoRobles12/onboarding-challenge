@@ -14,6 +14,7 @@ import {
   getPulseConfig,
   savePulseConfig,
   getPulseAttemptsByDate,
+  getPulseCategories,
 } from '@/lib/firestore-service';
 import type {
   DailyPulse,
@@ -21,6 +22,7 @@ import type {
   SlackDirectRecipient,
   PulseAttempt,
   PulseConfig,
+  PulseCategory,
   KnowledgeModule,
 } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS, KNOWLEDGE_MODULES } from '@/lib/types-scalable';
@@ -122,6 +124,13 @@ export default function KnowledgePulsePage() {
   const { questions, loading: loadingQ } = useQuestions();
 
   const [mainTab, setMainTab] = useState('pulsos');
+  const [categories, setCategories] = useState<PulseCategory[]>([]);
+  const categoryMap = Object.fromEntries(categories.map(c => [c.key, c])) as Record<string, PulseCategory>;
+  const moduleLabel = (mod: KnowledgeModule) => categoryMap[mod]?.name ?? KNOWLEDGE_MODULE_LABELS[mod];
+  const moduleColor = (mod: KnowledgeModule) => categoryMap[mod]?.color ?? MODULE_COLORS[mod];
+  useEffect(() => {
+    getPulseCategories().then(setCategories).catch(() => {});
+  }, []);
   const [weekAnchor, setWeekAnchor] = useState(todayStr());
   const [selectedDate, setSelectedDate] = useState(todayStr());
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
@@ -675,8 +684,8 @@ export default function KnowledgePulsePage() {
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium leading-snug">{q.text}</p>
                               {q.module && (
-                                <span className={cn('text-[10px] px-2 py-0.5 rounded-full mt-1.5 inline-block', MODULE_COLORS[q.module])}>
-                                  {KNOWLEDGE_MODULE_LABELS[q.module]}
+                                <span className={cn('text-[10px] px-2 py-0.5 rounded-full mt-1.5 inline-block', moduleColor(q.module))}>
+                                  {moduleLabel(q.module)}
                                 </span>
                               )}
                             </div>
@@ -829,8 +838,11 @@ export default function KnowledgePulsePage() {
                             }}
                             className="h-4 w-4 accent-primary"
                           />
-                          <span className={cn('text-xs font-medium', MODULE_COLORS[mod].split(' ')[1])}>
-                            {KNOWLEDGE_MODULE_LABELS[mod]}
+                          <span className={cn(
+                            'text-xs font-medium',
+                            moduleColor(mod).split(' ').find(c => c.startsWith('text-')) ?? '',
+                          )}>
+                            {moduleLabel(mod)}
                           </span>
                         </label>
                       );
@@ -1160,8 +1172,8 @@ export default function KnowledgePulsePage() {
                       )}
                     >
                       <p className="text-sm font-medium line-clamp-2">{q.text}</p>
-                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full mt-1 inline-block', MODULE_COLORS[q.module!])}>
-                        {KNOWLEDGE_MODULE_LABELS[q.module!]}
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full mt-1 inline-block', moduleColor(q.module!))}>
+                        {moduleLabel(q.module!)}
                       </span>
                     </button>
                   );

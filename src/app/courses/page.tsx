@@ -1,67 +1,58 @@
 'use client';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
+import { getCourses, getUserEnrollments } from '@/lib/firestore-service';
+import type { Course, CourseEnrollment } from '@/lib/types-lms';
 import {
   BookOpen,
-  Video,
-  FileText,
-  Headphones,
-  Globe,
   ChevronLeft,
   LogOut,
   ShieldCheck,
+  CheckCircle2,
+  PlayCircle,
+  Circle,
   Clock,
-  ListOrdered,
-  RefreshCw,
 } from 'lucide-react';
 
-const UPCOMING_FEATURES = [
-  {
-    icon: Video,
-    title: 'Lecciones en video',
-    description: 'Videos con streaming o carga directa, con seguimiento de progreso.',
-  },
-  {
-    icon: FileText,
-    title: 'Documentos y presentaciones',
-    description: 'Sube PDFs, PPTs y DOCs directamente al curso.',
-  },
-  {
-    icon: Headphones,
-    title: 'Audio lessons',
-    description: 'Contenido en formato podcast para aprender en movimiento.',
-  },
-  {
-    icon: Globe,
-    title: 'Contenido embebido',
-    description: 'Integra iFrames, SCORM y recursos externos.',
-  },
-  {
-    icon: ListOrdered,
-    title: 'Navegación secuencial o libre',
-    description: 'Define si el alumno avanza en orden o a su ritmo.',
-  },
-  {
-    icon: RefreshCw,
-    title: 'Re-certificación automática',
-    description: 'Cursos que vencen y se re-asignan automáticamente por compliance.',
-  },
-  {
-    icon: Clock,
-    title: 'Tiempo límite configurable',
-    description: 'Establece días máximos para completar cada curso.',
-  },
-];
+function courseStats(course: Course) {
+  const lessons = course.modules.flatMap(m => m.lessons);
+  const minutes = lessons.reduce((s, l) => s + (l.estimatedDuration ?? 0), 0);
+  return { lessonCount: lessons.length, minutes };
+}
 
 export default function CoursesPage() {
   const { user, profile, logout } = useAuth();
   const isAdmin = profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol);
+
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [enrollments, setEnrollments] = useState<Record<string, CourseEnrollment>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+
+    Promise.all([
+      getCourses().catch(() => [] as Course[]),
+      getUserEnrollments(profile.uid).catch(() => [] as CourseEnrollment[]),
+    ]).then(([allCourses, myEnrollments]) => {
+      if (cancelled) return;
+      setCourses(allCourses.filter(c => c.status === 'published'));
+      const map: Record<string, CourseEnrollment> = {};
+      myEnrollments.forEach(e => { map[e.courseId] = e; });
+      setEnrollments(map);
+    }).finally(() => { if (!cancelled) setLoading(false); });
+
+    return () => { cancelled = true; };
+  }, [profile]);
 
   return (
     <ProtectedRoute>
@@ -111,9 +102,11 @@ export default function CoursesPage() {
               </div>
               <div className="flex items-center gap-3 mt-2">
                 <h1 className="text-3xl sm:text-4xl font-bold font-headline">Cursos</h1>
-                <Badge className="bg-sky-100 text-sky-800 border-sky-200 text-xs">
-                  Próximamente
-                </Badge>
+                {!loading && courses.length > 0 && (
+                  <Badge className="bg-white/15 text-accent-foreground border-white/20 text-xs">
+                    {courses.length}
+                  </Badge>
+                )}
               </div>
               <p className="mt-1 text-accent-foreground/80">
                 Contenido estructurado con videos, documentos y evaluaciones.
@@ -122,53 +115,90 @@ export default function CoursesPage() {
           </header>
 
           <main className="flex-grow p-4 md:p-8">
-            <div className="max-w-5xl mx-auto space-y-8">
+            <div className="max-w-5xl mx-auto space-y-6">
 
-              {/* Hero coming soon */}
-              <div className="text-center py-10 space-y-4">
-                <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shadow-xl">
-                  <BookOpen className="h-10 w-10 text-white" />
-                </div>
-                <h2 className="text-2xl font-bold text-foreground">
-                  El módulo de Cursos está en desarrollo
-                </h2>
-                <p className="text-muted-foreground max-w-xl mx-auto text-sm leading-relaxed">
-                  Estamos construyendo un <strong>Course Authoring Engine</strong> completo que te
-                  permitirá crear, publicar y gestionar cursos con múltiples tipos de contenido,
-                  evaluaciones integradas y certificación automática.
-                </p>
-                <Button asChild variant="outline" className="mt-2">
-                  <Link href="/">
-                    <ChevronLeft className="mr-2 h-4 w-4" />
-                    Volver al LMS
-                  </Link>
-                </Button>
-              </div>
-
-              {/* Feature preview */}
-              <div>
-                <h3 className="text-base font-semibold text-foreground/60 uppercase tracking-wide mb-4 text-sm">
-                  Lo que incluirá este módulo
-                </h3>
+              {loading ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {UPCOMING_FEATURES.map((feat) => {
-                    const Icon = feat.icon;
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-40 rounded-2xl" />)}
+                </div>
+              ) : courses.length === 0 ? (
+                <div className="text-center py-16 space-y-4">
+                  <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shadow-xl">
+                    <BookOpen className="h-10 w-10 text-white" />
+                  </div>
+                  <h2 className="text-xl font-bold text-foreground">Aún no hay cursos publicados</h2>
+                  <p className="text-muted-foreground max-w-md mx-auto text-sm leading-relaxed">
+                    En cuanto tu equipo publique un curso, aparecerá aquí.
+                  </p>
+                  <Button asChild variant="outline" className="mt-2">
+                    <Link href="/">
+                      <ChevronLeft className="mr-2 h-4 w-4" />
+                      Volver al LMS
+                    </Link>
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {courses.map(course => {
+                    const { lessonCount, minutes } = courseStats(course);
+                    const enr = enrollments[course.id];
+                    const done = enr?.completedLessonIds?.length ?? 0;
+                    const status = enr?.status;
                     return (
-                      <Card key={feat.title} className="border border-dashed border-muted-foreground/20 bg-muted/20">
-                        <CardHeader className="pb-2">
-                          <div className="flex items-center gap-2">
-                            <Icon className="h-5 w-5 text-sky-500" />
-                            <CardTitle className="text-sm font-semibold">{feat.title}</CardTitle>
+                      <Card key={course.id} className="overflow-hidden flex flex-col">
+                        {course.thumbnail ? (
+                          <div className="h-28 w-full bg-muted overflow-hidden">
+                            <img src={course.thumbnail} alt={course.title} className="h-full w-full object-cover" />
                           </div>
+                        ) : (
+                          <div className="h-28 w-full bg-gradient-to-br from-sky-500/15 to-blue-600/10 flex items-center justify-center">
+                            <BookOpen className="h-8 w-8 text-sky-600/60" />
+                          </div>
+                        )}
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {course.category && (
+                              <Badge variant="secondary" className="text-[10px]">{course.category}</Badge>
+                            )}
+                            {status === 'completed' ? (
+                              <Badge className="bg-green-100 text-green-800 border-green-200 text-[10px] gap-1">
+                                <CheckCircle2 className="h-3 w-3" /> Completado
+                              </Badge>
+                            ) : status === 'in_progress' ? (
+                              <Badge className="bg-blue-100 text-blue-800 border-blue-200 text-[10px] gap-1">
+                                <PlayCircle className="h-3 w-3" /> En progreso
+                              </Badge>
+                            ) : null}
+                          </div>
+                          <CardTitle className="text-base leading-snug mt-1">{course.title}</CardTitle>
+                          <CardDescription className="text-xs line-clamp-2">{course.description}</CardDescription>
                         </CardHeader>
-                        <CardContent className="pt-0">
-                          <CardDescription className="text-xs">{feat.description}</CardDescription>
+                        <CardContent className="pt-0 mt-auto space-y-3">
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1"><Circle className="h-3 w-3" /> {lessonCount} lecciones</span>
+                            {minutes > 0 && (
+                              <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {minutes} min</span>
+                            )}
+                          </div>
+                          {status && lessonCount > 0 && (
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all"
+                                style={{ width: `${Math.round((done / lessonCount) * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                          <Button asChild size="sm" className="w-full gap-1.5">
+                            <Link href={`/courses/${course.id}`}>
+                              {status === 'completed' ? 'Ver de nuevo' : status ? 'Continuar' : 'Empezar curso'}
+                            </Link>
+                          </Button>
                         </CardContent>
                       </Card>
                     );
                   })}
                 </div>
-              </div>
+              )}
 
             </div>
           </main>
