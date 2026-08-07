@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
@@ -1018,6 +1019,7 @@ function MilestonesEditor({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function JourneyPage() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { products, loading: loadingProducts } = useProducts();
   const { profile } = useAuth();
 
@@ -1259,7 +1261,12 @@ export default function JourneyPage() {
   }, [hasUnsaved, handleSave, selectedProductId]);
 
   const handleDelete = async () => {
-    if (!journey?.id || !confirm('¿Eliminar esta ruta?')) return;
+    if (!journey?.id) return;
+    const ok = await confirm({
+      title: '¿Eliminar esta ruta?',
+      description: 'Se borran todas sus etapas y acciones. El progreso de los vendedores en ella se pierde.',
+    });
+    if (!ok) return;
     try {
       await deleteJourney(journey.id);
       setJourney(null);
@@ -1278,6 +1285,7 @@ export default function JourneyPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">

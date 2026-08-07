@@ -6,6 +6,7 @@ import { useProducts, useQuestions } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import { getQuiz, updateQuiz, createQuestion } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -429,6 +430,9 @@ export default function EditQuizPage() {
     tagsInput: '',
   });
   const [missions, setMissions] = useState<MissionDraft[]>([createEmptyMission(0)]);
+  // Copia de lo que se cargó, para saber si el usuario cambió algo de verdad
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const [savedOk, setSavedOk] = useState(false);
 
   // Load quiz data on mount
   useEffect(() => {
@@ -469,6 +473,19 @@ export default function EditQuizPage() {
       router.push('/admin/quizzes');
     }).finally(() => setLoadingQuiz(false));
   }, [quizId, router]);
+
+  const editableSignature = JSON.stringify({
+    formData: { ...formData, tagsInput: '' },
+    assessmentConfig,
+    missions: missions.map(({ expanded: _expanded, ...m }) => m),
+  });
+  // Se captura una sola vez, cuando la carga terminó y el estado ya refleja
+  // lo que vino de Firestore.
+  useEffect(() => {
+    if (!loadingQuiz && snapshot === null) setSnapshot(editableSignature);
+  }, [loadingQuiz, snapshot, editableSignature]);
+
+  useUnsavedChanges(!savedOk && snapshot !== null && snapshot !== editableSignature);
 
   const setField = (key: string, value: any) =>
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -566,6 +583,7 @@ export default function EditQuizPage() {
       });
 
       toast({ title: 'Evaluación actualizada' });
+      setSavedOk(true);
       router.push('/admin/quizzes');
     } catch (err: any) {
       toast({ title: 'Error al guardar', description: err.message, variant: 'destructive' });
@@ -594,7 +612,7 @@ export default function EditQuizPage() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-3xl font-bold">Editar Evaluación</h1>
+            <h1 className="text-2xl font-bold">Editar Evaluación</h1>
             <p className="text-muted-foreground mt-1">Modifica el contenido y configuración de la evaluación</p>
           </div>
         </div>

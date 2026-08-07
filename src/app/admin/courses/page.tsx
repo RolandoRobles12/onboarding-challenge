@@ -44,6 +44,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import {
   BookOpen,
   Plus,
@@ -176,6 +177,8 @@ export default function AdminCoursesPage() {
   // ── Editor de curso ──
   const [courseForm, setCourseForm] = useState<CourseForm>(DEFAULT_COURSE_FORM);
   const [modules, setModules] = useState<CourseModule[]>([]);
+  // Mientras haya un curso abierto en el editor hay trabajo sin guardar.
+  useUnsavedChanges(editingCourse !== null);
   const [expandedModuleId, setExpandedModuleId] = useState<string | null>(null);
   const [editingModuleId, setEditingModuleId] = useState<string | null>(null);
   const [moduleTitle, setModuleTitle] = useState('');

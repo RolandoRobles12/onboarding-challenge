@@ -425,7 +425,7 @@ export default function KnowledgePulsePage() {
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
             <Radio className="h-7 w-7 text-primary" /> Pulso de Conocimiento
           </h1>
           <p className="text-muted-foreground mt-1">Cuestionario diario de 7 preguntas para el equipo comercial</p>

@@ -15,6 +15,7 @@ import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { toast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine, ImageIcon, Upload } from 'lucide-react';
 import type { QuestionFormData, QuestionType, QuestionOption, KnowledgeModule } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
@@ -22,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 
 export default function QuestionsPage() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { profile } = useAuth();
   const { products } = useProducts();
   const { questions, loading, refresh } = useQuestions();
@@ -313,9 +315,11 @@ export default function QuestionsPage() {
   };
 
   const handleDelete = async (questionId: string) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar esta pregunta?')) {
-      return;
-    }
+    const ok = await confirm({
+      title: '¿Eliminar esta pregunta?',
+      description: 'Se quitará del banco y de las evaluaciones que la usen.',
+    });
+    if (!ok) return;
 
     try {
       await deleteQuestion(questionId);
@@ -340,6 +344,7 @@ export default function QuestionsPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

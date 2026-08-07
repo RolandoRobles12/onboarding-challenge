@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { createProduct, updateProduct, deleteProduct } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { Package, Plus, Pencil, Trash2, Search } from 'lucide-react';
 import type { ProductFormData } from '@/lib/types-scalable';
 
@@ -29,6 +31,7 @@ const COLOR_OPTIONS = [
 export default function ProductsPage() {
   const { products, loading, refresh } = useProducts();
   const { profile } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [searchQuery, setSearchQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
@@ -102,7 +105,11 @@ export default function ProductsPage() {
   };
 
   const handleDelete = async (productId: string, productName: string) => {
-    if (!confirm(`¿Estás seguro de que quieres eliminar el producto "${productName}"?`)) return;
+    const ok = await confirm({
+      title: `¿Eliminar el producto "${productName}"?`,
+      description: 'Las rutas, evaluaciones y contenido asociados a este producto dejarán de estar disponibles para los vendedores.',
+    });
+    if (!ok) return;
 
     try {
       await deleteProduct(productId);
@@ -116,6 +123,7 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -219,7 +227,7 @@ export default function ProductsPage() {
       {loading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
-            <Card key={i} className="h-48 animate-pulse bg-muted" />
+            <Skeleton key={i} className="h-48 rounded-xl" />
           ))}
         </div>
       ) : filteredProducts.length === 0 ? (
