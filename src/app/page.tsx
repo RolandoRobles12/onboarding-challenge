@@ -1499,7 +1499,7 @@ function LMSDashboard() {
                 )}
                 {isAdmin && !testMode && (
                   <Link href="/admin">
-                    <Button variant="outline" size="sm" className="text-accent-foreground border-accent-foreground/30 hover:bg-white/10 gap-1">
+                    <Button variant="outline" size="sm" className="bg-transparent text-accent-foreground border-accent-foreground/30 hover:bg-white/10 gap-1">
                       <ShieldCheck className="h-3.5 w-3.5" /> Admin
                     </Button>
                   </Link>
