@@ -1262,6 +1262,11 @@ function LessonFormFields({
             placeholder="https://..."
             type="url"
           />
+          <p className="text-xs text-muted-foreground">
+            Para un prototipo de Figma, pega el link normal de "Compartir → Presentar"
+            (figma.com/proto/… o /design/…) — lo convertimos automáticamente al formato de
+            embed. Figma no permite mostrar el link normal dentro de un iframe.
+          </p>
         </div>
       ) : supportsUpload ? (
         <div className="space-y-2">
@@ -1440,6 +1445,22 @@ function LessonFormFields({
 
 // ─── Helper: construir LessonContent desde formulario ───────────────────────
 
+/** Convierte un link normal de Figma (proto/file/design) a su URL de embed.
+ * Figma bloquea el link normal dentro de un iframe (X-Frame-Options), así
+ * que hay que usar el formato /embed?embed_host=share&url=... — si no es un
+ * link de Figma, o ya es un embed, se devuelve tal cual. */
+function toFigmaEmbedUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.endsWith('figma.com')) return url;
+    if (parsed.pathname.startsWith('/embed')) return url;
+    if (!/^\/(proto|file|design)\//.test(parsed.pathname)) return url;
+    return `https://www.figma.com/embed?embed_host=share&url=${encodeURIComponent(url)}`;
+  } catch {
+    return url;
+  }
+}
+
 function buildLessonContent(form: LessonForm) {
   const url = form.contentUrl.trim();
   switch (form.type) {
@@ -1447,7 +1468,7 @@ function buildLessonContent(form: LessonForm) {
     case 'slides':   return { slidesUrl: url || undefined };
     case 'document': return { documentUrl: url || undefined };
     case 'html':     return { htmlContent: form.htmlContent || undefined };
-    case 'embedded': return { embedUrl: url || undefined };
+    case 'embedded': return { embedUrl: url ? toFigmaEmbedUrl(url) : undefined };
     case 'audio':    return { audioUrl: url || undefined };
     case 'scorm':    return { scormPackageUrl: url || undefined };
     default:         return {};
