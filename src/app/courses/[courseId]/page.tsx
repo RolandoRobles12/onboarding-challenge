@@ -762,6 +762,10 @@ export default function CourseDetailPage() {
                           <span className="flex items-center gap-1 text-xs text-green-600 font-semibold">
                             <CheckCheck className="h-3.5 w-3.5" /> Completada
                           </span>
+                        ) : course.navigation === 'sequential' ? (
+                          <span className="text-xs text-amber-600 font-medium text-center leading-tight">
+                            Termina el contenido para continuar
+                          </span>
                         ) : (
                           <span className="text-xs text-muted-foreground font-medium">
                             {currentIdx + 1} / {allLessons.length}
@@ -778,10 +782,14 @@ export default function CourseDetailPage() {
                       {nextLesson ? (
                         <Button
                           size="sm"
+                          disabled={course.navigation === 'sequential' && !isDone}
                           onClick={async () => {
-                            if (!isDone) handleAutoComplete();
+                            // La lección solo se marca completada por sus propios
+                            // disparadores de contenido (ver LessonViewer) — este
+                            // botón nunca fuerza el auto-completado.
+                            if (course.navigation === 'sequential' && !isDone) return;
                             const quizUrl = getAssessmentUrl(`/courses/${courseId}?lesson=${nextLesson.id}`);
-                            if (quizUrl && !isDone) {
+                            if (quizUrl) {
                               await savePromiseRef.current;
                               router.push(quizUrl);
                             } else {
@@ -797,11 +805,12 @@ export default function CourseDetailPage() {
                         <Button
                           size="sm"
                           variant={isDone ? 'outline' : 'default'}
+                          disabled={course.navigation === 'sequential' && !isDone}
                           className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                           onClick={async () => {
-                            if (!isDone) handleAutoComplete();
+                            if (course.navigation === 'sequential' && !isDone) return;
                             const quizUrl = getAssessmentUrl('/');
-                            if (quizUrl && !isDone) {
+                            if (quizUrl) {
                               await savePromiseRef.current;
                               router.push(quizUrl);
                             } else {

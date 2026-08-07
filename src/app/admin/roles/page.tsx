@@ -43,7 +43,9 @@ const NAV_SECTIONS = [
     section: 'Configuración',
     items: [
       { label: 'Productos', path: '/admin/products' },
+      { label: 'Kioscos', path: '/admin/kioscos' },
       { label: 'Niveles XP', path: '/admin/levels' },
+      { label: 'Marca', path: '/admin/branding' },
       { label: 'Inscripciones', path: '/admin/enrollments' },
       { label: 'Notificaciones', path: '/admin/notifications' },
     ],

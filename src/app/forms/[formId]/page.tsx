@@ -17,7 +17,7 @@ import {
   getKioscos,
 } from '@/lib/firestore-service';
 import type { JourneyForm, FormField, FormAnswer, UserProfile, Kiosko } from '@/lib/types-scalable';
-import { ChevronLeft, AlertCircle, Send, Star } from 'lucide-react';
+import { ChevronLeft, AlertCircle, Send, Star, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Combobox } from '@/components/ui/combobox';
 
@@ -270,6 +270,16 @@ function FormContent() {
   const [submitted, setSubmitted] = useState(false);
   const [trainers, setTrainers] = useState<UserProfile[]>([]);
   const [kioscos, setKioscos] = useState<Kiosko[]>([]);
+  const [sellers, setSellers] = useState<UserProfile[]>([]);
+  const [subjectId, setSubjectId] = useState('');
+  const [subjectError, setSubjectError] = useState('');
+
+  // Formularios que NO responde el propio vendedor (p.ej. un capacitador o
+  // gerente evaluando a un vendedor específico) necesitan capturar sobre quién
+  // es la evaluación — de lo contrario la respuesta queda huérfana.
+  const needsSubject = !!form && form.respondent !== 'seller';
+  const isSeller = profile?.rol === 'seller';
+  const blockedForRole = needsSubject && isSeller;
 
   useEffect(() => {
     if (!formId) return;
@@ -282,6 +292,9 @@ function FormContent() {
           const needsKioscos = data.fields.some(f => f.type === 'kiosk_select');
           if (needsTrainers) getAllUsers().then(users => setTrainers(users.filter(u => u.rol === 'trainer' && u.active !== false)));
           if (needsKioscos) getKioscos(true).then(setKioscos);
+          if (data.respondent !== 'seller') {
+            getAllUsers().then(users => setSellers(users.filter(u => u.rol === 'seller' && u.active !== false)));
+          }
         }
       })
       .catch(() => setNotFound(true))
@@ -295,6 +308,11 @@ function FormContent() {
 
   const validate = () => {
     if (!form) return false;
+    let subjectOk = true;
+    if (needsSubject) {
+      subjectOk = !!subjectId;
+      setSubjectError(subjectOk ? '' : 'Selecciona sobre qué vendedor es esta evaluación');
+    }
     const newErrors: Record<string, string> = {};
     form.fields.forEach(field => {
       if (field.type === 'section_header' || !field.required) return;
@@ -307,12 +325,12 @@ function FormContent() {
       if (empty) newErrors[field.id] = 'Este campo es obligatorio';
     });
     setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    return subjectOk && Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate() || !form || !profile) return;
+    if (blockedForRole || !validate() || !form || !profile) return;
     setSubmitting(true);
     try {
       const formAnswers: FormAnswer[] = form.fields
@@ -324,6 +342,7 @@ function FormContent() {
         journeyId: journeyId || undefined,
         stepId: stepId || undefined,
         respondentId: profile.uid,
+        subjectId: needsSubject ? subjectId : undefined,
         organizationId: 'aviva-credito',
         answers: formAnswers,
       });
@@ -373,13 +392,26 @@ function FormContent() {
 
   if (!form) return null;
 
+  if (blockedForRole) return (
+    <div className="flex flex-col items-center justify-center gap-4 text-center py-20 px-4">
+      <ShieldAlert className="h-12 w-12 text-muted-foreground" />
+      <p className="font-semibold text-lg">Este formulario no es para ti</p>
+      <p className="text-muted-foreground text-sm max-w-xs">
+        &ldquo;{form.title}&rdquo; lo debe llenar tu capacitador o tu gerente sobre ti, no tú mismo.
+      </p>
+      <Button asChild variant="outline">
+        <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver al inicio</Link>
+      </Button>
+    </div>
+  );
+
   const dataFields = form.fields.filter(f => f.type !== 'section_header');
   const filledRequired = dataFields.filter(f => f.required).every(f => {
     const val = answers[f.id];
     if (val === undefined || val === '') return false;
     if (Array.isArray(val)) return val.length > 0;
     return true;
-  });
+  }) && (!needsSubject || !!subjectId);
 
   return (
     <div className="max-w-lg mx-auto px-4 py-8">
@@ -391,6 +423,23 @@ function FormContent() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {needsSubject && (
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              ¿Sobre qué vendedor es esta evaluación?
+              <span className="text-destructive ml-1">*</span>
+            </label>
+            <Combobox
+              options={sellers.map(s => ({ value: s.uid, label: s.nombre || s.email, description: s.email }))}
+              value={subjectId}
+              onChange={v => { setSubjectId(v); setSubjectError(''); }}
+              placeholder="Selecciona un vendedor…"
+              searchPlaceholder="Buscar vendedor…"
+              emptyLabel="No hay vendedores registrados"
+            />
+            {subjectError && <p className="text-xs text-destructive mt-1">{subjectError}</p>}
+          </div>
+        )}
         {[...form.fields]
           .sort((a, b) => a.order - b.order)
           .map(field => (

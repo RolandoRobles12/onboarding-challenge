@@ -9,12 +9,15 @@ import { BadgeDisplay } from '@/components/BadgeDisplay';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BottomNav } from '@/components/BottomNav';
-import { LEVELS, getLevelInfo, calcXP } from '@/lib/xp';
+import { calcXP } from '@/lib/xp';
 import {
   getUserBadges,
   getUserAttempts,
   getUserJourneyProgress,
   getJourneyByProduct,
+  getLevelsConfig,
+  getLevelFromConfig,
+  type LevelConfig,
 } from '@/lib/firestore-service';
 import type { UserBadge, QuizAttempt, JourneyStep } from '@/lib/types-scalable';
 import {
@@ -46,6 +49,7 @@ export default function PerfilPage() {
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [completedCount, setCompletedCount] = useState(0);
   const [xp, setXp] = useState(0);
+  const [levelConfig, setLevelConfig] = useState<LevelConfig[]>([]);
   const [loading, setLoading] = useState(true);
 
   const isAdmin = profile ? ['super_admin', 'admin', 'trainer'].includes(profile.rol) : false;
@@ -56,9 +60,11 @@ export default function PerfilPage() {
     Promise.all([
       getUserBadges(user.uid).catch(() => [] as UserBadge[]),
       getUserAttempts(user.uid).catch(() => [] as QuizAttempt[]),
-    ]).then(async ([b, a]) => {
+      getLevelsConfig().catch(() => [] as LevelConfig[]),
+    ]).then(async ([b, a, lvlCfg]) => {
       setBadges(b as UserBadge[]);
       setAttempts(a as QuizAttempt[]);
+      setLevelConfig(lvlCfg as LevelConfig[]);
 
       const completedIds = new Set<string>();
       if (profile.producto) {
@@ -71,7 +77,7 @@ export default function PerfilPage() {
               ? journey.stages.flatMap(s => s.actions ?? [])
               : journey.steps ?? [];
             allActions.forEach(action => {
-              if (action.type === 'info_form' && profile.onboardingCompleted) completedIds.add(action.id);
+              if (action.type === 'info_form' && !action.config?.formId && profile.onboardingCompleted) completedIds.add(action.id);
             });
           }
         } catch { /* no journey configured */ }
@@ -83,7 +89,10 @@ export default function PerfilPage() {
     });
   }, [user, profile]);
 
-  const levelInfo = getLevelInfo(xp);
+  const sortedLevels = [...levelConfig].sort((a, b) => a.minXP - b.minXP);
+  const levelInfo = levelConfig.length > 0
+    ? getLevelFromConfig(xp, levelConfig)
+    : { level: 1, title: '—', emoji: '🌱', minXP: 0, xp, pctToNext: 0, xpToNext: 0, nextLevel: null };
 
   const completedAttempts = attempts.filter(a => a.status === 'completed');
   const avgScore = completedAttempts.length > 0
@@ -192,9 +201,10 @@ export default function PerfilPage() {
                 <span className="font-semibold text-sm">Niveles</span>
               </div>
               <div className="divide-y">
-                {LEVELS.map(lvl => {
+                {sortedLevels.map((lvl, idx) => {
                   const isCurrent = levelInfo.level === lvl.level;
                   const isPast = levelInfo.level > lvl.level;
+                  const next = sortedLevels[idx + 1];
                   return (
                     <div
                       key={lvl.level}
@@ -208,7 +218,7 @@ export default function PerfilPage() {
                       <div className="flex-1 min-w-0">
                         <p className={cn('text-sm font-medium', isCurrent && 'text-primary')}>{lvl.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {lvl.max === Infinity ? `${lvl.min}+ XP` : `${lvl.min}–${lvl.max} XP`}
+                          {next ? `${lvl.minXP}–${next.minXP - 1} XP` : `${lvl.minXP}+ XP`}
                         </p>
                       </div>
                       {isCurrent && (

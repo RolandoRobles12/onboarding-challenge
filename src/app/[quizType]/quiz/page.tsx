@@ -81,7 +81,7 @@ function QuizComponent() {
   const [elapsedTime, setElapsedTime] = useState(0);
 
   // Per-question result tracking (stored in ref to avoid re-renders)
-  const questionResultsRef = useRef<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string }[]>([]);
+  const questionResultsRef = useRef<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[]>([]);
 
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
@@ -318,6 +318,7 @@ function QuizComponent() {
       isCorrect: !!isCorrect,
       userAnswer: userAnswerText,
       correctAnswer: correctAnswerText,
+      isTricky: !!currentQuestion?.isTricky,
     });
 
     setParticleType(isCorrect ? 'correct' : 'wrong');
@@ -460,6 +461,7 @@ function QuizComponent() {
       isCorrect,
       userAnswer: openTextAnswer,
       correctAnswer: currentQuestion?.validAnswers?.join(', ') ?? '',
+      isTricky: !!currentQuestion?.isTricky,
     });
 
     setParticleType(isCorrect ? 'correct' : 'wrong');
