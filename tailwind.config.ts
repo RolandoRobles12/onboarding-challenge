@@ -10,11 +10,29 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        body: ['Inter', 'sans-serif'],
-        headline: ['Inter', 'sans-serif'],
+        body: ['Fustat', 'sans-serif'],
+        headline: ['Fustat', 'sans-serif'],
         code: ['monospace'],
       },
       colors: {
+        aviva: {
+          esmeralda: '#B0F5CD',
+          verde: '#16B877',
+          musgo: '#026149',
+          pino: '#074739',
+          'gris-frio': '#F0F5FA',
+          'blanco-hueso': '#F6F4F0',
+          'blanco-off': '#F5F5F5',
+          'negro-off': '#1E2024',
+        },
+        fuerza: {
+          disciplina: { 100: '#E2D0F7', 300: '#BD88EB', DEFAULT: '#A35ED6', 500: '#A35ED6', 700: '#8248A8', 900: '#6A3987' },
+          esfuerzo: { 100: '#BDE4F5', 300: '#4DB2E8', DEFAULT: '#2493E3', 500: '#2493E3', 700: '#2375B8', 900: '#1B5B96' },
+          creatividad: { 100: '#F5D0E4', 300: '#ED93C2', DEFAULT: '#E565A5', 500: '#E565A5', 700: '#BD4F84', 900: '#9E416C' },
+          superacion: { 100: '#AFEDEA', 300: '#44CFCC', DEFAULT: '#1DB8B8', 500: '#1DB8B8', 700: '#179799', 900: '#127C80' },
+          trabajo: { 100: '#FCDCBB', 300: '#F7A565', DEFAULT: '#F57F31', 500: '#F57F31', 700: '#C26834', 900: '#A65329' },
+          sueno: { 100: '#FCEFA9', 300: '#F7CE48', DEFAULT: '#F5BB1D', 500: '#F5BB1D', 700: '#C79216', 900: '#AB770F' },
+        },
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         card: {

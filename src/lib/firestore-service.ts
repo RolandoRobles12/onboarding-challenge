@@ -1975,6 +1975,46 @@ export function getLevelFromConfig(xp: number, levels: LevelConfig[]) {
 }
 
 // ============================================================================
+// CONFIGURACIÓN DE MARCA (LOGOS)
+// ============================================================================
+
+export interface BrandingConfig {
+  /** Logo completo (ícono + wordmark), usado en pantallas grandes como login. */
+  logoUrl: string | null;
+  /** Símbolo/ícono únicamente, usado en espacios reducidos como el header. */
+  iconUrl: string | null;
+  updatedAt?: unknown;
+}
+
+const BRANDING_DOC_ID = 'branding';
+
+const DEFAULT_BRANDING: BrandingConfig = { logoUrl: null, iconUrl: null };
+
+/** Devuelve la configuración de marca (logos) desde Firestore. Si no existe, retorna los defaults. */
+export async function getBrandingConfig(): Promise<BrandingConfig> {
+  try {
+    const docRef = getDocRef(COLLECTIONS.CONFIG, BRANDING_DOC_ID);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : null,
+        iconUrl: typeof data.iconUrl === 'string' ? data.iconUrl : null,
+      };
+    }
+  } catch (error) {
+    console.error('Error getting branding config:', error);
+  }
+  return DEFAULT_BRANDING;
+}
+
+/** Guarda la configuración de marca (logos) en Firestore. */
+export async function saveBrandingConfig(config: Partial<BrandingConfig>): Promise<void> {
+  const docRef = getDocRef(COLLECTIONS.CONFIG, BRANDING_DOC_ID);
+  await setDoc(docRef, { ...config, updatedAt: serverTimestamp() }, { merge: true });
+}
+
+// ============================================================================
 // VIDEO FEED
 // ============================================================================
 
