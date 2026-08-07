@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import {
   Plus,
   Pencil,
@@ -1181,6 +1182,9 @@ export default function AdminFormsPage() {
   const [saving, setSaving] = useState(false);
   const [view, setView] = useState<ViewMode>('list');
   const [editingForm, setEditingForm] = useState<(Omit<JourneyForm, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'> & { id?: string }) | null>(null);
+  // Mientras el editor esté abierto hay trabajo en curso que se perdería al
+  // cerrar la pestaña — el guardado es explícito, no automático.
+  useUnsavedChanges(editingForm !== null);
   const [previewForm, setPreviewForm] = useState<JourneyForm | null>(null);
   const [responsesForm, setResponsesForm] = useState<JourneyForm | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<JourneyForm | null>(null);

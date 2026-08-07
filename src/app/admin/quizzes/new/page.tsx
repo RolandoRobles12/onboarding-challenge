@@ -6,6 +6,7 @@ import { useProducts, useQuestions } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
 import { createQuiz } from '@/lib/firestore-service';
 import { toast } from '@/hooks/use-toast';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -431,6 +432,16 @@ export default function NewQuizPage() {
     tagsInput: '',
   });
   const [missions, setMissions] = useState<MissionDraft[]>([createEmptyMission(0)]);
+  const [savedOk, setSavedOk] = useState(false);
+
+  // Hay trabajo que se perdería: se capturó algo y aún no se ha guardado.
+  useUnsavedChanges(
+    !savedOk && (
+      formData.title.trim().length > 0 ||
+      formData.description.trim().length > 0 ||
+      missions.some(m => m.questionIds.length > 0)
+    ),
+  );
 
   const setField = (key: string, value: any) =>
     setFormData((prev) => ({ ...prev, [key]: value }));
@@ -548,6 +559,7 @@ export default function NewQuizPage() {
       );
 
       toast({ title: '✅ Quiz creado exitosamente' });
+      setSavedOk(true);
       router.push('/admin/quizzes');
     } catch (err: any) {
       toast({ title: 'Error al guardar', description: err.message, variant: 'destructive' });
@@ -560,7 +572,7 @@ export default function NewQuizPage() {
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Nuevo Quiz</h1>
+          <h1 className="text-2xl font-bold">Nuevo Quiz</h1>
           <p className="text-muted-foreground mt-1">Configura el quiz y organiza sus misiones</p>
         </div>
         <Button onClick={handleSave} disabled={saving} className="gap-2" size="lg">

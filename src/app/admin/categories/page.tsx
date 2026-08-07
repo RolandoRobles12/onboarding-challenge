@@ -1,5 +1,7 @@
 'use client';
 
+import { toast } from '@/hooks/use-toast';
+
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useQuestions } from '@/hooks/use-firestore';
@@ -188,8 +190,10 @@ export default function CategoriesPage() {
       await savePulseCategory(payload, editingCat?.id);
       setDialogOpen(false);
       await loadCategories();
+      toast({ title: editingCat ? 'Categoría actualizada' : 'Categoría creada' });
     } catch (err) {
       console.error('Error saving category:', err);
+      toast({ variant: 'destructive', title: 'No se pudo guardar la categoría' });
     } finally {
       setSaving(false);
     }
@@ -202,8 +206,10 @@ export default function CategoriesPage() {
       await deletePulseCategory(id);
       setDeleteConfirmId(null);
       await loadCategories();
+      toast({ title: 'Categoría eliminada' });
     } catch (err) {
       console.error('Error deleting category:', err);
+      toast({ variant: 'destructive', title: 'No se pudo eliminar la categoría' });
     } finally {
       setSaving(false);
     }
@@ -247,7 +253,7 @@ export default function CategoriesPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
             <BookOpen className="h-7 w-7 text-primary" /> Categorias del Pulso
           </h1>
           <p className="text-muted-foreground mt-1">

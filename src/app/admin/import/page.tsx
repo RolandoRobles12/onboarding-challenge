@@ -458,7 +458,7 @@ export default function ImportPage() {
   return (
     <div className="space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-3xl font-bold">Importar Preguntas</h1>
+        <h1 className="text-2xl font-bold">Importar Preguntas</h1>
         <p className="text-muted-foreground mt-2">
           Carga masivamente preguntas desde archivos CSV o Excel al banco de preguntas.
         </p>

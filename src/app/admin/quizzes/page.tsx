@@ -71,7 +71,7 @@ export default function QuizzesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Evaluaciones</h1>
+          <h1 className="text-2xl font-bold">Evaluaciones</h1>
           <p className="text-muted-foreground mt-1">Crea evaluaciones completas con misiones usando preguntas del banco</p>
         </div>
         <Link href="/admin/quizzes/new">

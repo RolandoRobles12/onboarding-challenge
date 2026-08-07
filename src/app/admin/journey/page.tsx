@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
@@ -467,7 +468,7 @@ const STAGE_COLORS = [
 
 function StageCard({
   stage, stageIndex, totalStages, quizzes, courses, badges, forms, milestones,
-  onUpdate, onRemove, onMoveUp, onMoveDown,
+  onUpdate, onRemove, onMoveUp, onMoveDown, expanded, onToggleExpanded,
 }: {
   stage: JourneyStage;
   stageIndex: number;
@@ -481,8 +482,9 @@ function StageCard({
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(stage.title);
   const color = STAGE_COLORS[stageIndex % STAGE_COLORS.length];
@@ -620,7 +622,8 @@ function StageCard({
             <Trash2 className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => setExpanded(!expanded)}
+            onClick={onToggleExpanded}
+            aria-label={expanded ? 'Colapsar etapa' : 'Expandir etapa'}
             className="p-1 text-muted-foreground hover:text-foreground rounded ml-1"
           >
             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -1018,12 +1021,44 @@ function MilestonesEditor({
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function JourneyPage() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { products, loading: loadingProducts } = useProducts();
   const { profile } = useAuth();
 
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [journey, setJourney] = useState<Journey | null>(null);
   const [stages, setStages] = useState<JourneyStage[]>([]);
+  // Qué etapas están abiertas. Con varias etapas abrir todas produce un muro
+  // de contenido, así que sólo se expande automáticamente cuando son pocas.
+  const [showConcept, setShowConcept] = useState(true);
+  useEffect(() => {
+    if (localStorage.getItem('journeyConceptDismissed') === '1') setShowConcept(false);
+  }, []);
+  const dismissConcept = () => {
+    setShowConcept(false);
+    try { localStorage.setItem('journeyConceptDismissed', '1'); } catch { /* modo privado */ }
+  };
+  const [expandedStageIds, setExpandedStageIds] = useState<Set<string>>(new Set());
+  const stagesInitialisedRef = useRef<string | null>(null);
+
+  const toggleStageExpanded = (id: string) => setExpandedStageIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  // Al cargar/cambiar de ruta: si son pocas etapas se abren todas; si son
+  // muchas se dejan cerradas para poder ver la estructura completa de un golpe.
+  useEffect(() => {
+    if (!selectedProductId || stages.length === 0) return;
+    if (stagesInitialisedRef.current === selectedProductId) return;
+    stagesInitialisedRef.current = selectedProductId;
+    setExpandedStageIds(stages.length <= 2 ? new Set(stages.map(s => s.id)) : new Set());
+  }, [selectedProductId, stages]);
+
+  const allStagesExpanded = stages.length > 0 && stages.every(s => expandedStageIds.has(s.id));
+  const toggleAllStages = () => setExpandedStageIds(
+    allStagesExpanded ? new Set() : new Set(stages.map(s => s.id)),
+  );
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [badges, setBadges] = useState<BadgeType[]>([]);
@@ -1259,7 +1294,12 @@ export default function JourneyPage() {
   }, [hasUnsaved, handleSave, selectedProductId]);
 
   const handleDelete = async () => {
-    if (!journey?.id || !confirm('¿Eliminar esta ruta?')) return;
+    if (!journey?.id) return;
+    const ok = await confirm({
+      title: '¿Eliminar esta ruta?',
+      description: 'Se borran todas sus etapas y acciones. El progreso de los vendedores en ella se pierde.',
+    });
+    if (!ok) return;
     try {
       await deleteJourney(journey.id);
       setJourney(null);
@@ -1278,6 +1318,7 @@ export default function JourneyPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -1288,21 +1329,30 @@ export default function JourneyPage() {
         </p>
       </div>
 
-      {/* Concept info */}
-      <Card className="border-blue-200 bg-blue-50/40">
-        <CardContent className="py-3 flex gap-3 items-start">
-          <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-blue-700 leading-relaxed">
-            Cada ruta tiene <strong>etapas</strong> (ej: Bienvenida, Capacitación, Cierre). Dentro de cada etapa
-            puedes insertar múltiples <strong>acciones</strong>: formularios de datos, evaluaciones del capacitador,
-            cursos, desafíos, listas de verificación y certificados — en cualquier orden.
-          </p>
-        </CardContent>
-      </Card>
+      {/* Concept info — descartable: después de leerla una vez es ruido */}
+      {showConcept && (
+        <Card className="border-blue-200 bg-blue-50/40">
+          <CardContent className="py-3 flex gap-3 items-start">
+            <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+            <p className="text-xs text-blue-700 leading-relaxed flex-1">
+              Cada ruta tiene <strong>etapas</strong> (ej: Bienvenida, Capacitación, Cierre). Dentro de cada etapa
+              puedes insertar múltiples <strong>acciones</strong>: formularios de datos, evaluaciones del capacitador,
+              cursos, desafíos, listas de verificación y certificados — en cualquier orden.
+            </p>
+            <button
+              onClick={dismissConcept}
+              aria-label="Ocultar esta explicación"
+              className="text-blue-500 hover:text-blue-700 shrink-0"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* Product selector */}
+      {/* Product selector — compacto, es un paso previo no el contenido */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="py-4">
           <div className="space-y-2 max-w-sm">
             <Label>Producto</Label>
             <Select value={selectedProductId} onValueChange={setSelectedProductId}>
@@ -1388,11 +1438,6 @@ export default function JourneyPage() {
                           : <><FileEdit className="h-3.5 w-3.5" /> Borrador</>
                         }
                       </button>
-                      {journey && (
-                        <Button variant="outline" size="sm" className="text-destructive" onClick={handleDelete}>
-                          <Trash2 className="h-4 w-4 mr-1" /> Eliminar
-                        </Button>
-                      )}
                       <Button size="sm" onClick={() => handleSave(false)} disabled={saving || autoSaving}>
                         <Save className="h-4 w-4 mr-1" />
                         {saving ? 'Guardando...' : 'Guardar'}
@@ -1450,7 +1495,20 @@ export default function JourneyPage() {
 
                 {/* Stages */}
                 <div className="space-y-2">
-                  <Label>Etapas ({stages.length})</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>Etapas ({stages.length})</Label>
+                    {stages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={toggleAllStages}
+                        className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1"
+                      >
+                        {allStagesExpanded
+                          ? <><ChevronUp className="h-3.5 w-3.5" /> Colapsar todas</>
+                          : <><ChevronDown className="h-3.5 w-3.5" /> Expandir todas</>}
+                      </button>
+                    )}
+                  </div>
                   {stages.length === 0 ? (
                     <div className="border-2 border-dashed rounded-lg py-10 text-center text-muted-foreground">
                       <Route className="h-8 w-8 mx-auto mb-2 opacity-40" />
@@ -1473,13 +1531,15 @@ export default function JourneyPage() {
                             onRemove={() => removeStage(stageIdx)}
                             onMoveUp={() => moveStage(stageIdx, 'up')}
                             onMoveDown={() => moveStage(stageIdx, 'down')}
+                            expanded={expandedStageIds.has(stage.id)}
+                            onToggleExpanded={() => toggleStageExpanded(stage.id)}
                           />
                           {/* Insert stage connector */}
                           <div className="flex items-center gap-2 py-2 group">
                             <div className="flex-1 border-l-2 border-dashed border-muted ml-8 h-6" />
                             <button
                               onClick={() => insertStage(stageIdx)}
-                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 px-3 py-1 rounded-full border border-dashed border-muted hover:border-primary transition-all opacity-0 group-hover:opacity-100"
+                              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-primary/5 px-3 py-1 rounded-full border border-dashed border-muted hover:border-primary transition-all opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
                             >
                               <Plus className="h-3 w-3" /> Insertar etapa aquí
                             </button>
@@ -1494,6 +1554,18 @@ export default function JourneyPage() {
                     <Plus className="h-4 w-4 mr-2" /> Agregar etapa
                   </Button>
                 </div>
+
+                {/* Zona de riesgo — separada de "Guardar" a propósito */}
+                {journey && (
+                  <div className="pt-4 mt-2 border-t flex items-center justify-between gap-3 flex-wrap">
+                    <p className="text-xs text-muted-foreground">
+                      Eliminar la ruta borra sus etapas y el progreso de los vendedores en ella.
+                    </p>
+                    <Button variant="outline" size="sm" className="text-destructive border-destructive/30 hover:bg-destructive/5" onClick={handleDelete}>
+                      <Trash2 className="h-4 w-4 mr-1" /> Eliminar ruta
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}

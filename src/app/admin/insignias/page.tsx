@@ -13,6 +13,7 @@ import {
 import type { Badge, UserProfile } from '@/lib/types-scalable';
 import { BadgeDisplay } from '@/components/BadgeDisplay';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -181,7 +182,7 @@ export default function InsigniasPage() {
 
   if (loading) return (
     <div className="space-y-4">
-      {[1,2,3].map(i => <Card key={i} className="h-24 animate-pulse bg-muted" />)}
+      {[1, 2, 3].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}
     </div>
   );
 

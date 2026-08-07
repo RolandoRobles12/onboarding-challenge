@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuestions, useProducts } from '@/hooks/use-firestore';
 import { useAuth } from '@/context/AuthContext';
@@ -15,13 +15,51 @@ import { createQuestion, updateQuestion, deleteQuestion } from '@/lib/firestore-
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { toast } from '@/hooks/use-toast';
-import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine, ImageIcon, Upload } from 'lucide-react';
+import { useConfirm } from '@/components/ConfirmDialog';
+import { HelpCircle, Plus, Pencil, Trash2, Search, Check, X, PenLine, ImageIcon, Upload, AlertTriangle, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react';
 import type { QuestionFormData, QuestionType, QuestionOption, KnowledgeModule } from '@/lib/types-scalable';
-import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
+import { KNOWLEDGE_MODULE_LABELS, KNOWLEDGE_MODULES } from '@/lib/types-scalable';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 
+type SortKey = 'recent' | 'text' | 'used' | 'rate';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  recent: 'Más recientes',
+  text: 'Texto (A-Z)',
+  used: 'Más usadas',
+  rate: 'Menor tasa de acierto',
+};
+
+const PAGE_SIZE = 50;
+
+/**
+ * Marca preguntas que probablemente vengan mal de una importación y que un
+ * admin nunca encontraría a mano entre cientos de registros.
+ */
+function reviewReasons(q: any): string[] {
+  const reasons: string[] = [];
+  const needsOptions = q.type !== 'open_text' && q.type !== 'fill_in_the_blank';
+  const options: { text?: string; isCorrect?: boolean }[] = q.options ?? [];
+
+  if (needsOptions) {
+    if (options.length < 2) reasons.push('Tiene menos de 2 opciones');
+    if (!options.some(o => o.isCorrect)) reasons.push('Ninguna opción está marcada como correcta');
+    if (options.some(o => !o.text?.trim())) reasons.push('Hay opciones vacías');
+    // Restos de importación: nombres de canal / identificadores como respuesta
+    if (options.some(o => /^#|_{2,}|^[a-z0-9_]+--/.test(o.text?.trim() ?? ''))) {
+      reasons.push('Las opciones parecen identificadores, no respuestas');
+    }
+    const texts = options.map(o => (o.text ?? '').trim().toLowerCase()).filter(Boolean);
+    if (new Set(texts).size !== texts.length) reasons.push('Hay opciones repetidas');
+  }
+  if (!q.text?.trim()) reasons.push('Sin enunciado');
+  if (!q.module) reasons.push('Sin módulo — no puede entrar al Pulso');
+  return reasons;
+}
+
 export default function QuestionsPage() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { profile } = useAuth();
   const { products } = useProducts();
   const { questions, loading, refresh } = useQuestions();
@@ -39,6 +77,17 @@ export default function QuestionsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<any>(null);
   const [saving, setSaving] = useState(false);
+
+  // ── Vista de banco: orden, paginación, selección y filas expandidas ──
+  // Antes se renderizaban las N preguntas como tarjetas completas: con cientos
+  // de preguntas la página era un muro de scroll imposible de navegar.
+  const [sortBy, setSortBy] = useState<SortKey>('recent');
+  const [page, setPage] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [onlyNeedsReview, setOnlyNeedsReview] = useState(false);
+  const [bulkModule, setBulkModule] = useState<string>('');
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const [formData, setFormData] = useState<QuestionFormData>({
     text: '',
@@ -107,10 +156,106 @@ export default function QuestionsPage() {
 
       const matchesProduct = filterProduct === 'all' || question.productId === filterProduct;
       const matchesModule = filterModule === 'all' || question.module === filterModule || (filterModule === 'none' && !question.module);
+      const matchesReview = !onlyNeedsReview || reviewReasons(question).length > 0;
 
-      return matchesSearch && matchesProduct && matchesModule;
+      return matchesSearch && matchesProduct && matchesModule && matchesReview;
     });
-  }, [questions, searchQuery, filterProduct, filterModule]);
+  }, [questions, searchQuery, filterProduct, filterModule, onlyNeedsReview]);
+
+  const sortedQuestions = useMemo(() => {
+    const list = [...filteredQuestions];
+    switch (sortBy) {
+      case 'text':
+        return list.sort((a, b) => (a.text ?? '').localeCompare(b.text ?? ''));
+      case 'used':
+        return list.sort((a, b) => (b.timesUsed ?? 0) - (a.timesUsed ?? 0));
+      case 'rate':
+        // Las de peor desempeño primero: son las que hay que revisar/reescribir.
+        // Las que nunca se han usado no tienen tasa real, van al final.
+        return list.sort((a, b) => {
+          const au = a.timesUsed ?? 0, bu = b.timesUsed ?? 0;
+          if (au === 0 && bu === 0) return 0;
+          if (au === 0) return 1;
+          if (bu === 0) return -1;
+          return (a.averageCorrectRate ?? 0) - (b.averageCorrectRate ?? 0);
+        });
+      default: {
+        const ms = (q: any) => {
+          const ts = q.createdAt;
+          if (!ts) return 0;
+          if (typeof ts.toMillis === 'function') return ts.toMillis();
+          return (ts.seconds ?? 0) * 1000;
+        };
+        return list.sort((a, b) => ms(b) - ms(a));
+      }
+    }
+  }, [filteredQuestions, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedQuestions.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageQuestions = sortedQuestions.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+
+  // Al cambiar filtros u orden se vuelve al principio del listado
+  useEffect(() => { setPage(0); }, [searchQuery, filterProduct, filterModule, sortBy, onlyNeedsReview]);
+
+  const missingModuleCount = useMemo(() => questions.filter(q => !q.module).length, [questions]);
+  const needsReviewCount = useMemo(() => questions.filter(q => reviewReasons(q).length > 0).length, [questions]);
+
+  const pageAllSelected = pageQuestions.length > 0 && pageQuestions.every(q => selectedIds.has(q.id));
+  const togglePageSelection = () => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (pageAllSelected) pageQuestions.forEach(q => next.delete(q.id));
+    else pageQuestions.forEach(q => next.add(q.id));
+    return next;
+  });
+  const toggleSelected = (id: string) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  /** Asigna un módulo a todas las preguntas seleccionadas de una sola vez.
+   *  Sin esto, poner módulo a cientos de preguntas importadas implicaba
+   *  abrirlas y guardarlas una por una. */
+  const handleBulkAssignModule = async () => {
+    if (!bulkModule || selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    setBulkSaving(true);
+    try {
+      await Promise.all(ids.map(id => updateQuestion(id, { module: bulkModule as KnowledgeModule })));
+      toast({
+        title: 'Módulo asignado',
+        description: `${ids.length} pregunta${ids.length === 1 ? '' : 's'} actualizada${ids.length === 1 ? '' : 's'}.`,
+      });
+      setSelectedIds(new Set());
+      setBulkModule('');
+      refresh();
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudieron asignar los módulos' });
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    const ok = await confirm({
+      title: `¿Eliminar ${ids.length} pregunta${ids.length === 1 ? '' : 's'}?`,
+      description: 'Se quitarán del banco y de las evaluaciones que las usen.',
+    });
+    if (!ok) return;
+    setBulkSaving(true);
+    try {
+      await Promise.all(ids.map(id => deleteQuestion(id)));
+      toast({ title: `${ids.length} pregunta${ids.length === 1 ? '' : 's'} eliminada${ids.length === 1 ? '' : 's'}` });
+      setSelectedIds(new Set());
+      refresh();
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudieron eliminar' });
+    } finally {
+      setBulkSaving(false);
+    }
+  };
 
   const handleOpenDialog = (question?: any) => {
     if (question) {
@@ -313,9 +458,11 @@ export default function QuestionsPage() {
   };
 
   const handleDelete = async (questionId: string) => {
-    if (!confirm('¿Estás seguro de que quieres eliminar esta pregunta?')) {
-      return;
-    }
+    const ok = await confirm({
+      title: '¿Eliminar esta pregunta?',
+      description: 'Se quitará del banco y de las evaluaciones que la usen.',
+    });
+    if (!ok) return;
 
     try {
       await deleteQuestion(questionId);
@@ -340,6 +487,7 @@ export default function QuestionsPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -808,26 +956,38 @@ export default function QuestionsPage() {
         </CardContent>
       </Card>
 
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Total de preguntas</CardDescription>
-            <CardTitle className="text-3xl">{questions.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Con módulo asignado</CardDescription>
-            <CardTitle className="text-3xl">{questions.filter(q => q.module).length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Sin módulo</CardDescription>
-            <CardTitle className="text-3xl">{questions.filter(q => !q.module).length}</CardTitle>
-          </CardHeader>
-        </Card>
+      {/* Salud del banco — accionable, no sólo estadística.
+          Antes eran tres tarjetas grandes con números pasivos; el dato
+          importante (preguntas sin módulo, que no pueden entrar al Pulso)
+          quedaba como una cifra sin salida. */}
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">
+          <strong className="text-foreground">{questions.length}</strong> preguntas en el banco
+        </span>
+        {missingModuleCount > 0 && (
+          <button
+            onClick={() => { setFilterModule('none'); setOnlyNeedsReview(false); }}
+            className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 transition-colors"
+            title="Filtrar las preguntas sin módulo para asignarlo en bloque"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {missingModuleCount} sin módulo — no entran al Pulso
+          </button>
+        )}
+        {needsReviewCount > 0 && (
+          <button
+            onClick={() => { setOnlyNeedsReview(v => !v); setFilterModule('all'); }}
+            className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              onlyNeedsReview
+                ? 'border-red-400 bg-red-100 text-red-800'
+                : 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100'
+            }`}
+            title="Preguntas con problemas de formato (posibles restos de importación)"
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {needsReviewCount} por revisar
+          </button>
+        )}
       </div>
 
       {/* Questions List */}
@@ -855,110 +1015,235 @@ export default function QuestionsPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {filteredQuestions.map((question) => (
-            <Card key={question.id} className="hover:shadow-lg transition-shadow">
-              <CardContent className="pt-6">
-                <div className="flex items-start gap-4">
-                  <div className="flex-1 space-y-3">
-                    {/* Header */}
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="font-medium text-lg">{question.text}</p>
-                        {question.explanation && (
-                          <p className="text-sm text-muted-foreground mt-1">
-                            💡 {question.explanation}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex gap-1 ml-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleOpenDialog(question)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDelete(question.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </div>
+        <>
+          {/* Barra de acciones masivas — aparece al seleccionar filas */}
+          {selectedIds.size > 0 && (
+            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-primary/5 border-primary/30 px-3 py-2">
+              <span className="text-sm font-medium">
+                {selectedIds.size} seleccionada{selectedIds.size === 1 ? '' : 's'}
+              </span>
+              <div className="flex items-center gap-1.5 ml-2">
+                <span className="text-xs text-muted-foreground">Asignar módulo:</span>
+                <Select value={bulkModule} onValueChange={setBulkModule}>
+                  <SelectTrigger className="h-8 w-[190px] text-xs">
+                    <SelectValue placeholder="Elige un módulo..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {KNOWLEDGE_MODULES.map(mod => (
+                      <SelectItem key={mod} value={mod}>{KNOWLEDGE_MODULE_LABELS[mod]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" className="h-8" disabled={!bulkModule || bulkSaving} onClick={handleBulkAssignModule}>
+                  {bulkSaving ? 'Aplicando...' : 'Aplicar'}
+                </Button>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <Button size="sm" variant="outline" className="h-8 text-destructive border-destructive/30" disabled={bulkSaving} onClick={handleBulkDelete}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar
+                </Button>
+                <Button size="sm" variant="ghost" className="h-8" onClick={() => setSelectedIds(new Set())}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          )}
 
-                    {/* Options / Answers */}
-                    {question.type === 'open_text' ? (
-                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm bg-muted text-muted-foreground italic">
-                        <PenLine className="h-4 w-4 shrink-0" />
-                        Respuesta abierta — calificación manual
-                      </div>
-                    ) : question.type === 'fill_in_the_blank' && question.validAnswers ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        <span className="text-xs text-muted-foreground self-center">Respuestas válidas:</span>
-                        {question.validAnswers.map((ans: string) => (
-                          <Badge key={ans} variant="secondary" className="text-xs">{ans}</Badge>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {question.options.map((option: any, optIdx: number) => (
-                          <div
-                            key={option.text || optIdx}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${
-                              option.isCorrect
-                                ? 'bg-green-500/10 text-green-700 dark:text-green-400'
-                                : 'bg-muted'
-                            }`}
+          {/* Encabezado del listado: conteo + orden */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              Mostrando {currentPage * PAGE_SIZE + 1}–{Math.min((currentPage + 1) * PAGE_SIZE, sortedQuestions.length)} de {sortedQuestions.length}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Ordenar:</span>
+              <Select value={sortBy} onValueChange={v => setSortBy(v as SortKey)}>
+                <SelectTrigger className="h-8 w-[200px] text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(([v, l]) => (
+                    <SelectItem key={v} value={v}>{l}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Tabla densa: una fila por pregunta, opciones bajo demanda */}
+          <div className="rounded-lg border overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 border-b">
+                <tr className="text-left">
+                  <th className="w-9 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      className="accent-primary"
+                      checked={pageAllSelected}
+                      onChange={togglePageSelection}
+                      aria-label="Seleccionar todas las de esta página"
+                    />
+                  </th>
+                  <th className="px-2 py-2 font-medium">Pregunta</th>
+                  <th className="px-2 py-2 font-medium whitespace-nowrap hidden lg:table-cell">Producto</th>
+                  <th className="px-2 py-2 font-medium whitespace-nowrap hidden md:table-cell">Tipo</th>
+                  <th className="px-2 py-2 font-medium whitespace-nowrap">Módulo</th>
+                  <th className="px-2 py-2 font-medium text-right whitespace-nowrap hidden sm:table-cell" title="Veces usada en evaluaciones">Usos</th>
+                  <th className="px-2 py-2 font-medium text-right whitespace-nowrap hidden sm:table-cell" title="Tasa de acierto">Acierto</th>
+                  <th className="w-20 px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {pageQuestions.map((question) => {
+                  const reasons = reviewReasons(question);
+                  const isExpanded = expandedId === question.id;
+                  const used = question.timesUsed ?? 0;
+                  return (
+                    <React.Fragment key={question.id}>
+                      <tr className={`hover:bg-muted/30 ${selectedIds.has(question.id) ? 'bg-primary/5' : ''}`}>
+                        <td className="px-3 py-2 align-top">
+                          <input
+                            type="checkbox"
+                            className="accent-primary mt-0.5"
+                            checked={selectedIds.has(question.id)}
+                            onChange={() => toggleSelected(question.id)}
+                            aria-label="Seleccionar pregunta"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <button
+                            onClick={() => setExpandedId(isExpanded ? null : question.id)}
+                            className="flex items-start gap-1.5 text-left group"
                           >
-                            {option.isCorrect ? (
-                              <Check className="h-4 w-4 flex-shrink-0" />
-                            ) : (
-                              <X className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                            {isExpanded
+                              ? <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+                              : <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />}
+                            <span className="line-clamp-2 group-hover:text-primary transition-colors">
+                              {question.text || <span className="italic text-muted-foreground">(sin enunciado)</span>}
+                            </span>
+                          </button>
+                          <div className="flex items-center gap-1.5 mt-1 ml-5 flex-wrap">
+                            {reasons.length > 0 && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded px-1.5 py-0.5"
+                                title={reasons.join(' · ')}
+                              >
+                                <AlertTriangle className="h-3 w-3" /> revisar
+                              </span>
                             )}
-                            <span>{option.text}</span>
+                            {(question.isTricky || question.type === 'tricky') && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">⚡ tricky</span>
+                            )}
+                            {question.category && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{question.category}</span>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        </td>
+                        <td className="px-2 py-2 align-top text-xs text-muted-foreground hidden lg:table-cell">
+                          {getProductName(question.productId)}
+                        </td>
+                        <td className="px-2 py-2 align-top text-xs text-muted-foreground hidden md:table-cell whitespace-nowrap">
+                          {QUESTION_TYPE_LABELS[question.type as QuestionType] || question.type}
+                        </td>
+                        <td className="px-2 py-2 align-top whitespace-nowrap">
+                          {question.module ? (
+                            <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              {KNOWLEDGE_MODULE_LABELS[question.module as KnowledgeModule] ?? question.module}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-amber-700">— sin módulo</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 align-top text-right text-xs tabular-nums hidden sm:table-cell">
+                          {used > 0 ? used : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-2 py-2 align-top text-right text-xs tabular-nums hidden sm:table-cell">
+                          {used > 0
+                            ? <span className={question.averageCorrectRate >= 70 ? 'text-green-600' : question.averageCorrectRate >= 50 ? 'text-amber-600' : 'text-red-600'}>
+                                {Math.round(question.averageCorrectRate ?? 0)}%
+                              </span>
+                            : <span className="text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-2 py-2 align-top">
+                          <div className="flex justify-end gap-0.5">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleOpenDialog(question)} aria-label="Editar">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(question.id)} aria-label="Eliminar">
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
 
-                    {/* Metadata */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs px-2 py-1 rounded-full bg-secondary">
-                        {getProductName(question.productId)}
-                      </span>
-                      <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                        {QUESTION_TYPE_LABELS[question.type as QuestionType] || question.type}
-                      </span>
-                      {(question.isTricky || question.type === 'tricky') && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-purple-500 text-white">
-                          ⚡ Tricky
-                        </span>
+                      {/* Detalle: opciones y explicación, sólo al expandir */}
+                      {isExpanded && (
+                        <tr className="bg-muted/20">
+                          <td />
+                          <td colSpan={7} className="px-2 pb-3 pt-1">
+                            {reasons.length > 0 && (
+                              <ul className="mb-2 text-xs text-red-700 list-disc list-inside space-y-0.5">
+                                {reasons.map(r => <li key={r}>{r}</li>)}
+                              </ul>
+                            )}
+                            {question.explanation && (
+                              <p className="text-xs text-muted-foreground mb-2">💡 {question.explanation}</p>
+                            )}
+                            {question.type === 'open_text' ? (
+                              <p className="text-xs italic text-muted-foreground">Respuesta abierta — calificación manual</p>
+                            ) : question.type === 'fill_in_the_blank' && question.validAnswers ? (
+                              <div className="flex flex-wrap gap-1.5 items-center">
+                                <span className="text-xs text-muted-foreground">Respuestas válidas:</span>
+                                {question.validAnswers.map((ans: string) => (
+                                  <Badge key={ans} variant="secondary" className="text-xs">{ans}</Badge>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="space-y-1 max-w-2xl">
+                                {question.options.map((option: any, optIdx: number) => (
+                                  <div
+                                    key={option.text || optIdx}
+                                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded text-xs ${
+                                      option.isCorrect ? 'bg-green-500/10 text-green-700' : 'bg-background border'
+                                    }`}
+                                  >
+                                    {option.isCorrect
+                                      ? <Check className="h-3.5 w-3.5 shrink-0" />
+                                      : <X className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                                    <span>{option.text || <span className="italic text-muted-foreground">(vacía)</span>}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {question.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-2">
+                                {question.tags.map((tag: string) => (
+                                  <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">#{tag}</span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
                       )}
-                      {question.module && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-medium">
-                          📡 {KNOWLEDGE_MODULE_LABELS[question.module as KnowledgeModule] ?? question.module}
-                        </span>
-                      )}
-                      {question.category && (
-                        <span className="text-xs px-2 py-1 rounded-full bg-blue-500/10 text-blue-700 dark:text-blue-400">
-                          {question.category}
-                        </span>
-                      )}
-                      {question.tags.map((tag: string) => (
-                        <span key={tag} className="text-xs px-2 py-1 rounded-full bg-muted">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Paginación */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <Button variant="outline" size="sm" className="h-8" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>
+                <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Anterior
+              </Button>
+              <span className="text-xs text-muted-foreground px-2">
+                Página {currentPage + 1} de {totalPages}
+              </span>
+              <Button variant="outline" size="sm" className="h-8" disabled={currentPage >= totalPages - 1} onClick={() => setPage(currentPage + 1)}>
+                Siguiente <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

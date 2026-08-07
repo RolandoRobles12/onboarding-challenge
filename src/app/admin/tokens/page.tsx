@@ -1,5 +1,7 @@
 'use client';
 
+import { toast } from '@/hooks/use-toast';
+
 /**
  * /admin/tokens
  * Panel para gestionar tokens de integración (API keys) de la organización.
@@ -173,6 +175,7 @@ export default function TokensPage() {
       await saveOrgToken(formKey.trim(), formLabel.trim(), formValue.trim(), profile?.email ?? 'admin');
       setDialogOpen(false);
       await loadTokens();
+      toast({ title: 'Token guardado' });
     } catch (err) {
       console.error(err);
       setError('Error al guardar el token. Intenta de nuevo.');
@@ -186,8 +189,10 @@ export default function TokensPage() {
       await deleteOrgToken(key);
       setDeleteKey(null);
       await loadTokens();
+      toast({ title: 'Token eliminado' });
     } catch (err) {
       console.error(err);
+      toast({ variant: 'destructive', title: 'No se pudo eliminar el token' });
     }
   };
 

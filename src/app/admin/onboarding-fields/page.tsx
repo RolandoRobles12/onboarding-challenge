@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getAllOnboardingFields, createOnboardingField, updateOnboardingField, deleteOnboardingField } from '@/lib/firestore-service';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import {
   ClipboardList, Plus, Pencil, Trash2, GripVertical,
   ChevronUp, ChevronDown, Upload, X, Check
@@ -50,6 +52,7 @@ const EMPTY_FORM = {
 };
 
 export default function OnboardingFieldsPage() {
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { profile } = useAuth();
   const [fields, setFields] = useState<OnboardingField[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,7 +187,11 @@ export default function OnboardingFieldsPage() {
   };
 
   const handleDelete = async (field: OnboardingField) => {
-    if (!confirm(`¿Eliminar el campo "${field.label}"?`)) return;
+    const ok = await confirm({
+      title: `¿Eliminar el campo "${field.label}"?`,
+      description: 'Los vendedores dejarán de verlo en el formulario de ingreso. Los datos ya capturados se conservan.',
+    });
+    if (!ok) return;
     try {
       await deleteOnboardingField(field.id);
       toast({ title: 'Campo eliminado' });
@@ -212,6 +219,7 @@ export default function OnboardingFieldsPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -229,7 +237,7 @@ export default function OnboardingFieldsPage() {
       {/* Fields List */}
       {loading ? (
         <div className="space-y-3">
-          {[1, 2, 3].map(i => <Card key={i} className="h-20 animate-pulse bg-muted" />)}
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 rounded-xl" />)}
         </div>
       ) : fields.length === 0 ? (
         <Card>

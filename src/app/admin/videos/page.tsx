@@ -16,6 +16,8 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { toast } from '@/hooks/use-toast';
+import { useConfirm } from '@/components/ConfirmDialog';
 import {
   getAllVideos, createVideo, updateVideo, deleteVideo, getVideoViews,
   getVideoFolders, createVideoFolder, updateVideoFolder, deleteVideoFolder,
@@ -148,7 +150,7 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
               views.length === 0 ? (
                 <p className="text-center text-muted-foreground text-sm py-6">Nadie ha visto este video todavía.</p>
               ) : (
-                <div className="max-h-72 overflow-y-auto">
+                <div className="max-h-72 overflow-y-auto overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -196,7 +198,7 @@ function StatsModal({ video, onClose }: { video: Video; onClose: () => void }) {
               pendingSellers.length === 0 ? (
                 <p className="text-center text-muted-foreground text-sm py-6">¡Todos los vendedores han visto este video! 🎉</p>
               ) : (
-                <div className="max-h-72 overflow-y-auto">
+                <div className="max-h-72 overflow-y-auto overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -630,6 +632,7 @@ function FolderFormDialog({
 
 export default function AdminVideosPage() {
   const { user } = useAuth();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const { products } = useProducts();
   const [videos, setVideos] = useState<Video[]>([]);
   const [folders, setFolders] = useState<VideoFolder[]>([]);
@@ -654,12 +657,17 @@ export default function AdminVideosPage() {
   useEffect(() => { load(); }, []);
 
   async function handleSave(data: Omit<Video, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) {
-    if (editing) {
-      await updateVideo(editing.id, data);
-    } else {
-      await createVideo({ ...data, createdBy: user?.uid ?? '' } as any);
+    try {
+      if (editing) {
+        await updateVideo(editing.id, data);
+      } else {
+        await createVideo({ ...data, createdBy: user?.uid ?? '' } as any);
+      }
+      await load();
+      toast({ title: editing ? 'Video actualizado' : 'Video creado' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo guardar el video' });
     }
-    await load();
   }
 
   async function handleToggle(video: Video) {
@@ -668,24 +676,43 @@ export default function AdminVideosPage() {
   }
 
   async function handleDelete(videoId: string) {
-    if (!confirm('¿Eliminar este video? Esta acción no se puede deshacer.')) return;
+    const ok = await confirm({
+      title: '¿Eliminar este video?',
+      description: 'Esta acción no se puede deshacer. Las vistas y reacciones registradas se conservan pero quedan huérfanas.',
+    });
+    if (!ok) return;
     setDeletingId(videoId);
-    await deleteVideo(videoId);
-    setVideos(prev => prev.filter(v => v.id !== videoId));
-    setDeletingId(null);
+    try {
+      await deleteVideo(videoId);
+      setVideos(prev => prev.filter(v => v.id !== videoId));
+      toast({ title: 'Video eliminado' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo eliminar el video' });
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function handleSaveFolder(data: Omit<VideoFolder, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) {
-    if (editingFolder) {
-      await updateVideoFolder(editingFolder.id, data);
-    } else {
-      await createVideoFolder({ ...data, createdBy: user?.uid ?? '' } as any);
+    try {
+      if (editingFolder) {
+        await updateVideoFolder(editingFolder.id, data);
+      } else {
+        await createVideoFolder({ ...data, createdBy: user?.uid ?? '' } as any);
+      }
+      await load();
+      toast({ title: editingFolder ? 'Carpeta actualizada' : 'Carpeta creada' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo guardar la carpeta' });
     }
-    await load();
   }
 
   async function handleDeleteFolder(folderId: string) {
-    if (!confirm('¿Eliminar esta carpeta? Los videos que estén en ella se moverán al feed principal.')) return;
+    const ok = await confirm({
+      title: '¿Eliminar esta carpeta?',
+      description: 'Los videos que estén en ella se moverán al feed principal, no se borran.',
+    });
+    if (!ok) return;
     await deleteVideoFolder(folderId);
     // Move videos in this folder back to no folder
     const videosInFolder = videos.filter(v => v.folderId === folderId);
@@ -712,6 +739,7 @@ export default function AdminVideosPage() {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

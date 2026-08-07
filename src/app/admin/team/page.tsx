@@ -97,7 +97,7 @@ export default function MyTeamPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold flex items-center gap-2">
+        <h1 className="text-2xl font-bold flex items-center gap-2">
           <Users className="h-7 w-7 text-primary" /> Mi Equipo
         </h1>
         <p className="text-muted-foreground mt-1">
