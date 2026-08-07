@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge as UiBadge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
@@ -580,7 +581,9 @@ export default function AdminCoursesPage() {
 
         {/* Lista de cursos */}
         {loading ? (
-          <div className="text-center py-12 text-muted-foreground">Cargando cursos...</div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3].map(i => <Skeleton key={i} className="h-40 rounded-xl" />)}
+          </div>
         ) : filteredCourses.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-16 text-center space-y-3">

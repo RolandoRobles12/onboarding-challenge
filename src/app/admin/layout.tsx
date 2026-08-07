@@ -231,7 +231,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
 
             {/* Navigation */}
-            <nav className="flex-1 overflow-y-auto p-4 pt-2 space-y-1">
+            <nav className="flex-1 overflow-y-auto scrollbar-subtle p-4 pt-2 space-y-1">
               {visibleNavigation.length === 0 && (
                 <p className="text-xs text-white/50 px-3 py-4 text-center">
                   Sin resultados para &ldquo;{navSearch}&rdquo;
