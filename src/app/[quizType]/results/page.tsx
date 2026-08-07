@@ -104,6 +104,19 @@ function ResultsContent() {
   const [timeTaken, setTimeTaken] = useState<number | null>(null);
   const [questionResults, setQuestionResults] = useState<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[]>([]);
   const [showDetail, setShowDetail] = useState(false);
+  const [quizGamificationConfig, setQuizGamificationConfig] = useState<GamificationConfig | null>(null);
+  const [quizPassingScore, setQuizPassingScore] = useState<number | null>(null);
+
+  // Config del quiz para mostrar el XP real y el estado de aprobado/reprobado
+  // (independiente del guardado del intento, que corre una sola vez más abajo).
+  useEffect(() => {
+    if (!quizId) return;
+    getQuiz(quizId).then(q => {
+      setQuizGamificationConfig(q?.gamificationConfig ?? null);
+      const ps = q?.assessmentConfig?.passingScore;
+      setQuizPassingScore(ps && ps > 0 ? ps : null);
+    }).catch(() => {});
+  }, [quizId]);
 
   useEffect(() => {
     if (!productId || !scoreStr || !totalQuestionsStr) {
@@ -236,6 +249,10 @@ function ResultsContent() {
   const percentage = totalQuestions > 0 ? (score / totalQuestions) * 100 : 0;
   const level = getLevel(score, totalQuestions);
   const Avatar = getAvatarComponent(avatarKey);
+  const displayXp = quizGamificationConfig
+    ? calcGamifiedXp(quizGamificationConfig, score, totalQuestions, questionResults)
+    : Math.round(percentage);
+  const passed = quizPassingScore != null ? percentage >= quizPassingScore : null;
 
   const timeFormatted = timeTaken !== null
     ? `${Math.floor(timeTaken / 60)}m ${(timeTaken % 60).toString().padStart(2, '0')}s`
@@ -337,9 +354,28 @@ function ResultsContent() {
                 className="bg-yellow-400 text-yellow-900 rounded-full px-3 py-1.5 font-bold flex items-center gap-1"
               >
                 <Zap className="h-4 w-4" />
-                +{Math.round(percentage)} XP
+                +{displayXp} XP
               </motion.div>
             </motion.div>
+
+            {passed !== null && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.85 }}
+                className={cn(
+                  'rounded-xl px-5 py-3 border text-sm font-semibold flex items-center justify-center gap-2',
+                  passed
+                    ? 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-amber-50 border-amber-200 text-amber-700',
+                )}
+              >
+                {passed ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                {passed
+                  ? `Aprobado · puntaje mínimo ${quizPassingScore}%`
+                  : `No alcanzaste el puntaje mínimo (${quizPassingScore}%)`}
+              </motion.div>
+            )}
 
             {/* Feedback message */}
             <motion.div
@@ -402,7 +438,14 @@ function ResultsContent() {
               transition={{ delay: 1.1 }}
             >
               <Button asChild size="lg" className="w-full rounded-xl shadow-md font-semibold">
-                <Link href={returnTo}>Finalizar y volver al inicio</Link>
+                {/* Cuando el quiz se lanzó desde una lección/módulo de curso
+                    (returnTo apunta a /courses/...), se anexa el puntaje para
+                    que el curso pueda registrarlo contra su passingScore. */}
+                <Link href={returnTo.includes('/courses/')
+                  ? `${returnTo}${returnTo.includes('?') ? '&' : '?'}assessmentScore=${Math.round(percentage)}`
+                  : returnTo}>
+                  Finalizar y volver al inicio
+                </Link>
               </Button>
             </motion.div>
           </CardContent>

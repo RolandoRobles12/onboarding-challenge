@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   getDailyPulse,
@@ -11,6 +11,7 @@ import {
   addToPulseBacklog,
   getUserPulseBacklog,
   resolvePulseBacklogItem,
+  getPulseCategories,
 } from '@/lib/firestore-service';
 import type {
   DailyPulse,
@@ -18,6 +19,7 @@ import type {
   PulseAnswer,
   PulseBacklogItem,
   PulseConfig,
+  PulseCategory,
   Question,
   KnowledgeModule,
 } from '@/lib/types-scalable';
@@ -45,8 +47,12 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function currentHour() {
-  return new Date().getHours();
+/** "14:00" → "2:00 PM" */
+function formatCloseAt(closeAt: string) {
+  const [h, m] = closeAt.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m || 0).padStart(2, '0')} ${period}`;
 }
 
 const MODULE_COLORS: Record<KnowledgeModule, string> = {
@@ -95,6 +101,13 @@ export default function PulsePage() {
   const [pulse, setPulse] = useState<DailyPulse | null>(null);
   const [attempt, setAttempt] = useState<PulseAttempt | null>(null);
   const [pulseConfig, setPulseConfig] = useState<PulseConfig | null>(null);
+  const [categories, setCategories] = useState<PulseCategory[]>([]);
+  const categoryMap = useMemo(
+    () => Object.fromEntries(categories.map(c => [c.key, c])) as Record<string, PulseCategory>,
+    [categories],
+  );
+  const moduleLabel = (mod: KnowledgeModule) => categoryMap[mod]?.name ?? KNOWLEDGE_MODULE_LABELS[mod];
+  const moduleColor = (mod: KnowledgeModule) => categoryMap[mod]?.color ?? MODULE_COLORS[mod];
   const [questions, setQuestions] = useState<Question[]>([]);
   const [backlog, setBacklog] = useState<PulseBacklogItem[]>([]);
   const [showBacklog, setShowBacklog] = useState(false);
@@ -109,8 +122,17 @@ export default function PulsePage() {
   const [startTime, setStartTime] = useState<number>(0);
 
   const today = todayStr();
-  const hour = currentHour();
-  const windowOpen = hour >= 0 && hour < 12;
+  // Ventana de respuesta real, según la hora de cierre configurada en el
+  // Pulso (admin/knowledge-pulse) — antes estaba fija en las 12:00 sin
+  // relación con esa configuración, y solo era un aviso, no un bloqueo.
+  const closeAt = pulseConfig?.closeAt || '12:00';
+  const windowOpen = (() => {
+    const [closeH, closeM] = closeAt.split(':').map(Number);
+    const now = new Date();
+    const closeTime = new Date(now);
+    closeTime.setHours(closeH || 0, closeM || 0, 0, 0);
+    return now < closeTime;
+  })();
 
   // ── Load data ──────────────────────────────────────────────────────────
 
@@ -118,12 +140,14 @@ export default function PulsePage() {
     if (!profile) return;
     setLoading(true);
     try {
-      const [pulseData, attemptData, backlogData, cfg] = await Promise.all([
+      const [pulseData, attemptData, backlogData, cfg, cats] = await Promise.all([
         getDailyPulse(today),
         getPulseAttempt(profile.uid, today),
         getUserPulseBacklog(profile.uid),
         getPulseConfig(),
+        getPulseCategories().catch(() => [] as PulseCategory[]),
       ]);
+      setCategories(cats);
 
       // Auto-create today's pulse if autoDailyPulse is enabled and no pulse exists yet
       let resolvedPulse = pulseData;
@@ -211,6 +235,19 @@ export default function PulsePage() {
   };
 
   const currentQuestion = questions[currentIndex] ?? null;
+
+  // Orden de opciones — se mezcla una sola vez por pregunta cuando el admin
+  // activó "Orden aleatorio de respuestas" en la configuración del Pulso.
+  const displayedOptions = useMemo(() => {
+    if (!currentQuestion) return [];
+    if (!pulseConfig?.randomizeAnswerOrder) return currentQuestion.options;
+    const shuffled = [...currentQuestion.options];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }, [currentQuestion, pulseConfig?.randomizeAnswerOrder]);
 
   const handleSelectOption = (optionId: string) => {
     if (revealed) return;
@@ -322,9 +359,9 @@ export default function PulsePage() {
                 {currentQuestion.module && (
                   <span className={cn(
                     'text-xs px-2.5 py-1 rounded-full inline-block border font-medium',
-                    MODULE_COLORS[currentQuestion.module]
+                    moduleColor(currentQuestion.module)
                   )}>
-                    {KNOWLEDGE_MODULE_LABELS[currentQuestion.module]}
+                    {moduleLabel(currentQuestion.module)}
                   </span>
                 )}
 
@@ -333,7 +370,7 @@ export default function PulsePage() {
 
                 {/* Options */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {currentQuestion.options.map(opt => {
+                  {displayedOptions.map(opt => {
                     const isSelected = selectedOption === opt.id;
                     const isCorrect = opt.isCorrect;
                     let stateClass = 'border-border hover:border-primary/50 hover:bg-muted/40';
@@ -468,7 +505,7 @@ export default function PulsePage() {
                 {showBacklog && (
                   <div className="border-t border-orange-200 divide-y divide-orange-100">
                     {backlog.map(item => (
-                      <BacklogItem key={item.id} item={item} onResolve={handleResolveBacklog} />
+                      <BacklogItem key={item.id} item={item} onResolve={handleResolveBacklog} categoryMap={categoryMap} />
                     ))}
                   </div>
                 )}
@@ -531,9 +568,13 @@ export default function PulsePage() {
               <CardContent className="p-6 space-y-5">
                 <div className="space-y-1">
                   <p className="font-bold text-2xl">{pulseConfig?.questionsPerPulse ?? 7} preguntas de hoy</p>
-                  {!windowOpen && (
-                    <p className="text-xs text-orange-600 flex items-center gap-1.5">
-                      <Clock className="h-3.5 w-3.5" /> Responde antes de las 12:00 PM
+                  {windowOpen ? (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5" /> Responde antes de las {formatCloseAt(closeAt)}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-red-600 flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5" /> La ventana de hoy cerró a las {formatCloseAt(closeAt)}
                     </p>
                   )}
                 </div>
@@ -542,10 +583,10 @@ export default function PulsePage() {
                   className="w-full h-12 sm:h-14 rounded-xl font-semibold text-base sm:text-lg"
                   size="lg"
                   onClick={handleStart}
-                  disabled={submitting}
+                  disabled={submitting || !windowOpen}
                 >
                   <Play className="h-5 w-5 mr-2" />
-                  {submitting ? 'Iniciando...' : 'Iniciar Pulso de Hoy'}
+                  {submitting ? 'Iniciando...' : windowOpen ? 'Iniciar Pulso de Hoy' : 'Ventana cerrada'}
                 </Button>
               </CardContent>
             </Card>
@@ -568,7 +609,7 @@ export default function PulsePage() {
               {showBacklog && (
                 <div className="border-t divide-y">
                   {backlog.map(item => (
-                    <BacklogItem key={item.id} item={item} onResolve={handleResolveBacklog} />
+                    <BacklogItem key={item.id} item={item} onResolve={handleResolveBacklog} categoryMap={categoryMap} />
                   ))}
                 </div>
               )}
@@ -581,16 +622,20 @@ export default function PulsePage() {
 
 // ── Backlog item ────────────────────────────────────────────────────────────
 
-function BacklogItem({ item, onResolve }: { item: PulseBacklogItem; onResolve: (id: string) => void }) {
+function BacklogItem({ item, onResolve, categoryMap = {} }: {
+  item: PulseBacklogItem;
+  onResolve: (id: string) => void;
+  categoryMap?: Record<string, PulseCategory>;
+}) {
   return (
     <div className="px-4 py-3 bg-background">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <span className={cn(
             'text-[10px] px-2 py-0.5 rounded-full inline-block mb-1.5 border font-medium',
-            MODULE_COLORS[item.module]
+            categoryMap[item.module]?.color ?? MODULE_COLORS[item.module]
           )}>
-            {KNOWLEDGE_MODULE_LABELS[item.module]}
+            {categoryMap[item.module]?.name ?? KNOWLEDGE_MODULE_LABELS[item.module]}
           </span>
           <p className="text-sm font-medium leading-snug">{item.questionText}</p>
           <p className="text-xs text-muted-foreground mt-1">Del pulso del {item.pulseDate}</p>

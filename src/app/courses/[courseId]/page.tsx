@@ -498,6 +498,7 @@ export default function CourseDetailPage() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -513,6 +514,9 @@ export default function CourseDetailPage() {
         getUserEnrollments(profile.uid).catch(() => []),
       ]);
       if (!data) { setNotFound(true); return; }
+      // Un curso no publicado no debe quedar accesible ni inscribible para el
+      // vendedor solo por conocer la URL — los admins sí pueden previsualizarlo.
+      if (data.status !== 'published' && !isAdmin) { setUnavailable(true); return; }
       setCourse(data);
 
       let enr = enrollments.find(e => e.courseId === courseId) ?? null;
@@ -541,6 +545,20 @@ export default function CourseDetailPage() {
           updatedAt: enrolledAt,
         };
       }
+      // Si venimos de una evaluación de lección/módulo, registrar el mejor
+      // puntaje obtenido — es lo que Course.passingScore evalúa.
+      const assessmentScoreParam = searchParams?.get('assessmentScore');
+      if (assessmentScoreParam) {
+        const newScore = parseInt(assessmentScoreParam, 10);
+        if (!Number.isNaN(newScore)) {
+          const bestScore = Math.max(enr.overallScore ?? 0, newScore);
+          if (bestScore !== enr.overallScore) {
+            await updateEnrollmentProgress(enr.id, { overallScore: bestScore }).catch(console.error);
+            enr = { ...enr, overallScore: bestScore };
+          }
+        }
+      }
+
       setEnrollment(enr);
       setCompletedLessonIds(new Set(enr.completedLessonIds));
       setCompletedModuleIds(new Set(enr.completedModuleIds));
@@ -555,7 +573,7 @@ export default function CourseDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [courseId, profile, searchParams]);
+  }, [courseId, profile, searchParams, isAdmin]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -572,6 +590,18 @@ export default function CourseDetailPage() {
       quizId: selectedLesson.assessmentQuizId,
       returnTo,
     });
+    return `/${profile.producto}/quiz?${params.toString()}`;
+  };
+
+  // Builds the quiz URL when finishing the current lesson also finishes the
+  // module it belongs to and that module has its own assessmentQuizId.
+  const getModuleAssessmentUrl = (returnTo: string): string | null => {
+    if (!course || !selectedLesson || !profile?.producto) return null;
+    const mod = course.modules.find(m => m.lessons.some(l => l.id === selectedLesson.id));
+    if (!mod?.assessmentQuizId || completedModuleIds.has(mod.id)) return null;
+    const allDone = mod.lessons.every(l => completedLessonIds.has(l.id) || l.id === selectedLesson.id);
+    if (!allDone) return null;
+    const params = new URLSearchParams({ quizId: mod.assessmentQuizId, returnTo });
     return `/${profile.producto}/quiz?${params.toString()}`;
   };
 
@@ -683,6 +713,17 @@ export default function CourseDetailPage() {
                 <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver al inicio</Link>
               </Button>
             </div>
+          ) : unavailable ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-4">
+              <AlertCircle className="h-12 w-12 text-muted-foreground" />
+              <p className="font-semibold text-lg">Este curso aún no está disponible</p>
+              <p className="text-muted-foreground text-sm max-w-xs">
+                Todavía no ha sido publicado por tu equipo de capacitación.
+              </p>
+              <Button asChild variant="outline">
+                <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver al inicio</Link>
+              </Button>
+            </div>
           ) : course ? (
             <div className="flex flex-1 overflow-hidden relative">
 
@@ -788,7 +829,8 @@ export default function CourseDetailPage() {
                             // disparadores de contenido (ver LessonViewer) — este
                             // botón nunca fuerza el auto-completado.
                             if (course.navigation === 'sequential' && !isDone) return;
-                            const quizUrl = getAssessmentUrl(`/courses/${courseId}?lesson=${nextLesson.id}`);
+                            const returnTo = `/courses/${courseId}?lesson=${nextLesson.id}`;
+                            const quizUrl = getAssessmentUrl(returnTo) ?? getModuleAssessmentUrl(returnTo);
                             if (quizUrl) {
                               await savePromiseRef.current;
                               router.push(quizUrl);
@@ -809,7 +851,7 @@ export default function CourseDetailPage() {
                           className="gap-1 h-11 px-3 sm:px-4 text-xs sm:text-sm"
                           onClick={async () => {
                             if (course.navigation === 'sequential' && !isDone) return;
-                            const quizUrl = getAssessmentUrl('/');
+                            const quizUrl = getAssessmentUrl('/') ?? getModuleAssessmentUrl('/');
                             if (quizUrl) {
                               await savePromiseRef.current;
                               router.push(quizUrl);
@@ -837,6 +879,22 @@ export default function CourseDetailPage() {
                         <Badge className="bg-green-100 text-green-800 border-green-200 text-sm px-3 py-1">
                           <CheckCircle2 className="h-4 w-4 mr-1" /> {completedLessonIds.size} lecciones completadas
                         </Badge>
+                        {enrollment?.overallScore != null && course.passingScore != null && (
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              'text-sm px-3 py-1',
+                              enrollment.overallScore >= course.passingScore
+                                ? 'bg-green-50 text-green-700 border-green-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200',
+                            )}
+                          >
+                            Evaluaciones: {enrollment.overallScore}%
+                            {enrollment.overallScore >= course.passingScore
+                              ? ' · Aprobado'
+                              : ` · mínimo requerido ${course.passingScore}%`}
+                          </Badge>
+                        )}
                         <Button asChild variant="outline" className="mt-2">
                           <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver a mi ruta</Link>
                         </Button>

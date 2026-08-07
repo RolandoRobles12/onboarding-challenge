@@ -1,15 +1,59 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { useProducts, useQuizzes } from '@/hooks/use-firestore';
+import { getAllUsers, getAllQuizAttempts, getPulseAttemptsByDateRange } from '@/lib/firestore-service';
 import { Package, FileQuestion, Users, TrendingUp, Activity, Award } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
+function toDateStr(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
 export default function AdminDashboard() {
   const { products, loading: loadingProducts } = useProducts();
   const { quizzes, loading: loadingQuizzes } = useQuizzes();
+
+  const [activeUsers, setActiveUsers] = useState<number | null>(null);
+  const [completionRate, setCompletionRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+        const [users, quizAttempts, pulseAttempts] = await Promise.all([
+          getAllUsers().catch(() => []),
+          getAllQuizAttempts().catch(() => []),
+          getPulseAttemptsByDateRange(toDateStr(sevenDaysAgo), toDateStr(new Date())).catch(() => []),
+        ]);
+        if (cancelled) return;
+
+        // "Activos" = tuvieron al menos una acción medible (evaluación o pulso)
+        // en los últimos 7 días — no hay registro de último login en el modelo.
+        const recentUserIds = new Set<string>();
+        quizAttempts.forEach(a => {
+          const completedMs = a.completedAt?.toMillis?.() ?? 0;
+          if (completedMs >= sevenDaysAgo.getTime()) recentUserIds.add(a.userId);
+        });
+        pulseAttempts.forEach(a => recentUserIds.add(a.userId));
+        setActiveUsers(recentUserIds.size);
+
+        const sellers = users.filter(u => u.rol === 'seller' && u.active !== false);
+        const usersWithAttempt = new Set(quizAttempts.map(a => a.userId));
+        const sellersWithAttempt = sellers.filter(s => usersWithAttempt.has(s.uid)).length;
+        setCompletionRate(sellers.length > 0 ? Math.round((sellersWithAttempt / sellers.length) * 100) : 0);
+      } catch {
+        if (!cancelled) { setActiveUsers(0); setCompletionRate(0); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const stats = [
     {
@@ -30,16 +74,16 @@ export default function AdminDashboard() {
     },
     {
       title: 'Usuarios Activos',
-      value: '0',
-      description: 'Usuarios registrados en el sistema',
+      value: activeUsers === null ? '...' : activeUsers,
+      description: 'Con actividad (evaluación o pulso) en los últimos 7 días',
       icon: Users,
       color: 'text-purple-500',
       href: '/admin/users',
     },
     {
       title: 'Tasa de Completado',
-      value: '0%',
-      description: 'Porcentaje de evaluaciones completadas',
+      value: completionRate === null ? '...' : `${completionRate}%`,
+      description: 'Vendedores con al menos una evaluación completada',
       icon: TrendingUp,
       color: 'text-orange-500',
       href: '/admin/analytics',
@@ -153,7 +197,7 @@ export default function AdminDashboard() {
         ) : (
           <div className="space-y-2">
             {products.slice(0, 3).map((product) => (
-              <Link key={product.id} href={`/admin/products/${product.id}`}>
+              <Link key={product.id} href="/admin/products">
                 <Card className="hover:border-primary transition-colors cursor-pointer">
                   <CardContent className="flex items-center gap-4 py-4">
                     <div
@@ -167,7 +211,7 @@ export default function AdminDashboard() {
                       <p className="text-sm text-muted-foreground">{product.description}</p>
                     </div>
                     <div className="text-sm text-muted-foreground">
-                      {product.targetAudience}
+                      {product.active ? 'Activo' : 'Inactivo'}
                     </div>
                   </CardContent>
                 </Card>

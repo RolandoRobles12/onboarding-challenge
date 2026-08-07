@@ -538,7 +538,9 @@ function VideoFeed() {
         getVideoFolders(),
       ]);
       setVideos(vids);
-      setFolders(flds.filter(f => f.active));
+      // Una carpeta sin producto asignado es visible para todos; si tiene uno,
+      // solo se muestra a vendedores con ese mismo producto asignado.
+      setFolders(flds.filter(f => f.active && (!f.productId || f.productId === productId)));
       const map: Record<string, VideoView> = {};
       views.forEach(v => { map[v.videoId] = v; });
       setViewsMap(map);

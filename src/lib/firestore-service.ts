@@ -65,7 +65,6 @@ import type {
 import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-scalable';
 import type {
   Course,
-  LearningPath,
   CourseEnrollment,
   LessonProgress,
 } from './types-lms';
@@ -1349,69 +1348,6 @@ export async function adminEnrollUserInCourse(
   }
 }
 
-// ============================================================================
-// LMS - MÓDULO RUTAS DE APRENDIZAJE (Learning Paths Module)
-// ============================================================================
-
-export async function getLearningPaths(
-  organizationId: string = DEFAULT_ORG_ID
-): Promise<LearningPath[]> {
-  try {
-    const colRef = getCollectionRef(COLLECTIONS.LEARNING_PATHS);
-    const q = query(
-      colRef,
-      where('organizationId', '==', organizationId),
-      where('status', '==', 'published'),
-      orderBy('createdAt', 'desc')
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LearningPath));
-  } catch (error) {
-    console.error('Error fetching learning paths:', error);
-    throw error;
-  }
-}
-
-export async function createLearningPath(
-  pathData: Omit<LearningPath, 'id' | 'createdAt' | 'updatedAt'>
-): Promise<string> {
-  try {
-    const colRef = getCollectionRef(COLLECTIONS.LEARNING_PATHS);
-    const docRef = doc(colRef);
-    await setDoc(docRef, {
-      ...pathData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating learning path:', error);
-    throw error;
-  }
-}
-
-export async function updateLearningPath(
-  pathId: string,
-  updates: Partial<Omit<LearningPath, 'id' | 'createdAt'>>
-): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.LEARNING_PATHS, pathId);
-    await updateDoc(docRef, { ...updates, updatedAt: serverTimestamp() } as DocumentData);
-  } catch (error) {
-    console.error('Error updating learning path:', error);
-    throw error;
-  }
-}
-
-export async function deleteLearningPath(pathId: string): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.LEARNING_PATHS, pathId);
-    await deleteDoc(docRef);
-  } catch (error) {
-    console.error('Error deleting learning path:', error);
-    throw error;
-  }
-}
 
 // ============================================================================
 // LMS - PROGRESO DE LECCIONES (Lesson Progress)
@@ -1983,12 +1919,16 @@ export interface BrandingConfig {
   logoUrl: string | null;
   /** Símbolo/ícono únicamente, usado en espacios reducidos como el header. */
   iconUrl: string | null;
+  /** Color primario de marca (hex, ej. "#16B877"). null = usar el default de la plataforma. */
+  primaryColor?: string | null;
+  /** Color de acento de marca (hex). null = usar el default de la plataforma. */
+  accentColor?: string | null;
   updatedAt?: unknown;
 }
 
 const BRANDING_DOC_ID = 'branding';
 
-const DEFAULT_BRANDING: BrandingConfig = { logoUrl: null, iconUrl: null };
+const DEFAULT_BRANDING: BrandingConfig = { logoUrl: null, iconUrl: null, primaryColor: null, accentColor: null };
 
 /** Devuelve la configuración de marca (logos) desde Firestore. Si no existe, retorna los defaults. */
 export async function getBrandingConfig(): Promise<BrandingConfig> {
@@ -2000,6 +1940,8 @@ export async function getBrandingConfig(): Promise<BrandingConfig> {
       return {
         logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : null,
         iconUrl: typeof data.iconUrl === 'string' ? data.iconUrl : null,
+        primaryColor: typeof data.primaryColor === 'string' ? data.primaryColor : null,
+        accentColor: typeof data.accentColor === 'string' ? data.accentColor : null,
       };
     }
   } catch (error) {
@@ -2625,11 +2567,15 @@ export async function scheduleAutoPulse(
     where('organizationId', '==', orgId),
     where('active', '==', true),
   );
-  const snap = await getDocs(q);
+  const [snap, cfg] = await Promise.all([getDocs(q), getPulseConfig(orgId)]);
+  const activeModules = new Set(cfg.activeModules ?? []);
   const allQuestions = snap.docs
     .map(d => ({ id: d.id, ...d.data() }) as import('./types-scalable').Question)
     // Solo preguntas con módulo asignado (preguntas del pulso, no de quizzes)
-    .filter(question => !!question.module);
+    .filter(question => !!question.module)
+    // Vacío = todos los módulos activos; si el admin restringió módulos en
+    // PulseConfig, el pool automático debe respetarlo.
+    .filter(question => activeModules.size === 0 || activeModules.has(question.module!));
 
   // Ordenar por correctRate asc (más difíciles primero) para priorizar refuerzo
   allQuestions.sort((a, b) => a.averageCorrectRate - b.averageCorrectRate);
