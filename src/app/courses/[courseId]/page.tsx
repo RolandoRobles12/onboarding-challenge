@@ -70,6 +70,12 @@ function TimerAutoComplete({
   onComplete: () => void;
 }) {
   const [remaining, setRemaining] = useState(seconds);
+  // Este tipo de contenido (documento/slides/embebido) se abre en un iframe
+  // que la app no puede medir — no hay forma real de saber si ya se leyó.
+  // Se exige una espera mínima corta (para que "Siguiente" no complete al
+  // instante) y después se permite confirmar manualmente sin forzar la
+  // duración estimada completa.
+  const minWaitSeconds = Math.min(seconds, 15);
 
   useEffect(() => {
     // Reset timer when seconds changes (new lesson loaded)
@@ -92,7 +98,9 @@ function TimerAutoComplete({
 
   if (isCompleted) return null;
 
-  const pct = Math.round(((seconds - remaining) / seconds) * 100);
+  const elapsed = seconds - remaining;
+  const pct = Math.round((elapsed / seconds) * 100);
+  const canConfirm = elapsed >= minWaitSeconds;
 
   return (
     <div className="mt-4 rounded-xl border bg-muted/30 px-4 py-3 space-y-2">
@@ -106,6 +114,15 @@ function TimerAutoComplete({
         </span>
       </div>
       <Progress value={pct} className="h-1.5" />
+      {canConfirm && (
+        <button
+          type="button"
+          onClick={onComplete}
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          Ya terminé de leer — marcar como completada
+        </button>
+      )}
     </div>
   );
 }
