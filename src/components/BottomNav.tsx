@@ -18,7 +18,9 @@ export function BottomNav({ isAdmin }: { isAdmin: boolean }) {
   ];
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 bg-background/95 backdrop-blur border-t shadow-lg">
+    // pb con safe-area: instalada como app el contenido llega hasta el borde
+    // inferior, donde vive la barra de gestos de iOS/Android.
+    <nav className="fixed bottom-0 inset-x-0 z-30 bg-background/95 backdrop-blur border-t shadow-lg pb-[env(safe-area-inset-bottom)]">
       <div className="max-w-md mx-auto flex">
         {tabs.map(tab => {
           const active = pathname === tab.href;
