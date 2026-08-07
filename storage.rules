@@ -19,6 +19,12 @@ service firebase.storage {
       allow write: if request.auth != null;
     }
 
+    // Logo de marca (Admin > Marca)
+    match /branding/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
     // Regla por defecto: denegar todo lo demás
     match /{allPaths=**} {
       allow read, write: if false;
