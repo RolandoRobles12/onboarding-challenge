@@ -23,7 +23,7 @@ import {
   Route, Plus, Trash2, ChevronUp, ChevronDown,
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
   BookOpen, Swords, Medal, Info, ListChecks, Pencil, X, ClipboardList,
-  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock, CalendarClock, Flag, Compass,
+  Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock, CalendarClock, Flag, Compass, Layers,
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
@@ -764,10 +764,11 @@ const MILESTONE_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EC4899',
 const MILESTONE_EMOJIS = ['🌱', '⚡', '🏆', '🚀', '🎯', '💎', '🔥', '⭐'];
 
 function MilestonesEditor({
-  anchored, milestones, onToggleAnchor, onChange,
+  anchored, milestones, stages, onToggleAnchor, onChange,
 }: {
   anchored: boolean;
   milestones: JourneyMilestone[];
+  stages: JourneyStage[];
   onToggleAnchor: (v: boolean) => void;
   onChange: (m: JourneyMilestone[]) => void;
 }) {
@@ -854,12 +855,15 @@ function MilestonesEditor({
             <>
               {sorted.map((m, i) => {
                 const startDay = i === 0 ? 1 : sorted[i - 1].dayOffset + 1;
+                const stagesHere = stages.filter(s => s.milestoneId === m.id);
+                const actionsHere = stagesHere.reduce((n, s) => n + s.actions.length, 0);
                 return (
                   <div
                     key={m.id}
-                    className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 flex-wrap"
+                    className="rounded-lg border bg-background px-3 py-2"
                     style={{ borderLeftWidth: 4, borderLeftColor: m.color ?? '#8B5CF6' }}
                   >
+                  <div className="flex items-center gap-2 flex-wrap">
                     <select
                       value={m.emoji ?? ''}
                       onChange={e => update(m.id, { emoji: e.target.value || undefined })}
@@ -894,7 +898,8 @@ function MilestonesEditor({
                       (del día {startDay} al {m.dayOffset})
                     </span>
 
-                    <div className="flex items-center gap-1 shrink-0 ml-auto">
+                    <div className="flex items-center gap-1 shrink-0 ml-auto" title="Color del tramo en la línea de tiempo">
+                      <span className="text-[10px] text-muted-foreground mr-0.5">color:</span>
                       {MILESTONE_COLORS.map(c => (
                         <button
                           key={c}
@@ -917,6 +922,29 @@ function MilestonesEditor({
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
+                  </div>
+
+                  {/* Qué contenido cae en este tramo — para que se entienda la
+                      relación sin tener que bajar a revisar cada etapa. */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-2 mt-2 border-t border-dashed">
+                    <Layers className="h-3 w-3 text-muted-foreground shrink-0" />
+                    {stagesHere.length === 0 ? (
+                      <span className="text-[11px] text-amber-600">
+                        Sin etapas asignadas — este tramo se verá vacío para el vendedor.
+                      </span>
+                    ) : (
+                      <>
+                        <span className="text-[11px] text-muted-foreground shrink-0">
+                          {stagesHere.length} {stagesHere.length === 1 ? 'etapa' : 'etapas'} · {actionsHere} {actionsHere === 1 ? 'acción' : 'acciones'}:
+                        </span>
+                        {stagesHere.map(s => (
+                          <span key={s.id} className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-foreground/80">
+                            {s.title}
+                          </span>
+                        ))}
+                      </>
+                    )}
+                  </div>
                   </div>
                 );
               })}
@@ -1368,6 +1396,7 @@ export default function JourneyPage() {
                 <MilestonesEditor
                   anchored={anchorToEntryDate}
                   milestones={milestones}
+                  stages={stages}
                   onToggleAnchor={setAnchorToEntryDate}
                   onChange={setMilestones}
                 />
