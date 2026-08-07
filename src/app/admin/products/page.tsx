@@ -15,8 +15,15 @@ import { Package, Plus, Pencil, Trash2, Search } from 'lucide-react';
 import type { ProductFormData } from '@/lib/types-scalable';
 
 const COLOR_OPTIONS = [
-  '#23cd7d', '#074750', '#3b82f6', '#8b5cf6', '#ec4899',
-  '#f59e0b', '#10b981', '#ef4444', '#6366f1', '#14b8a6'
+  '#16B877', // Verde Aviva
+  '#026149', // Verde Musgo
+  '#074739', // Verde Pino
+  '#A35ED6', // Disciplina / Morado
+  '#2493E3', // Esfuerzo / Azul
+  '#E565A5', // Creatividad / Rosa
+  '#1DB8B8', // Superación / Turquesa
+  '#F57F31', // Trabajo / Naranja
+  '#F5BB1D', // Sueño / Amarillo
 ];
 
 export default function ProductsPage() {
@@ -53,7 +60,7 @@ export default function ProductsPage() {
         name: '',
         description: '',
         icon: 'package',
-        color: '#23cd7d',
+        color: '#16B877',
       });
     }
     setDialogOpen(true);

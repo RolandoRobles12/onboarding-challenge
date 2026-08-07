@@ -31,6 +31,7 @@ import {
   MessageSquare,
   ShieldCheck,
   Store,
+  ImageIcon,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -76,6 +77,7 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Productos', href: '/admin/products', icon: Package },
       { name: 'Kioscos', href: '/admin/kioscos', icon: Store },
       { name: 'Niveles XP', href: '/admin/levels', icon: Layers },
+      { name: 'Marca', href: '/admin/branding', icon: ImageIcon },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
       { name: 'Notificaciones', href: '/admin/notifications', icon: BellRing },
     ],
@@ -149,7 +151,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-white/10">
               <div className="flex items-center gap-2">
-                <AvivaLogo className="h-8 w-8" />
+                <AvivaLogo variant="icon" className="h-8 w-8" />
                 <div>
                   <h1 className="text-lg font-bold">Admin Panel</h1>
                   <p className="text-xs text-white/70">Aviva LMS</p>
