@@ -19,16 +19,21 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: '/',
     display: 'standalone',
     orientation: 'portrait-primary',
-    background_color: '#074739',
+    // background_color pinta el splash mientras arranca: se iguala al fondo del
+    // logo (#026149, Verde Musgo) para que el ícono no se vea recortado sobre
+    // otro tono. theme_color es la barra de estado, y ahí sí va el Verde Pino
+    // porque es el color del encabezado de la app.
+    background_color: '#026149',
     theme_color: '#074739',
     lang: 'es-MX',
     dir: 'ltr',
     categories: ['education', 'business', 'productivity'],
+    // El logo de marca ya trae fondo sólido de borde a borde y el símbolo ocupa
+    // el 61% central, así que cumple la zona segura de Android (80% central) sin
+    // necesitar una variante recortada aparte: sirve como 'any' y 'maskable'.
     icons: [
-      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icons/maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
-      { src: '/icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
     ],
     shortcuts: [
       {

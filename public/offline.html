@@ -30,9 +30,9 @@
       width: 64px; height: 64px;
       margin: 0 auto 20px;
       border-radius: 18px;
-      background: #074739;
-      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
     }
+    .icon img { width: 100%; height: 100%; display: block; }
     h1 { font-size: 20px; margin: 0 0 8px; }
     p { font-size: 14px; line-height: 1.55; color: #5b665f; margin: 0 0 20px; }
     button {
@@ -52,13 +52,8 @@
 <body>
   <div class="card">
     <div class="icon">
-      <svg width="34" height="34" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <rect x="1" y="1" width="30" height="38" rx="15" fill="#B0F5CD"/>
-        <rect x="4" y="4" width="24" height="32" rx="12" fill="#16B877"/>
-        <rect x="8" y="8" width="16" height="24" rx="8" fill="#FFFFFF"/>
-        <rect x="11" y="11" width="10" height="18" rx="5" fill="#026149"/>
-        <circle cx="16" cy="16.5" r="1.8" fill="#FFFFFF"/>
-      </svg>
+      <!-- Logo real de marca (el mismo archivo que precachea el service worker) -->
+      <img src="/icons/icon-192.png" alt="Aviva" width="64" height="64" />
     </div>
     <h1>Sin conexión</h1>
     <p>
