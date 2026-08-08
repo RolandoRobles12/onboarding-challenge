@@ -486,7 +486,7 @@ export default function FormPage() {
     <ProtectedRoute>
       <SellerOnboardingGate>
         <div className="flex flex-col min-h-screen bg-background">
-          <header className="bg-accent text-accent-foreground border-b sticky top-0 z-20">
+          <header className="bg-accent text-accent-foreground border-b sticky top-0 z-20 safe-top">
             <div className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Link href="/" aria-label="Inicio">

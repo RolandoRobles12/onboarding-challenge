@@ -114,7 +114,7 @@ export default function LearningPathsCatalogPage() {
         <div className="flex flex-col min-h-screen bg-background">
 
           {/* Header */}
-          <header className="bg-accent text-accent-foreground sticky top-0 z-20">
+          <header className="bg-accent text-accent-foreground sticky top-0 z-20 safe-top">
             <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
               <Link href="/"><AvivaLogo className="h-8 w-auto" /></Link>
               <div className="flex items-center gap-1">

@@ -89,6 +89,16 @@ body {
 }
 
 @layer utilities {
+  /* Áreas seguras del dispositivo. Con la app instalada (viewportFit: cover)
+     el contenido llega hasta los bordes físicos, así que las barras fijas
+     deben reservar el espacio del notch y de la barra de gestos. */
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
   /* Oculta la barra de scroll manteniendo el desplazamiento.
      Se usaba en carruseles horizontales pero no estaba definida en ningún
      lado (ni plugin ni CSS), así que la barra nativa seguía apareciendo. */

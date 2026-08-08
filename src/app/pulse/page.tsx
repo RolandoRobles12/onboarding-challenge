@@ -71,7 +71,7 @@ function PageShell({ children }: { children: React.ReactNode }) {
     <ProtectedRoute>
       <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background flex flex-col">
         {/* Sticky top bar */}
-        <header className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 h-14 flex items-center gap-3">
+        <header className="sticky top-0 z-20 safe-top bg-background/95 backdrop-blur border-b px-4 h-14 flex items-center gap-3">
           <Link href="/" className="p-1.5 rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="h-5 w-5" />
           </Link>
