@@ -26,16 +26,16 @@ import { useAuth } from '@/context/AuthContext';
 import { createSimAttempt, getSimModule, updateSimAttempt } from '@/lib/firestore-service';
 import {
   DEFAULT_MAX_WRONG_TAPS, MAX_STORED_TAPS, decideTap, evaluateAttempt, expectedHotspot,
-  findExpectedPath, isFinishNode, resolveHotspotStep,
+  findExpectedPath, findPendingWork, isFinishNode, nodeNeedsInput, resolveHotspotStep,
 } from '@/lib/types-simulation';
 import type {
-  SimAttemptState, SimHotspot, SimModule, SimNode, SimTapEvent,
+  SimAttemptState, SimHotspot, SimModule, SimNode, SimTapEvent, SimTapOutcome,
 } from '@/lib/types-simulation';
 import { SimStage } from '@/components/simulation/SimStage';
 import { SimBrief, SimExitDialog, SimHintPanel, SimResult } from '@/components/simulation/SimScreens';
 import type { SimHintStep } from '@/components/simulation/SimScreens';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, HelpCircle, Loader2, Undo2, X } from 'lucide-react';
+import { ArrowLeft, Check, HelpCircle, Loader2, Undo2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** Cuánto espera la pantalla de éxito antes de mostrar el resultado. */
@@ -258,7 +258,7 @@ function SimulationRunner() {
     const evaluation = evaluateAttempt({
       wrongTaps: current.wrongTaps,
       stepsTaken: current.steps,
-      optimalSteps: expected?.steps ?? null,
+      optimalSteps: expected?.screens ?? null,
       maxWrongTaps,
       needsManualReview: manualReview,
     });
@@ -273,8 +273,8 @@ function SimulationRunner() {
       updatedAt: serverTimestamp(),
       wrongTaps: current.wrongTaps,
       hintsUsed: current.hintsUsed,
-      stepsTaken: current.steps,
-      optimalSteps: expected?.steps,
+      stepsTaken: current.steps + 1,
+      optimalSteps: expected?.screens,
       path: current.path,
       lastNodeId: current.currentNodeId,
       taps: current.taps,
@@ -329,7 +329,7 @@ function SimulationRunner() {
         wrongTaps: 0,
         hintsUsed: 0,
         stepsTaken: 0,
-        optimalSteps: expected?.steps,
+        optimalSteps: expected?.screens,
         path: [startNodeId],
         lastNodeId: startNodeId,
         taps: [],
@@ -429,15 +429,42 @@ function SimulationRunner() {
 
   function handleTap(hotspot: SimHotspot | null, xPct: number, yPct: number) {
     if (!module || !node || run.finishedAt) return;
-    const base = { nodeId: node.id, xPct, yPct, at: Date.now(), hotspotId: hotspot?.id };
-    const outcome = decideTap({
-      node,
-      hotspot,
-      checked: run.checkedByNode[node.id] ?? [],
-      texts: run.texts,
-      nodeExists: id => module.nodes.some(n => n.id === id),
-    });
+    applyOutcome(
+      decideTap({
+        node,
+        hotspot,
+        checked: run.checkedByNode[node.id] ?? [],
+        texts: run.texts,
+        nodeExists: id => module.nodes.some(n => n.id === id),
+      }),
+      { nodeId: node.id, xPct, yPct, at: Date.now(), hotspotId: hotspot?.id },
+    );
+  }
 
+  /**
+   * El vendedor confirmó lo que escribió. Si ese campo lleva a otra pantalla,
+   * escribir y presionar Listo es la forma de avanzar — igual que en la
+   * herramienta real, donde nadie escribe y luego busca otro botón inventado.
+   */
+  function handleSubmitText(hotspotId: string) {
+    if (!module || !node || run.finishedAt) return;
+    const hotspot = node.hotspots.find(h => h.id === hotspotId);
+    if (!hotspot) return;
+    applyOutcome(
+      decideTap({
+        node,
+        hotspot,
+        checked: run.checkedByNode[node.id] ?? [],
+        texts: run.texts,
+        nodeExists: id => module.nodes.some(n => n.id === id),
+        via: 'submit',
+      }),
+      { nodeId: node.id, xPct: hotspot.xPct, yPct: hotspot.yPct, at: Date.now(), hotspotId },
+    );
+  }
+
+  function applyOutcome(outcome: SimTapOutcome, base: Omit<SimTapEvent, 'kind' | 'hit'>) {
+    if (!node) return;
     switch (outcome.kind) {
       case 'miss':
         dispatch({ type: 'tap', event: { ...base, kind: 'miss', hit: false } });
@@ -490,12 +517,30 @@ function SimulationRunner() {
 
   // Llegar a la pantalla final termina el módulo, pero con una pausa para que
   // el vendedor alcance a ver la confirmación, como en la herramienta real.
+  //
+  // Si esa pantalla todavía le pide algo —un campo por llenar, una casilla—,
+  // no se cierra sola: terminaría el ejercicio antes de dejarlo escribir. En
+  // ese caso espera a que confirme con "Terminar".
+  const finishNeedsConfirm = !!node && isFinishNode(node) && nodeNeedsInput(node);
+
   useEffect(() => {
     if (phase !== 'running' || !node || run.finishedAt) return;
-    if (!isFinishNode(node)) return;
+    if (!isFinishNode(node) || nodeNeedsInput(node)) return;
     const timer = setTimeout(() => dispatch({ type: 'finish' }), SUCCESS_BEAT_MS);
     return () => clearTimeout(timer);
   }, [node, phase, run.finishedAt]);
+
+  function handleConfirmFinish() {
+    if (!node) return;
+    const missing = findPendingWork(node, run.checkedByNode[node.id] ?? [], run.texts);
+    if (missing) {
+      if (missing.textErrors) dispatch({ type: 'textErrors', errors: missing.textErrors });
+      setShakeToken(token => token + 1);
+      showMessage('error', missing.message);
+      return;
+    }
+    dispatch({ type: 'finish' });
+  }
 
   // Precarga las pantallas siguientes: sin esto cada avance espera a la red y
   // parece que la app se trabó.
@@ -560,7 +605,7 @@ function SimulationRunner() {
     return (
       <SimBrief
         module={module}
-        expectedSteps={expected?.steps ?? null}
+        expectedSteps={expected?.screens ?? null}
         maxWrongTaps={maxWrongTaps}
         isTrainer={isTrainer}
         revealAll={revealAll}
@@ -573,13 +618,18 @@ function SimulationRunner() {
 
   const evaluation = evaluateAttempt({
     wrongTaps: run.wrongTaps,
-    stepsTaken: run.steps,
-    optimalSteps: expected?.steps ?? null,
+    stepsTaken: run.steps + 1,
+    optimalSteps: expected?.screens ?? null,
     maxWrongTaps,
     needsManualReview: needsManualReview(run.texts),
   });
-  const progress = expected?.steps
-    ? Math.min(100, Math.round((run.taps.filter(t => t.kind === 'expected').length / expected.steps) * 100))
+  // El paso se saca de dónde está parado el vendedor dentro de la ruta
+  // esperada, no de cuántos toques buenos lleva: así regresar con "Atrás"
+  // devuelve el contador, y un desvío se ve como lo que es, no como avance.
+  const routeIndex = expected ? expected.nodes.indexOf(run.currentNodeId) : -1;
+  const onRoute = routeIndex >= 0;
+  const progress = expected && onRoute
+    ? Math.round((routeIndex / Math.max(1, expected.screens - 1)) * 100)
     : 0;
 
   return (
@@ -600,9 +650,9 @@ function SimulationRunner() {
             <p className="text-sm font-medium leading-tight line-clamp-2">
               {node?.goal || module.instructions || module.title}
             </p>
-            {expected?.steps ? (
-              <p className="text-[11px] text-white/40">
-                Paso {Math.min(expected.steps, run.taps.filter(t => t.kind === 'expected').length + 1)} de {expected.steps}
+            {expected ? (
+              <p className={cn('text-[11px]', onRoute ? 'text-white/40' : 'text-amber-300/80')}>
+                {onRoute ? `Paso ${routeIndex + 1} de ${expected.screens}` : 'Fuera de la ruta esperada'}
               </p>
             ) : null}
           </div>
@@ -620,7 +670,7 @@ function SimulationRunner() {
           </button>
         </div>
 
-        {expected?.steps ? (
+        {expected ? (
           <div className="h-0.5 bg-white/10">
             <div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${progress}%` }} />
           </div>
@@ -651,6 +701,7 @@ function SimulationRunner() {
           disabled={!!run.finishedAt}
           onTap={handleTap}
           onChangeText={(hotspotId, value) => dispatch({ type: 'text', hotspotId, value })}
+          onSubmitText={handleSubmitText}
         />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
@@ -664,16 +715,24 @@ function SimulationRunner() {
       )}
 
       {/* Atrás abajo a la izquierda: donde cae el pulgar, como en cualquier app. */}
-      {canGoBack && !run.finishedAt && (
-        <div className="shrink-0 border-t border-white/10 px-2 py-2">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/10"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Atrás
-          </button>
+      {(canGoBack || finishNeedsConfirm) && !run.finishedAt && (
+        <div className="shrink-0 border-t border-white/10 px-2 py-2 flex items-center justify-between gap-2">
+          {canGoBack ? (
+            <button
+              type="button"
+              onClick={handleBack}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/10"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Atrás
+            </button>
+          ) : <span />}
+
+          {finishNeedsConfirm && (
+            <Button size="sm" onClick={handleConfirmFinish}>
+              <Check className="h-4 w-4 mr-1.5" />Terminar
+            </Button>
+          )}
         </div>
       )}
 
@@ -716,8 +775,8 @@ function SimulationRunner() {
           durationMs={(run.finishedAt ?? Date.now()) - run.startedAt}
           wrongTaps={run.wrongTaps}
           hintsUsed={run.hintsUsed}
-          steps={run.steps}
-          optimalSteps={expected?.steps ?? null}
+          steps={run.steps + 1}
+          optimalSteps={expected?.screens ?? null}
           taps={run.taps}
           onRetry={startRun}
           onExit={() => router.push('/')}
