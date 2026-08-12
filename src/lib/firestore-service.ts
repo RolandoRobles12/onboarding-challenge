@@ -2090,11 +2090,49 @@ export async function deleteSimModule(moduleId: string): Promise<void> {
   await deleteDoc(getDocRef(COLLECTIONS.SIM_MODULES, moduleId));
 }
 
-/** Registra un intento (para validar el prototipo: ruta seguida, toques y resultado). */
+/**
+ * Registra un intento. Se crea al empezar, no al terminar: así los intentos
+ * abandonados —que son justo los que dicen dónde se atora la gente— también
+ * quedan registrados.
+ */
 export async function createSimAttempt(data: Omit<SimAttempt, 'id'>): Promise<string> {
   const docRef = doc(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS));
   await setDoc(docRef, stripUndefined(data));
   return docRef.id;
+}
+
+/** Actualiza un intento en curso (avance parcial) o lo cierra al terminar. */
+export async function updateSimAttempt(attemptId: string, updates: Partial<Omit<SimAttempt, 'id'>>): Promise<void> {
+  const docRef = getDocRef(COLLECTIONS.SIM_ATTEMPTS, attemptId);
+  await updateDoc(docRef, stripUndefined(updates) as WithFieldValue<DocumentData>);
+}
+
+/**
+ * Intentos de un módulo, del más reciente al más viejo.
+ *
+ * Se ordena en memoria a propósito: combinar `where` con `orderBy` obligaría a
+ * crear un índice compuesto en Firestore, y el volumen de un módulo de
+ * capacitación no lo amerita.
+ */
+export async function getSimAttempts(moduleId: string, max = 100): Promise<SimAttempt[]> {
+  try {
+    const q = query(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS), where('moduleId', '==', moduleId));
+    const snap = await getDocs(q);
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() }) as SimAttempt)
+      .sort((a, b) => toMillis(b.startedAt) - toMillis(a.startedAt))
+      .slice(0, max);
+  } catch (error) {
+    console.error('Error getting sim attempts:', error);
+    return [];
+  }
+}
+
+/** Los timestamps de Firestore pueden venir sin resolver mientras se escriben. */
+function toMillis(value: SimAttempt['startedAt']): number {
+  return value && typeof value === 'object' && 'toMillis' in value
+    ? (value as Timestamp).toMillis()
+    : 0;
 }
 
 /** Devuelve el registro de visualización de un usuario para todos sus videos. */

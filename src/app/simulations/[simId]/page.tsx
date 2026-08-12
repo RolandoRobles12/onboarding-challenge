@@ -1,348 +1,747 @@
 'use client';
 
 /**
- * Runner de prueba del prototipo de "simulación por nodos".
+ * Runner de simulaciones: la pantalla donde el vendedor opera la herramienta.
  *
- * Standalone a propósito: no está enganchado a cursos, rutas ni
- * AssessmentConfig. Sirve para validar el patrón de interacción (tocar sobre
- * una captura real, escribir en los campos que importan, navegar de pantalla
- * en pantalla y calificar por ruta y estado final) antes de integrarlo a algo
- * que un vendedor real vea en su ruta de aprendizaje.
+ * Principios del rediseño, en orden de importancia:
+ *
+ * 1. Emular, no examinar. Un toque equivocado no saca un letrero rojo: hace lo
+ *    que haría la herramienta real. Si el capacitador conectó esa zona a otra
+ *    pantalla, el vendedor termina ahí y tiene que darse cuenta y regresar —
+ *    que es exactamente la habilidad que se está midiendo. Si no lleva a nada,
+ *    no pasa nada, igual que al picarle a un pedazo de interfaz que no es botón.
+ * 2. Nunca dejarlo atorado sin salida. Siempre hay atrás, ayuda progresiva y
+ *    salida; una pantalla rota se explica en vez de quedarse en negro.
+ * 3. Ayuda que cuesta pero no castiga. Pedir una pista es gratis en el momento
+ *    y se registra al final; adivinar a ciegas no enseña nada.
+ * 4. Todo intento deja rastro. El registro se crea al empezar y se actualiza en
+ *    cada pantalla, así que abandonar a la mitad también es un dato.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
-import { useAuth } from '@/context/AuthContext';
-import { getSimModule, createSimAttempt } from '@/lib/firestore-service';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { serverTimestamp } from 'firebase/firestore';
-import { matchesValidAnswer } from '@/lib/types-simulation';
-import type { SimModule, SimNode, SimTapEvent } from '@/lib/types-simulation';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import { useAuth } from '@/context/AuthContext';
+import { createSimAttempt, getSimModule, updateSimAttempt } from '@/lib/firestore-service';
+import {
+  DEFAULT_MAX_WRONG_TAPS, MAX_STORED_TAPS, decideTap, evaluateAttempt, expectedHotspot,
+  findExpectedPath, isFinishNode, resolveHotspotStep,
+} from '@/lib/types-simulation';
+import type {
+  SimAttemptState, SimHotspot, SimModule, SimNode, SimTapEvent,
+} from '@/lib/types-simulation';
+import { SimStage } from '@/components/simulation/SimStage';
+import { SimBrief, SimExitDialog, SimHintPanel, SimResult } from '@/components/simulation/SimScreens';
+import type { SimHintStep } from '@/components/simulation/SimScreens';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { Loader2, RotateCcw, Eye } from 'lucide-react';
+import { ArrowLeft, HelpCircle, Loader2, Undo2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export default function SimulationRunnerPage() {
-  const params = useParams<{ simId: string }>();
-  const { user, profile } = useAuth();
-  const [module, setModule] = useState<SimModule | null>(null);
-  const [notFound, setNotFound] = useState(false);
-  const [showZones, setShowZones] = useState(false);
+/** Cuánto espera la pantalla de éxito antes de mostrar el resultado. */
+const SUCCESS_BEAT_MS = 900;
+/** Cuánto dura el resaltado de la pista "muéstrame dónde". */
+const REVEAL_MS = 4000;
+/** Silencio antes de ofrecer ayuda por iniciativa propia. */
+const NUDGE_MS = 25000;
 
-  const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [texts, setTexts] = useState<Record<string, string>>({});
-  const [path, setPath] = useState<string[]>([]);
-  const [taps, setTaps] = useState<SimTapEvent[]>([]);
-  const [wrongTaps, setWrongTaps] = useState(0);
-  const [banner, setBanner] = useState<{ kind: 'error' | 'ok'; text: string } | null>(null);
-  const [finished, setFinished] = useState(false);
-  const [startedAt, setStartedAt] = useState<number>(0);
-  const [saved, setSaved] = useState(false);
+// ─── Estado del intento ──────────────────────────────────────────────────────
+
+interface RunState {
+  currentNodeId: string;
+  /** Pila de navegación, para el botón de atrás. */
+  history: string[];
+  /** Todo lo recorrido en orden, incluyendo regresos: es el registro real. */
+  path: string[];
+  checkedByNode: Record<string, string[]>;
+  texts: Record<string, string>;
+  textErrors: Record<string, string>;
+  taps: SimTapEvent[];
+  wrongTaps: number;
+  hintsUsed: number;
+  /** Toques que cambiaron de pantalla. */
+  steps: number;
+  startedAt: number;
+  finishedAt: number | null;
+}
+
+type RunAction =
+  | { type: 'start'; nodeId: string }
+  | { type: 'tap'; event: SimTapEvent }
+  | { type: 'wrong'; event: SimTapEvent }
+  | { type: 'toggle'; nodeId: string; hotspotId: string; event: SimTapEvent }
+  | { type: 'advance'; nodeId: string; event: SimTapEvent }
+  | { type: 'complete'; event: SimTapEvent }
+  | { type: 'text'; hotspotId: string; value: string }
+  | { type: 'textErrors'; errors: Record<string, string> }
+  | { type: 'back' }
+  | { type: 'hint' }
+  | { type: 'finish' };
+
+function initialRunState(nodeId: string): RunState {
+  return {
+    currentNodeId: nodeId,
+    history: [nodeId],
+    path: [nodeId],
+    checkedByNode: {},
+    texts: {},
+    textErrors: {},
+    taps: [],
+    wrongTaps: 0,
+    hintsUsed: 0,
+    steps: 0,
+    startedAt: Date.now(),
+    finishedAt: null,
+  };
+}
+
+function pushTap(taps: SimTapEvent[], event: SimTapEvent): SimTapEvent[] {
+  return [...taps, event].slice(-MAX_STORED_TAPS);
+}
+
+function runReducer(state: RunState, action: RunAction): RunState {
+  switch (action.type) {
+    case 'start':
+      return initialRunState(action.nodeId);
+
+    case 'tap':
+      return { ...state, taps: pushTap(state.taps, action.event) };
+
+    case 'wrong':
+      return { ...state, taps: pushTap(state.taps, action.event), wrongTaps: state.wrongTaps + 1 };
+
+    case 'toggle': {
+      const current = state.checkedByNode[action.nodeId] ?? [];
+      const next = current.includes(action.hotspotId)
+        ? current.filter(id => id !== action.hotspotId)
+        : [...current, action.hotspotId];
+      return {
+        ...state,
+        checkedByNode: { ...state.checkedByNode, [action.nodeId]: next },
+        taps: pushTap(state.taps, action.event),
+      };
+    }
+
+    case 'advance':
+      return {
+        ...state,
+        currentNodeId: action.nodeId,
+        history: [...state.history, action.nodeId],
+        path: [...state.path, action.nodeId],
+        steps: state.steps + 1,
+        // Un desvío avanza igual que un acierto, pero cuenta como error.
+        wrongTaps: action.event.kind === 'detour' ? state.wrongTaps + 1 : state.wrongTaps,
+        taps: pushTap(state.taps, action.event),
+        textErrors: {},
+      };
+
+    case 'complete':
+      return {
+        ...state,
+        steps: state.steps + 1,
+        taps: pushTap(state.taps, action.event),
+        finishedAt: Date.now(),
+      };
+
+    case 'text': {
+      const { [action.hotspotId]: _removed, ...textErrors } = state.textErrors;
+      return { ...state, texts: { ...state.texts, [action.hotspotId]: action.value }, textErrors };
+    }
+
+    case 'textErrors':
+      return { ...state, textErrors: action.errors };
+
+    case 'back': {
+      if (state.history.length < 2) return state;
+      const history = state.history.slice(0, -1);
+      const currentNodeId = history[history.length - 1];
+      return { ...state, history, currentNodeId, path: [...state.path, currentNodeId], textErrors: {} };
+    }
+
+    case 'hint':
+      return { ...state, hintsUsed: state.hintsUsed + 1 };
+
+    case 'finish':
+      return state.finishedAt ? state : { ...state, finishedAt: Date.now() };
+  }
+}
+
+// ─── Página ──────────────────────────────────────────────────────────────────
+
+export default function SimulationRunnerPage() {
+  return (
+    <ProtectedRoute>
+      <SimulationRunner />
+    </ProtectedRoute>
+  );
+}
+
+type LoadStatus = 'loading' | 'ready' | 'missing' | 'broken' | 'inactive';
+type Phase = 'brief' | 'running' | 'result';
+
+function SimulationRunner() {
+  const params = useParams<{ simId: string }>();
+  const router = useRouter();
+  const { user, profile, isTrainer } = useAuth();
+
+  const [module, setModule] = useState<SimModule | null>(null);
+  const [status, setStatus] = useState<LoadStatus>('loading');
+  const [phase, setPhase] = useState<Phase>('brief');
+  const [run, dispatch] = useReducer(runReducer, initialRunState(''));
+
+  const [message, setMessage] = useState<{ tone: 'error' | 'detour'; text: string } | null>(null);
+  const [shakeToken, setShakeToken] = useState(0);
+  const [offTrack, setOffTrack] = useState(false);
+  const [hintOpen, setHintOpen] = useState(false);
+  const [hintLevel, setHintLevel] = useState(0);
+  const [revealHotspotId, setRevealHotspotId] = useState<string | null>(null);
+  const [nudge, setNudge] = useState(false);
+  const [revealAll, setRevealAll] = useState(false);
+  const [exiting, setExiting] = useState(false);
+
+  const attemptIdRef = useRef<string | null>(null);
+  const finalizedRef = useRef(false);
+  const runRef = useRef(run);
+  runRef.current = run;
+
+  // ─── Carga del módulo ──────────────────────────────────────────────────────
 
   useEffect(() => {
     let active = true;
-    getSimModule(params.simId).then(m => {
-      if (!active) return;
-      if (!m) { setNotFound(true); return; }
-      setModule(m);
-      startOver(m);
-    });
+    getSimModule(params.simId)
+      .then(loaded => {
+        if (!active) return;
+        if (!loaded) { setStatus('missing'); return; }
+        setModule(loaded);
+        if (!loaded.nodes?.length) { setStatus('broken'); return; }
+        setStatus('ready');
+      })
+      .catch(error => {
+        console.error('No se pudo cargar la simulación:', error);
+        if (active) setStatus('missing');
+      });
     return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.simId]);
 
-  useEffect(() => {
-    if (!banner) return;
-    const t = setTimeout(() => setBanner(null), 2500);
-    return () => clearTimeout(t);
-  }, [banner]);
+  const expected = useMemo(() => (module ? findExpectedPath(module) : null), [module]);
+  const maxWrongTaps = module?.maxWrongTaps ?? DEFAULT_MAX_WRONG_TAPS;
+  const allowBack = module?.allowBack !== false;
 
-  function startOver(m: SimModule) {
-    setCurrentNodeId(m.startNodeId);
-    setChecked(new Set());
-    setTexts({});
-    setPath([m.startNodeId]);
-    setTaps([]);
-    setWrongTaps(0);
-    setBanner(null);
-    setFinished(false);
-    setStartedAt(Date.now());
-    setSaved(false);
-  }
+  const startNodeId = useMemo(() => {
+    if (!module?.nodes.length) return '';
+    return module.nodes.some(n => n.id === module.startNodeId) ? module.startNodeId : module.nodes[0].id;
+  }, [module]);
 
-  async function finish(
-    passed: boolean,
-    finalTaps: SimTapEvent[],
-    finalPath: string[],
-    finalWrongTaps: number,
-    finalTexts: Record<string, string>,
-  ) {
-    setFinished(true);
-    if (!module || saved) return;
-    setSaved(true);
+  const node: SimNode | null = useMemo(
+    () => module?.nodes.find(n => n.id === run.currentNodeId) ?? null,
+    [module, run.currentNodeId]
+  );
 
-    // Un campo de texto sin respuestas válidas configuradas es texto abierto:
-    // se guarda, pero la calificación final la da un capacitador.
-    const needsManualReview = module.nodes.some(n =>
-      n.hotspots.some(h =>
-        h.kind === 'text' && (h.validAnswers?.length ?? 0) === 0 && !!finalTexts[h.id]?.trim()
-      )
-    );
+  const nodeIndex = module && node ? module.nodes.findIndex(n => n.id === node.id) : -1;
+  const canGoBack = allowBack && run.history.length > 1;
+
+  // ─── Registro del intento ──────────────────────────────────────────────────
+
+  const needsManualReview = useCallback((texts: Record<string, string>) => {
+    if (!module) return false;
+    return module.nodes.some(n => n.hotspots.some(h =>
+      h.kind === 'text' && (h.validAnswers?.length ?? 0) === 0 && !!texts[h.id]?.trim()
+    ));
+  }, [module]);
+
+  const finalize = useCallback(async (state: SimAttemptState) => {
+    if (finalizedRef.current || !module) return;
+    finalizedRef.current = true;
+
+    const current = runRef.current;
+    const manualReview = needsManualReview(current.texts);
+    const evaluation = evaluateAttempt({
+      wrongTaps: current.wrongTaps,
+      stepsTaken: current.steps,
+      optimalSteps: expected?.steps ?? null,
+      maxWrongTaps,
+      needsManualReview: manualReview,
+    });
+    const completed = state === 'completed';
+
+    const payload = {
+      state,
+      // Un intento abandonado nunca se da por aprobado, sin importar el score.
+      outcome: completed ? evaluation.outcome : undefined,
+      passed: completed && evaluation.passed && !manualReview,
+      finishedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      wrongTaps: current.wrongTaps,
+      hintsUsed: current.hintsUsed,
+      stepsTaken: current.steps,
+      optimalSteps: expected?.steps,
+      path: current.path,
+      lastNodeId: current.currentNodeId,
+      taps: current.taps,
+      durationMs: (current.finishedAt ?? Date.now()) - current.startedAt,
+      textAnswers: current.texts,
+      needsManualReview: manualReview,
+    };
 
     try {
-      await createSimAttempt({
-        moduleId: module.id,
-        userId: user?.uid,
-        userEmail: profile?.email,
-        startedAt: serverTimestamp(),
-        finishedAt: serverTimestamp(),
-        passed,
-        wrongTaps: finalWrongTaps,
-        path: finalPath,
-        taps: finalTaps,
-        durationMs: Date.now() - startedAt,
-        textAnswers: finalTexts,
-        needsManualReview,
-      });
+      if (attemptIdRef.current) {
+        await updateSimAttempt(attemptIdRef.current, payload);
+      } else {
+        // El alta inicial pudo fallar (o seguir en vuelo): no perdemos el intento.
+        await createSimAttempt({
+          moduleId: module.id,
+          moduleTitle: module.title,
+          userId: user?.uid,
+          userEmail: profile?.email,
+          userName: profile?.nombre,
+          startedAt: serverTimestamp(),
+          ...payload,
+        });
+      }
     } catch (error) {
       console.error('No se pudo guardar el intento de simulación:', error);
     }
-  }
+  }, [module, expected, maxWrongTaps, needsManualReview, user, profile]);
 
-  function handleTap(node: SimNode, xPct: number, yPct: number) {
-    if (finished) return;
-    const hotspot = node.hotspots.find(h =>
-      xPct >= h.xPct && xPct <= h.xPct + h.wPct && yPct >= h.yPct && yPct <= h.yPct + h.hPct
-    );
+  const startRun = useCallback(async () => {
+    if (!module || !startNodeId) return;
+    dispatch({ type: 'start', nodeId: startNodeId });
+    setPhase('running');
+    setMessage(null);
+    setOffTrack(false);
+    setHintOpen(false);
+    setHintLevel(0);
+    setRevealHotspotId(null);
+    finalizedRef.current = false;
+    attemptIdRef.current = null;
 
-    // Los campos de texto manejan su propia interacción (el input real);
-    // aquí no hacen nada.
-    if (!hotspot || hotspot.kind === 'text') {
-      if (!hotspot) setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hit: false, at: Date.now() }]);
-      return;
-    }
-
-    if (hotspot.kind === 'checkbox') {
-      setChecked(prev => {
-        const next = new Set(prev);
-        next.has(hotspot.id) ? next.delete(hotspot.id) : next.add(hotspot.id);
-        return next;
+    try {
+      const id = await createSimAttempt({
+        moduleId: module.id,
+        moduleTitle: module.title,
+        userId: user?.uid,
+        userEmail: profile?.email,
+        userName: profile?.nombre,
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        state: 'in_progress',
+        passed: false,
+        wrongTaps: 0,
+        hintsUsed: 0,
+        stepsTaken: 0,
+        optimalSteps: expected?.steps,
+        path: [startNodeId],
+        lastNodeId: startNodeId,
+        taps: [],
       });
-      setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hotspotId: hotspot.id, hit: true, at: Date.now() }]);
-      return;
+      attemptIdRef.current = id;
+    } catch (error) {
+      // Sin registro el ejercicio sigue siendo útil: no bloqueamos al vendedor.
+      console.error('No se pudo registrar el inicio del intento:', error);
     }
+  }, [module, startNodeId, expected, user, profile]);
 
-    // kind === 'hotspot'
-    const registerWrong = (message: string) => {
-      setWrongTaps(w => w + 1);
-      setBanner({ kind: 'error', text: message });
-      setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hotspotId: hotspot.id, hit: false, at: Date.now() }]);
-    };
+  // Guarda el avance en cada cambio de pantalla: si abandona, sabemos dónde quedó.
+  useEffect(() => {
+    if (phase !== 'running' || !attemptIdRef.current || run.finishedAt) return;
+    updateSimAttempt(attemptIdRef.current, {
+      updatedAt: serverTimestamp(),
+      path: run.path,
+      lastNodeId: run.currentNodeId,
+      wrongTaps: run.wrongTaps,
+      hintsUsed: run.hintsUsed,
+      stepsTaken: run.steps,
+      taps: run.taps,
+      textAnswers: run.texts,
+    }).catch(error => console.error('No se pudo guardar el avance:', error));
+    // Sólo al cambiar de pantalla: un write por toque sería un desperdicio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.currentNodeId, phase]);
 
-    if (!hotspot.isCorrect) {
-      registerWrong(hotspot.feedback || 'Esa no es la zona correcta. Intenta de nuevo.');
-      return;
+  // Cierre del intento al terminar.
+  useEffect(() => {
+    if (phase === 'running' && run.finishedAt) {
+      finalize('completed');
+      setPhase('result');
     }
+  }, [run.finishedAt, phase, finalize]);
 
-    const checkboxHotspots = node.hotspots.filter(h => h.kind === 'checkbox');
-    if (checkboxHotspots.length > 0 && !checkboxHotspots.every(h => checked.has(h.id) === h.isCorrect)) {
-      registerWrong('Revisa tu selección antes de continuar.');
-      return;
-    }
+  // Cerrar la pestaña a media simulación cuenta como abandono.
+  useEffect(() => {
+    if (phase !== 'running') return;
+    const handler = () => { if (!finalizedRef.current) finalize('abandoned'); };
+    window.addEventListener('pagehide', handler);
+    return () => window.removeEventListener('pagehide', handler);
+  }, [phase, finalize]);
 
-    // Los campos de texto de esta pantalla se validan al momento de avanzar.
-    const textHotspots = node.hotspots.filter(h => h.kind === 'text');
-    const empty = textHotspots.find(h => !texts[h.id]?.trim());
-    if (empty) {
-      registerWrong(`Falta llenar "${empty.label}".`);
-      return;
+  // ─── Ayuda progresiva ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    setHintLevel(0);
+    setRevealHotspotId(null);
+    setHintOpen(false);
+    setNudge(false);
+    if (phase !== 'running') return;
+    const timer = setTimeout(() => setNudge(true), NUDGE_MS);
+    return () => clearTimeout(timer);
+  }, [run.currentNodeId, phase]);
+
+  const hintSteps = useMemo<SimHintStep[]>(() => {
+    if (!node || !module) return [];
+    const steps: SimHintStep[] = [];
+    const goal = node.goal || module.instructions;
+    if (goal) steps.push({ title: 'Tu objetivo', body: goal });
+    const detail = node.hint || expectedHotspot(node)?.hint;
+    if (detail) steps.push({ title: 'Pista', body: detail });
+    return steps;
+  }, [node, module]);
+
+  function openHints() {
+    setNudge(false);
+    if (hintLevel === 0 && hintSteps.length > 0) {
+      setHintLevel(1);
+      dispatch({ type: 'hint' });
     }
-    const wrongText = textHotspots.find(h =>
-      (h.validAnswers?.length ?? 0) > 0 && !matchesValidAnswer(texts[h.id] || '', h.validAnswers!)
+    setHintOpen(true);
+  }
+
+  function advanceHint() {
+    setHintLevel(level => level + 1);
+    dispatch({ type: 'hint' });
+  }
+
+  function revealAnswer() {
+    if (!node) return;
+    const target = expectedHotspot(node);
+    if (!target) return;
+    dispatch({ type: 'hint' });
+    setRevealHotspotId(target.id);
+    setHintOpen(false);
+    setTimeout(() => setRevealHotspotId(current => (current === target.id ? null : current)), REVEAL_MS);
+  }
+
+  // ─── Interacción ───────────────────────────────────────────────────────────
+
+  const showMessage = useCallback((tone: 'error' | 'detour', text: string) => {
+    setMessage({ tone, text });
+    setTimeout(() => setMessage(current => (current?.text === text ? null : current)), 3200);
+  }, []);
+
+  function handleTap(hotspot: SimHotspot | null, xPct: number, yPct: number) {
+    if (!module || !node || run.finishedAt) return;
+    const base = { nodeId: node.id, xPct, yPct, at: Date.now(), hotspotId: hotspot?.id };
+    const outcome = decideTap({
+      node,
+      hotspot,
+      checked: run.checkedByNode[node.id] ?? [],
+      texts: run.texts,
+      nodeExists: id => module.nodes.some(n => n.id === id),
+    });
+
+    switch (outcome.kind) {
+      case 'miss':
+        dispatch({ type: 'tap', event: { ...base, kind: 'miss', hit: false } });
+        return;
+
+      case 'toggle':
+        dispatch({
+          type: 'toggle',
+          nodeId: node.id,
+          hotspotId: outcome.hotspotId,
+          event: { ...base, kind: 'toggle', hit: true },
+        });
+        return;
+
+      case 'expected':
+        dispatch({ type: 'advance', nodeId: outcome.nodeId, event: { ...base, kind: 'expected', hit: true } });
+        setOffTrack(false);
+        return;
+
+      case 'finish':
+        dispatch({ type: 'complete', event: { ...base, kind: 'expected', hit: true } });
+        return;
+
+      case 'detour':
+        dispatch({ type: 'advance', nodeId: outcome.nodeId, event: { ...base, kind: 'detour', hit: true } });
+        setOffTrack(true);
+        showMessage('detour', outcome.message);
+        return;
+
+      case 'wrong':
+        if (outcome.textErrors) dispatch({ type: 'textErrors', errors: outcome.textErrors });
+        dispatch({ type: 'wrong', event: { ...base, kind: 'wrong', hit: false } });
+        setShakeToken(token => token + 1);
+        showMessage('error', outcome.message);
+        return;
+
+      case 'broken':
+        // Error de autoría del módulo: no se le cobra al vendedor.
+        dispatch({ type: 'tap', event: { ...base, kind: 'miss', hit: false } });
+        showMessage('error', outcome.message);
+        return;
+    }
+  }
+
+  function handleBack() {
+    dispatch({ type: 'back' });
+    setOffTrack(false);
+    setMessage(null);
+  }
+
+  // Llegar a la pantalla final termina el módulo, pero con una pausa para que
+  // el vendedor alcance a ver la confirmación, como en la herramienta real.
+  useEffect(() => {
+    if (phase !== 'running' || !node || run.finishedAt) return;
+    if (!isFinishNode(node)) return;
+    const timer = setTimeout(() => dispatch({ type: 'finish' }), SUCCESS_BEAT_MS);
+    return () => clearTimeout(timer);
+  }, [node, phase, run.finishedAt]);
+
+  // Precarga las pantallas siguientes: sin esto cada avance espera a la red y
+  // parece que la app se trabó.
+  useEffect(() => {
+    if (!module || !node || typeof window === 'undefined') return;
+    const targets = new Set(
+      node.hotspots
+        .map(hotspot => resolveHotspotStep(hotspot))
+        .filter((step): step is { type: 'go'; nodeId: string } => step.type === 'go')
+        .map(step => step.nodeId)
     );
-    if (wrongText) {
-      registerWrong(wrongText.feedback || `Revisa lo que escribiste en "${wrongText.label}".`);
-      return;
+    for (const id of targets) {
+      const target = module.nodes.find(n => n.id === id);
+      if (!target) continue;
+      const image = new window.Image();
+      image.src = target.imageUrl;
     }
+  }, [module, node]);
 
-    const nextTaps = [...taps, { nodeId: node.id, xPct, yPct, hotspotId: hotspot.id, hit: true, at: Date.now() }];
-    setTaps(nextTaps);
-    if (hotspot.feedback) setBanner({ kind: 'ok', text: hotspot.feedback });
-
-    if (!hotspot.nextNodeId) {
-      finish(true, nextTaps, path, wrongTaps, texts);
-      return;
-    }
-    const nextPath = [...path, hotspot.nextNodeId];
-    setPath(nextPath);
-    setCurrentNodeId(hotspot.nextNodeId);
-    setChecked(new Set());
+  async function exitSimulation() {
+    if (phase === 'running') await finalize('abandoned');
+    router.push('/');
   }
 
-  if (notFound) {
-    return <div className="min-h-screen flex items-center justify-center text-muted-foreground">No se encontró esta simulación.</div>;
-  }
-  if (!module || !currentNodeId) {
-    return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  // ─── Render ────────────────────────────────────────────────────────────────
+
+  if (status === 'loading') {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center bg-neutral-950">
+        <Loader2 className="h-6 w-6 animate-spin text-white/60" />
+      </div>
+    );
   }
 
-  const node = module.nodes.find(n => n.id === currentNodeId);
+  if (status === 'missing' || !module) {
+    return <FullMessage title="No encontramos esta simulación." action="Volver al inicio" onAction={() => router.push('/')} />;
+  }
+
+  if (status === 'broken') {
+    return (
+      <FullMessage
+        title="Esta simulación todavía no tiene pantallas."
+        detail="Avísale a tu capacitador para que la termine de armar."
+        action="Volver al inicio"
+        onAction={() => router.push('/')}
+      />
+    );
+  }
+
+  if (!module.active && !isTrainer) {
+    return (
+      <FullMessage
+        title="Esta simulación no está disponible."
+        detail="Tu capacitador la tiene desactivada por ahora."
+        action="Volver al inicio"
+        onAction={() => router.push('/')}
+      />
+    );
+  }
+
+  if (phase === 'brief') {
+    return (
+      <SimBrief
+        module={module}
+        expectedSteps={expected?.steps ?? null}
+        maxWrongTaps={maxWrongTaps}
+        isTrainer={isTrainer}
+        revealAll={revealAll}
+        onToggleReveal={setRevealAll}
+        onStart={startRun}
+        onExit={() => router.push('/')}
+      />
+    );
+  }
+
+  const evaluation = evaluateAttempt({
+    wrongTaps: run.wrongTaps,
+    stepsTaken: run.steps,
+    optimalSteps: expected?.steps ?? null,
+    maxWrongTaps,
+    needsManualReview: needsManualReview(run.texts),
+  });
+  const progress = expected?.steps
+    ? Math.min(100, Math.round((run.taps.filter(t => t.kind === 'expected').length / expected.steps) * 100))
+    : 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-neutral-950 text-white">
-      <header className="shrink-0 border-b border-white/10 px-4 py-2 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{module.title}</p>
-          {module.instructions && <p className="text-xs text-white/60 truncate">{module.instructions}</p>}
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-1.5">
-            <Eye className="h-3.5 w-3.5 text-white/60" />
-            <Label htmlFor="zones" className="text-xs text-white/60">Modo capacitador</Label>
-            <Switch id="zones" checked={showZones} onCheckedChange={setShowZones} />
+    <div className="relative min-h-[100dvh] h-[100dvh] flex flex-col bg-neutral-950 text-white overscroll-none">
+      {/* Barra de tarea: qué tengo que lograr aquí, y las dos salidas siempre visibles. */}
+      <header className="shrink-0 border-b border-white/10">
+        <div className="flex items-center gap-2 px-2 py-2">
+          <button
+            type="button"
+            onClick={() => setExiting(true)}
+            aria-label="Salir de la simulación"
+            className="rounded-full p-2 text-white/60 hover:text-white hover:bg-white/10 shrink-0"
+          >
+            <X className="h-5 w-5" />
+          </button>
+
+          <div className="min-w-0 flex-1 text-center px-1">
+            <p className="text-sm font-medium leading-tight line-clamp-2">
+              {node?.goal || module.instructions || module.title}
+            </p>
+            {expected?.steps ? (
+              <p className="text-[11px] text-white/40">
+                Paso {Math.min(expected.steps, run.taps.filter(t => t.kind === 'expected').length + 1)} de {expected.steps}
+              </p>
+            ) : null}
           </div>
-          <Button size="sm" variant="ghost" className="text-white hover:bg-white/10" onClick={() => startOver(module)}>
-            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />Reiniciar
-          </Button>
+
+          <button
+            type="button"
+            onClick={openHints}
+            aria-label="Pedir ayuda"
+            className={cn(
+              'rounded-full p-2 shrink-0 text-white/60 hover:text-white hover:bg-white/10',
+              nudge && 'text-amber-300 animate-pulse-ring'
+            )}
+          >
+            <HelpCircle className="h-5 w-5" />
+          </button>
         </div>
+
+        {expected?.steps ? (
+          <div className="h-0.5 bg-white/10">
+            <div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${progress}%` }} />
+          </div>
+        ) : null}
       </header>
 
-      <div className="relative flex-1 flex items-center justify-center overflow-hidden p-2">
-        {node && (
-          <SimStage
-            node={node}
-            checked={checked}
-            texts={texts}
-            showZones={showZones}
-            disabled={finished}
-            onChangeText={(id, value) => setTexts(prev => ({ ...prev, [id]: value }))}
-            onTap={(x, y) => handleTap(node, x, y)}
-          />
-        )}
+      {/* Aviso de desvío: la corrección tiene que estar a un toque. */}
+      {offTrack && canGoBack && (
+        <button
+          type="button"
+          onClick={handleBack}
+          className="shrink-0 flex items-center justify-center gap-2 bg-amber-500/15 border-b border-amber-500/25 px-4 py-2 text-xs text-amber-200"
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+          Te saliste de la ruta esperada — regresar
+        </button>
+      )}
 
-        {banner && (
-          <div className={cn(
-            'absolute bottom-4 left-1/2 -translate-x-1/2 rounded-lg px-4 py-2 text-sm shadow-lg max-w-xs text-center',
-            banner.kind === 'error' ? 'bg-red-600 text-white' : 'bg-emerald-600 text-white'
-          )}>
-            {banner.text}
-          </div>
-        )}
+      {node ? (
+        <SimStage
+          node={node}
+          checked={run.checkedByNode[node.id] ?? []}
+          texts={run.texts}
+          textErrors={run.textErrors}
+          revealHotspotId={revealHotspotId}
+          revealAll={revealAll && isTrainer}
+          shakeToken={shakeToken}
+          disabled={!!run.finishedAt}
+          onTap={handleTap}
+          onChangeText={(hotspotId, value) => dispatch({ type: 'text', hotspotId, value })}
+        />
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
+          <p className="text-sm text-white/70">
+            Esta pantalla ya no existe en el módulo.
+          </p>
+          <Button variant="secondary" onClick={canGoBack ? handleBack : () => dispatch({ type: 'start', nodeId: startNodeId })}>
+            {canGoBack ? 'Regresar' : 'Empezar de nuevo'}
+          </Button>
+        </div>
+      )}
 
-        {finished && (
-          <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-6">
-            <div className="bg-neutral-900 rounded-xl p-6 max-w-sm w-full text-center space-y-3 border border-white/10">
-              <h2 className="text-lg font-semibold">¡Completaste la simulación!</h2>
-              <p className="text-sm text-white/70">
-                {wrongTaps === 0 ? 'Sin errores en el camino.' : `${wrongTaps} toque${wrongTaps === 1 ? '' : 's'} fuera de lugar.`}
-              </p>
-              <p className="text-xs text-white/50">Tiempo: {Math.round((Date.now() - startedAt) / 1000)}s</p>
-              <Button className="w-full" onClick={() => startOver(module)}>
-                <RotateCcw className="h-4 w-4 mr-2" />Intentar de nuevo
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* Atrás abajo a la izquierda: donde cae el pulgar, como en cualquier app. */}
+      {canGoBack && !run.finishedAt && (
+        <div className="shrink-0 border-t border-white/10 px-2 py-2">
+          <button
+            type="button"
+            onClick={handleBack}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/10"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Atrás
+          </button>
+        </div>
+      )}
+
+      {message && (
+        <div
+          role="status"
+          className={cn(
+            'absolute left-1/2 -translate-x-1/2 bottom-20 z-20 max-w-[85%] rounded-xl px-4 py-2.5 text-sm text-center shadow-lg border animate-fade-in',
+            message.tone === 'detour'
+              ? 'bg-amber-500/15 border-amber-500/30 text-amber-100'
+              : 'bg-neutral-900/95 border-white/15 text-white/90'
+          )}
+        >
+          {message.text}
+        </div>
+      )}
+
+      {hintOpen && (
+        <SimHintPanel
+          steps={hintSteps}
+          level={hintLevel}
+          canReveal={!!node && !!expectedHotspot(node)}
+          onAdvance={advanceHint}
+          onReveal={revealAnswer}
+          onClose={() => setHintOpen(false)}
+        />
+      )}
+
+      {exiting && (
+        <SimExitDialog
+          onConfirm={exitSimulation}
+          onCancel={() => setExiting(false)}
+        />
+      )}
+
+      {phase === 'result' && (
+        <SimResult
+          module={module}
+          evaluation={evaluation}
+          durationMs={(run.finishedAt ?? Date.now()) - run.startedAt}
+          wrongTaps={run.wrongTaps}
+          hintsUsed={run.hintsUsed}
+          steps={run.steps}
+          optimalSteps={expected?.steps ?? null}
+          taps={run.taps}
+          onRetry={startRun}
+          onExit={() => router.push('/')}
+        />
+      )}
     </div>
   );
 }
 
-function SimStage({
-  node, checked, texts, showZones, disabled, onTap, onChangeText,
+function FullMessage({
+  title, detail, action, onAction,
 }: {
-  node: SimNode;
-  checked: Set<string>;
-  texts: Record<string, string>;
-  showZones: boolean;
-  disabled: boolean;
-  onTap: (xPct: number, yPct: number) => void;
-  onChangeText: (hotspotId: string, value: string) => void;
+  title: string;
+  detail?: string;
+  action: string;
+  onAction: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const downPoint = useRef<{ x: number; y: number } | null>(null);
-  const [stageHeight, setStageHeight] = useState(0);
-
-  // El tamaño de letra de los campos tiene que seguir al de la captura
-  // renderizada: la misma imagen se ve mucho más chica en un celular que en
-  // una tablet, y un input con letra fija se vería fuera de lugar.
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setStageHeight(el.getBoundingClientRect().height));
-    ro.observe(el);
-    setStageHeight(el.getBoundingClientRect().height);
-    return () => ro.disconnect();
-  }, [node.id]);
-
-  function pct(e: React.PointerEvent) {
-    const rect = ref.current!.getBoundingClientRect();
-    return {
-      x: Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100)),
-      y: Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100)),
-    };
-  }
-
   return (
-    <div
-      ref={ref}
-      className="relative inline-block max-h-full max-w-full select-none touch-none"
-      onPointerDown={e => { downPoint.current = pct(e); }}
-      onPointerUp={e => {
-        const start = downPoint.current;
-        downPoint.current = null;
-        if (!start) return;
-        const end = pct(e);
-        // Si se movió más de ~1.5% de la imagen, es un gesto (scroll/pan), no un toque.
-        if (Math.abs(end.x - start.x) > 1.5 || Math.abs(end.y - start.y) > 1.5) return;
-        onTap(end.x, end.y);
-      }}
-    >
-      <img src={node.imageUrl} alt="" draggable={false} className="block max-h-[calc(100dvh-56px)] max-w-full w-auto h-auto object-contain" />
-
-      {/* Campos de texto: inputs reales encima de la captura. */}
-      {node.hotspots.filter(h => h.kind === 'text').map(h => {
-        const boxHeightPx = (h.hPct / 100) * stageHeight;
-        const fontSize = Math.max(11, Math.min(20, boxHeightPx * 0.45));
-        return (
-          <input
-            key={h.id}
-            type="text"
-            value={texts[h.id] || ''}
-            disabled={disabled}
-            placeholder={h.placeholder}
-            aria-label={h.label}
-            onChange={e => onChangeText(h.id, e.target.value)}
-            // El detector de toque-vs-gesto vive en el contenedor; sin esto,
-            // tocar el campo contaría además como un toque fallido al fondo.
-            onPointerDown={e => e.stopPropagation()}
-            onPointerUp={e => e.stopPropagation()}
-            className="absolute rounded-[3px] bg-white/95 text-neutral-900 px-1.5 outline-none ring-2 ring-sky-400/70 focus:ring-sky-400 touch-auto select-text"
-            style={{
-              left: `${h.xPct}%`,
-              top: `${h.yPct}%`,
-              width: `${h.wPct}%`,
-              height: `${h.hPct}%`,
-              fontSize: `${fontSize}px`,
-            }}
-          />
-        );
-      })}
-
-      {showZones && node.hotspots.filter(h => h.kind !== 'text').map(h => (
-        <div
-          key={h.id}
-          className={cn(
-            'absolute border-2 rounded-sm pointer-events-none',
-            h.kind === 'checkbox'
-              ? (checked.has(h.id) ? 'border-emerald-400 bg-emerald-400/30' : 'border-emerald-400/60 bg-emerald-400/10')
-              : 'border-sky-400/70 bg-sky-400/10'
-          )}
-          style={{ left: `${h.xPct}%`, top: `${h.yPct}%`, width: `${h.wPct}%`, height: `${h.hPct}%` }}
-        />
-      ))}
+    <div className="min-h-[100dvh] flex items-center justify-center bg-neutral-950 p-6">
+      <div className="text-center space-y-4 max-w-sm">
+        <p className="text-base text-white/85">{title}</p>
+        {detail && <p className="text-sm text-white/50">{detail}</p>}
+        <Button variant="secondary" onClick={onAction}>{action}</Button>
+      </div>
     </div>
   );
 }

@@ -55,7 +55,7 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Evaluaciones y Desafíos', href: '/admin/quizzes', icon: Swords },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
-      { name: 'Simulaciones (beta)', href: '/admin/simulations', icon: MousePointerClick },
+      { name: 'Simulaciones', href: '/admin/simulations', icon: MousePointerClick },
     ],
   },
   {
