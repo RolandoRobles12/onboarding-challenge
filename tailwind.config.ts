@@ -135,6 +135,11 @@ export default {
           '70%': { transform: 'scale(1.2) rotate(5deg)' },
           '100%': { transform: 'scale(1) rotate(0)', opacity: '1' },
         },
+        // Onda que deja cada toque en una simulación, como el ripple de una app nativa.
+        'sim-ripple': {
+          '0%': { transform: 'scale(0.3)', opacity: '0.55' },
+          '100%': { transform: 'scale(1.6)', opacity: '0' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -145,6 +150,7 @@ export default {
         'pulse-ring': 'pulse-ring 1.5s ease infinite',
         'float': 'float 3s ease-in-out infinite',
         'star-pop': 'star-pop 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards',
+        'sim-ripple': 'sim-ripple 0.6s ease-out forwards',
       },
     },
   },
