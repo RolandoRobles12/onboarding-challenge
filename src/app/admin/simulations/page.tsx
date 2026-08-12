@@ -32,7 +32,7 @@ import {
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import type { SimModule, SimNode, SimHotspot, SimHotspotKind } from '@/lib/types-simulation';
-import { Plus, Trash2, ExternalLink, Upload, MousePointerClick, CheckSquare, ArrowLeft, Loader2 } from 'lucide-react';
+import { Plus, Trash2, ExternalLink, Upload, MousePointerClick, CheckSquare, Type, ArrowLeft, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 function genId() {
@@ -431,7 +431,9 @@ function Builder({
                       selectedHotspotId === h.id && 'ring-2 ring-primary'
                     )}
                   >
-                    {h.kind === 'checkbox' ? <CheckSquare className="h-3.5 w-3.5 shrink-0" /> : <MousePointerClick className="h-3.5 w-3.5 shrink-0" />}
+                    {h.kind === 'checkbox' ? <CheckSquare className="h-3.5 w-3.5 shrink-0" />
+                      : h.kind === 'text' ? <Type className="h-3.5 w-3.5 shrink-0" />
+                      : <MousePointerClick className="h-3.5 w-3.5 shrink-0" />}
                     <span className="flex-1 truncate">{h.label}</span>
                   </button>
                 ))}
@@ -451,19 +453,49 @@ function Builder({
                     <SelectContent>
                       <SelectItem value="hotspot">Zona táctil (avanza al tocar)</SelectItem>
                       <SelectItem value="checkbox">Casilla (marcar / desmarcar)</SelectItem>
+                      <SelectItem value="text">Campo de texto (escribir)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id="correct-check"
-                    checked={selectedHotspot.isCorrect}
-                    onCheckedChange={c => updateHotspot(activeNode.id, selectedHotspot.id, { isCorrect: !!c })}
-                  />
-                  <Label htmlFor="correct-check" className="text-xs font-normal">
-                    {selectedHotspot.kind === 'checkbox' ? 'Debe quedar marcada' : 'Es la zona correcta a tocar'}
-                  </Label>
-                </div>
+
+                {selectedHotspot.kind === 'text' ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Respuestas válidas (una por línea)</Label>
+                      <Textarea
+                        value={(selectedHotspot.validAnswers || []).join('\n')}
+                        onChange={e => updateHotspot(activeNode.id, selectedHotspot.id, {
+                          validAnswers: e.target.value.split('\n').map(s => s.trim()).filter(Boolean),
+                        })}
+                        rows={3}
+                        className="text-xs"
+                        placeholder={'15000\n$15,000'}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        No distingue mayúsculas, acentos ni espacios de más.
+                        {(selectedHotspot.validAnswers || []).length === 0 && ' Si lo dejas vacío, la respuesta se guarda pero la revisa un capacitador.'}
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Texto guía dentro del campo (opcional)</Label>
+                      <Input
+                        value={selectedHotspot.placeholder || ''}
+                        onChange={e => updateHotspot(activeNode.id, selectedHotspot.id, { placeholder: e.target.value })}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="correct-check"
+                      checked={selectedHotspot.isCorrect}
+                      onCheckedChange={c => updateHotspot(activeNode.id, selectedHotspot.id, { isCorrect: !!c })}
+                    />
+                    <Label htmlFor="correct-check" className="text-xs font-normal">
+                      {selectedHotspot.kind === 'checkbox' ? 'Debe quedar marcada' : 'Es la zona correcta a tocar'}
+                    </Label>
+                  </div>
+                )}
                 {selectedHotspot.kind === 'hotspot' && (
                   <div className="space-y-1.5">
                     <Label className="text-xs">Lleva a</Label>
@@ -573,7 +605,9 @@ function NodeCanvas({
           onClick={(e) => { e.stopPropagation(); onSelectHotspot(h.id); }}
           className={cn(
             'absolute border-2 rounded-sm cursor-pointer',
-            h.kind === 'checkbox' ? 'border-emerald-500 bg-emerald-500/20' : 'border-sky-500 bg-sky-500/20',
+            h.kind === 'checkbox' ? 'border-emerald-500 bg-emerald-500/20'
+              : h.kind === 'text' ? 'border-amber-500 bg-amber-500/20'
+              : 'border-sky-500 bg-sky-500/20',
             selectedHotspotId === h.id && 'ring-2 ring-offset-1 ring-primary'
           )}
           style={{ left: `${h.xPct}%`, top: `${h.yPct}%`, width: `${h.wPct}%`, height: `${h.hPct}%` }}

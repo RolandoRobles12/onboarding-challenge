@@ -5,16 +5,17 @@
  *
  * Standalone a propósito: no está enganchado a cursos, rutas ni
  * AssessmentConfig. Sirve para validar el patrón de interacción (tocar sobre
- * una captura real, navegar de pantalla en pantalla, calificar por ruta y
- * estado final) antes de integrarlo a algo que un vendedor real vea en su
- * ruta de aprendizaje.
+ * una captura real, escribir en los campos que importan, navegar de pantalla
+ * en pantalla y calificar por ruta y estado final) antes de integrarlo a algo
+ * que un vendedor real vea en su ruta de aprendizaje.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { getSimModule, createSimAttempt } from '@/lib/firestore-service';
 import { serverTimestamp } from 'firebase/firestore';
+import { matchesValidAnswer } from '@/lib/types-simulation';
 import type { SimModule, SimNode, SimTapEvent } from '@/lib/types-simulation';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -31,6 +32,7 @@ export default function SimulationRunnerPage() {
 
   const [currentNodeId, setCurrentNodeId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [texts, setTexts] = useState<Record<string, string>>({});
   const [path, setPath] = useState<string[]>([]);
   const [taps, setTaps] = useState<SimTapEvent[]>([]);
   const [wrongTaps, setWrongTaps] = useState(0);
@@ -60,6 +62,7 @@ export default function SimulationRunnerPage() {
   function startOver(m: SimModule) {
     setCurrentNodeId(m.startNodeId);
     setChecked(new Set());
+    setTexts({});
     setPath([m.startNodeId]);
     setTaps([]);
     setWrongTaps(0);
@@ -69,10 +72,25 @@ export default function SimulationRunnerPage() {
     setSaved(false);
   }
 
-  async function finish(passed: boolean, finalTaps: SimTapEvent[], finalPath: string[], finalWrongTaps: number) {
+  async function finish(
+    passed: boolean,
+    finalTaps: SimTapEvent[],
+    finalPath: string[],
+    finalWrongTaps: number,
+    finalTexts: Record<string, string>,
+  ) {
     setFinished(true);
     if (!module || saved) return;
     setSaved(true);
+
+    // Un campo de texto sin respuestas válidas configuradas es texto abierto:
+    // se guarda, pero la calificación final la da un capacitador.
+    const needsManualReview = module.nodes.some(n =>
+      n.hotspots.some(h =>
+        h.kind === 'text' && (h.validAnswers?.length ?? 0) === 0 && !!finalTexts[h.id]?.trim()
+      )
+    );
+
     try {
       await createSimAttempt({
         moduleId: module.id,
@@ -85,6 +103,8 @@ export default function SimulationRunnerPage() {
         path: finalPath,
         taps: finalTaps,
         durationMs: Date.now() - startedAt,
+        textAnswers: finalTexts,
+        needsManualReview,
       });
     } catch (error) {
       console.error('No se pudo guardar el intento de simulación:', error);
@@ -97,8 +117,10 @@ export default function SimulationRunnerPage() {
       xPct >= h.xPct && xPct <= h.xPct + h.wPct && yPct >= h.yPct && yPct <= h.yPct + h.hPct
     );
 
-    if (!hotspot) {
-      setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hit: false, at: Date.now() }]);
+    // Los campos de texto manejan su propia interacción (el input real);
+    // aquí no hacen nada.
+    if (!hotspot || hotspot.kind === 'text') {
+      if (!hotspot) setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hit: false, at: Date.now() }]);
       return;
     }
 
@@ -113,24 +135,36 @@ export default function SimulationRunnerPage() {
     }
 
     // kind === 'hotspot'
-    if (!hotspot.isCorrect) {
-      const nextWrong = wrongTaps + 1;
-      setWrongTaps(nextWrong);
-      setBanner({ kind: 'error', text: hotspot.feedback || 'Esa no es la zona correcta. Intenta de nuevo.' });
+    const registerWrong = (message: string) => {
+      setWrongTaps(w => w + 1);
+      setBanner({ kind: 'error', text: message });
       setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hotspotId: hotspot.id, hit: false, at: Date.now() }]);
+    };
+
+    if (!hotspot.isCorrect) {
+      registerWrong(hotspot.feedback || 'Esa no es la zona correcta. Intenta de nuevo.');
       return;
     }
 
     const checkboxHotspots = node.hotspots.filter(h => h.kind === 'checkbox');
-    if (checkboxHotspots.length > 0) {
-      const matches = checkboxHotspots.every(h => checked.has(h.id) === h.isCorrect);
-      if (!matches) {
-        const nextWrong = wrongTaps + 1;
-        setWrongTaps(nextWrong);
-        setBanner({ kind: 'error', text: 'Revisa tu selección antes de continuar.' });
-        setTaps(prev => [...prev, { nodeId: node.id, xPct, yPct, hotspotId: hotspot.id, hit: false, at: Date.now() }]);
-        return;
-      }
+    if (checkboxHotspots.length > 0 && !checkboxHotspots.every(h => checked.has(h.id) === h.isCorrect)) {
+      registerWrong('Revisa tu selección antes de continuar.');
+      return;
+    }
+
+    // Los campos de texto de esta pantalla se validan al momento de avanzar.
+    const textHotspots = node.hotspots.filter(h => h.kind === 'text');
+    const empty = textHotspots.find(h => !texts[h.id]?.trim());
+    if (empty) {
+      registerWrong(`Falta llenar "${empty.label}".`);
+      return;
+    }
+    const wrongText = textHotspots.find(h =>
+      (h.validAnswers?.length ?? 0) > 0 && !matchesValidAnswer(texts[h.id] || '', h.validAnswers!)
+    );
+    if (wrongText) {
+      registerWrong(wrongText.feedback || `Revisa lo que escribiste en "${wrongText.label}".`);
+      return;
     }
 
     const nextTaps = [...taps, { nodeId: node.id, xPct, yPct, hotspotId: hotspot.id, hit: true, at: Date.now() }];
@@ -138,7 +172,7 @@ export default function SimulationRunnerPage() {
     if (hotspot.feedback) setBanner({ kind: 'ok', text: hotspot.feedback });
 
     if (!hotspot.nextNodeId) {
-      finish(true, nextTaps, path, wrongTaps);
+      finish(true, nextTaps, path, wrongTaps, texts);
       return;
     }
     const nextPath = [...path, hotspot.nextNodeId];
@@ -180,7 +214,10 @@ export default function SimulationRunnerPage() {
           <SimStage
             node={node}
             checked={checked}
+            texts={texts}
             showZones={showZones}
+            disabled={finished}
+            onChangeText={(id, value) => setTexts(prev => ({ ...prev, [id]: value }))}
             onTap={(x, y) => handleTap(node, x, y)}
           />
         )}
@@ -214,15 +251,31 @@ export default function SimulationRunnerPage() {
 }
 
 function SimStage({
-  node, checked, showZones, onTap,
+  node, checked, texts, showZones, disabled, onTap, onChangeText,
 }: {
   node: SimNode;
   checked: Set<string>;
+  texts: Record<string, string>;
   showZones: boolean;
+  disabled: boolean;
   onTap: (xPct: number, yPct: number) => void;
+  onChangeText: (hotspotId: string, value: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const downPoint = useRef<{ x: number; y: number } | null>(null);
+  const [stageHeight, setStageHeight] = useState(0);
+
+  // El tamaño de letra de los campos tiene que seguir al de la captura
+  // renderizada: la misma imagen se ve mucho más chica en un celular que en
+  // una tablet, y un input con letra fija se vería fuera de lugar.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setStageHeight(el.getBoundingClientRect().height));
+    ro.observe(el);
+    setStageHeight(el.getBoundingClientRect().height);
+    return () => ro.disconnect();
+  }, [node.id]);
 
   function pct(e: React.PointerEvent) {
     const rect = ref.current!.getBoundingClientRect();
@@ -248,7 +301,37 @@ function SimStage({
       }}
     >
       <img src={node.imageUrl} alt="" draggable={false} className="block max-h-[calc(100dvh-56px)] max-w-full w-auto h-auto object-contain" />
-      {showZones && node.hotspots.map(h => (
+
+      {/* Campos de texto: inputs reales encima de la captura. */}
+      {node.hotspots.filter(h => h.kind === 'text').map(h => {
+        const boxHeightPx = (h.hPct / 100) * stageHeight;
+        const fontSize = Math.max(11, Math.min(20, boxHeightPx * 0.45));
+        return (
+          <input
+            key={h.id}
+            type="text"
+            value={texts[h.id] || ''}
+            disabled={disabled}
+            placeholder={h.placeholder}
+            aria-label={h.label}
+            onChange={e => onChangeText(h.id, e.target.value)}
+            // El detector de toque-vs-gesto vive en el contenedor; sin esto,
+            // tocar el campo contaría además como un toque fallido al fondo.
+            onPointerDown={e => e.stopPropagation()}
+            onPointerUp={e => e.stopPropagation()}
+            className="absolute rounded-[3px] bg-white/95 text-neutral-900 px-1.5 outline-none ring-2 ring-sky-400/70 focus:ring-sky-400 touch-auto select-text"
+            style={{
+              left: `${h.xPct}%`,
+              top: `${h.yPct}%`,
+              width: `${h.wPct}%`,
+              height: `${h.hPct}%`,
+              fontSize: `${fontSize}px`,
+            }}
+          />
+        );
+      })}
+
+      {showZones && node.hotspots.filter(h => h.kind !== 'text').map(h => (
         <div
           key={h.id}
           className={cn(

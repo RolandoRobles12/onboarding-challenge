@@ -11,7 +11,7 @@
 
 import type { Timestamp, FieldValue } from 'firebase/firestore';
 
-export type SimHotspotKind = 'hotspot' | 'checkbox';
+export type SimHotspotKind = 'hotspot' | 'checkbox' | 'text';
 
 export interface SimHotspot {
   id: string;
@@ -25,12 +25,22 @@ export interface SimHotspot {
   /**
    * kind 'hotspot': es la zona correcta a tocar para avanzar.
    * kind 'checkbox': debe quedar marcada para que la respuesta cuente como correcta.
+   * kind 'text': no aplica.
    */
   isCorrect: boolean;
   /** Solo kind 'hotspot'. Vacío = fin del módulo. */
   nextNodeId?: string;
   /** Mensaje breve al tocar (acierto o error), opcional. */
   feedback?: string;
+  /**
+   * Solo kind 'text': respuestas aceptadas. Se comparan normalizando
+   * mayúsculas, acentos y espacios, para no reprobar por formato.
+   * Lista vacía = texto abierto: se guarda pero lo revisa un capacitador,
+   * mismo patrón que las preguntas `open_text` del banco.
+   */
+  validAnswers?: string[];
+  /** Solo kind 'text': texto guía dentro del campo. */
+  placeholder?: string;
 }
 
 export interface SimNode {
@@ -74,4 +84,28 @@ export interface SimAttempt {
   path: string[];
   taps: SimTapEvent[];
   durationMs?: number;
+  /** Lo que escribió el vendedor, por id de campo de texto. */
+  textAnswers?: Record<string, string>;
+  /** true si algún campo de texto era abierto y necesita revisión humana. */
+  needsManualReview?: boolean;
+}
+
+/**
+ * Normaliza texto antes de compararlo: sin espacios sobrantes, sin
+ * diferencias de mayúsculas y sin acentos. "Ferretería López " y
+ * "ferreteria lopez" cuentan como la misma respuesta.
+ */
+export function normalizeAnswer(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** true si `value` coincide con alguna de las respuestas aceptadas. */
+export function matchesValidAnswer(value: string, validAnswers: string[]): boolean {
+  const normalized = normalizeAnswer(value);
+  return validAnswers.some(a => normalizeAnswer(a) === normalized);
 }
