@@ -33,6 +33,7 @@ import {
   Store,
   ImageIcon,
   Search,
+  MousePointerClick,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -54,6 +55,7 @@ const navigation: (NavItem | NavSection)[] = [
       { name: 'Evaluaciones y Desafíos', href: '/admin/quizzes', icon: Swords },
       { name: 'Preguntas', href: '/admin/questions', icon: HelpCircle },
       { name: 'Importar Preguntas', href: '/admin/import', icon: Upload },
+      { name: 'Simulaciones (beta)', href: '/admin/simulations', icon: MousePointerClick },
     ],
   },
   {

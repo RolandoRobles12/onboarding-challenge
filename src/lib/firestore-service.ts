@@ -68,6 +68,10 @@ import type {
   CourseEnrollment,
   LessonProgress,
 } from './types-lms';
+import type {
+  SimModule,
+  SimAttempt,
+} from './types-simulation';
 
 // ============================================================================
 // CONSTANTES
@@ -121,6 +125,9 @@ const COLLECTIONS = {
   PULSE_CATEGORIES: 'pulseCategories',
   ROLE_PERMISSIONS: 'role_permissions',
   KIOSCOS: 'kioscos',
+  // --- Prototipo: Simulaciones por nodos (hotspots sobre capturas) ---
+  SIM_MODULES: 'sim_modules',
+  SIM_ATTEMPTS: 'sim_attempts',
 } as const;
 
 // Organization ID por defecto (puedes obtenerlo del contexto en producción)
@@ -2041,6 +2048,53 @@ export async function updateVideoFolder(folderId: string, updates: Partial<Omit<
 /** Elimina una carpeta de videos. */
 export async function deleteVideoFolder(folderId: string): Promise<void> {
   await deleteDoc(getDocRef(COLLECTIONS.VIDEO_FOLDERS, folderId));
+}
+
+// ============================================================================
+// SIMULACIONES POR NODOS (prototipo, standalone)
+// ============================================================================
+
+/** Devuelve todos los módulos de simulación. */
+export async function getAllSimModules(): Promise<SimModule[]> {
+  try {
+    const snap = await getDocs(getCollectionRef(COLLECTIONS.SIM_MODULES));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as SimModule);
+  } catch (error) {
+    console.error('Error getting sim modules:', error);
+    return [];
+  }
+}
+
+/** Devuelve un módulo de simulación por id, o null si no existe. */
+export async function getSimModule(moduleId: string): Promise<SimModule | null> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.SIM_MODULES, moduleId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as SimModule;
+}
+
+/** Crea un módulo de simulación. */
+export async function createSimModule(data: Omit<SimModule, 'id'>): Promise<string> {
+  const docRef = doc(getCollectionRef(COLLECTIONS.SIM_MODULES));
+  await setDoc(docRef, stripUndefined({ ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  return docRef.id;
+}
+
+/** Actualiza un módulo de simulación existente. */
+export async function updateSimModule(moduleId: string, updates: Partial<Omit<SimModule, 'id'>>): Promise<void> {
+  const docRef = getDocRef(COLLECTIONS.SIM_MODULES, moduleId);
+  await updateDoc(docRef, stripUndefined({ ...updates, updatedAt: serverTimestamp() }) as WithFieldValue<DocumentData>);
+}
+
+/** Elimina un módulo de simulación. */
+export async function deleteSimModule(moduleId: string): Promise<void> {
+  await deleteDoc(getDocRef(COLLECTIONS.SIM_MODULES, moduleId));
+}
+
+/** Registra un intento (para validar el prototipo: ruta seguida, toques y resultado). */
+export async function createSimAttempt(data: Omit<SimAttempt, 'id'>): Promise<string> {
+  const docRef = doc(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS));
+  await setDoc(docRef, stripUndefined(data));
+  return docRef.id;
 }
 
 /** Devuelve el registro de visualización de un usuario para todos sus videos. */
