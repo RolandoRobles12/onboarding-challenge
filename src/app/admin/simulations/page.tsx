@@ -36,7 +36,7 @@ import {
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
-  DEFAULT_MAX_WRONG_TAPS, findExpectedPath, findModuleIssues,
+  DEFAULT_MAX_WRONG_TAPS, findExpectedPath, findModuleIssues, normalizeHotspots,
 } from '@/lib/types-simulation';
 import type {
   SimAttempt, SimModule, SimNode, SimHotspot, SimHotspotKind,
@@ -46,6 +46,18 @@ import {
   Loader2, AlertTriangle, Flag, BarChart3, Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+/** Valor del selector de destino de una zona. */
+function destinationValue(hotspot: SimHotspot): string {
+  return hotspot.goToNodeId || hotspot.nextNodeId || (hotspot.endsModule ? '__end__' : '__none__');
+}
+
+function destinationLabel(hotspot: SimHotspot, nodeLabel: (id?: string) => string): string {
+  const target = hotspot.goToNodeId || hotspot.nextNodeId;
+  if (target) return `Va a ${nodeLabel(target).toLowerCase()}`;
+  if (hotspot.endsModule) return 'Termina el módulo';
+  return hotspot.kind === 'text' ? 'Sólo se llena, no avanza' : 'No pasa nada';
+}
 
 function genId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -98,7 +110,7 @@ export default function SimulationsAdminPage() {
       active: m.active,
       maxWrongTaps: m.maxWrongTaps ?? DEFAULT_MAX_WRONG_TAPS,
       allowBack: m.allowBack !== false,
-      nodes: m.nodes,
+      nodes: normalizeHotspots(m.nodes),
     });
     setView('builder');
   }
@@ -221,7 +233,7 @@ export default function SimulationsAdminPage() {
                 <CardContent className="mt-auto space-y-3">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     <span>{m.nodes.length} pantalla{m.nodes.length === 1 ? '' : 's'}</span>
-                    {expected && <span>· ruta de {expected.steps} paso{expected.steps === 1 ? '' : 's'}</span>}
+                    {expected && <span>· ruta de {expected.screens} paso{expected.screens === 1 ? '' : 's'}</span>}
                   </div>
                   {issues.errors.length > 0 && (
                     <p className="flex items-start gap-1.5 text-xs text-destructive">
@@ -494,7 +506,9 @@ function Builder({
             ))}
             {expected && (
               <p className="text-xs text-muted-foreground pt-1">
-                Ruta esperada: {expected.steps} paso{expected.steps === 1 ? '' : 's'}.
+                Ruta esperada: {expected.nodes.map(id => nodeLabel(id)).join(' → ')}
+                {' '}({expected.screens} paso{expected.screens === 1 ? '' : 's'}).
+                {expected.screens < draft.nodes.length && ' Las demás pantallas quedan fuera de la ruta.'}
               </p>
             )}
           </CardContent>
@@ -560,6 +574,7 @@ function Builder({
                   label: `Zona ${activeNode.hotspots.length + 1}`,
                   kind: 'hotspot',
                   isCorrect: activeNode.hotspots.every(h => !(h.kind === 'hotspot' && h.isCorrect)),
+                  endsModule: false,
                   ...rect,
                 })}
               />
@@ -673,11 +688,10 @@ function Builder({
                   <>
                     <div className="space-y-1.5">
                       <Label className="text-xs">Respuestas válidas (una por línea)</Label>
-                      <Textarea
-                        value={(selectedHotspot.validAnswers || []).join('\n')}
-                        onChange={e => updateHotspot(activeNode.id, selectedHotspot.id, {
-                          validAnswers: e.target.value.split('\n').map(s => s.trim()).filter(Boolean),
-                        })}
+                      <LinesTextarea
+                        key={selectedHotspot.id}
+                        lines={selectedHotspot.validAnswers || []}
+                        onChangeLines={validAnswers => updateHotspot(activeNode.id, selectedHotspot.id, { validAnswers })}
                         rows={3}
                         className="text-xs"
                         placeholder={'15000\n$15,000'}
@@ -708,29 +722,38 @@ function Builder({
                   </div>
                 )}
 
-                {selectedHotspot.kind === 'hotspot' && (
+                {selectedHotspot.kind !== 'checkbox' && (
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Lleva a</Label>
+                    <Label className="text-xs">
+                      {selectedHotspot.kind === 'text' ? 'Al confirmar lo que escriba' : 'Al tocarla'}
+                    </Label>
                     <Select
-                      value={(selectedHotspot.goToNodeId || selectedHotspot.nextNodeId) ?? '__none__'}
+                      value={destinationValue(selectedHotspot)}
                       onValueChange={v => updateHotspot(activeNode.id, selectedHotspot.id, {
-                        goToNodeId: v === '__none__' ? undefined : v,
+                        goToNodeId: v === '__none__' || v === '__end__' ? undefined : v,
                         nextNodeId: undefined,
+                        endsModule: v === '__end__',
                       })}
                     >
                       <SelectTrigger>
-                        <SelectValue>{nodeLabel(selectedHotspot.goToNodeId || selectedHotspot.nextNodeId)}</SelectValue>
+                        <SelectValue>{destinationLabel(selectedHotspot, nodeLabel)}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none__">— No lleva a ningún lado —</SelectItem>
+                        <SelectItem value="__none__">
+                          {selectedHotspot.kind === 'text' ? 'Sólo se llena, no avanza' : 'No pasa nada'}
+                        </SelectItem>
+                        <SelectItem value="__end__">Termina el módulo</SelectItem>
                         {draft.nodes.filter(n => n.id !== activeNode.id).map(n => (
-                          <SelectItem key={n.id} value={n.id}>{nodeLabel(n.id)}</SelectItem>
+                          <SelectItem key={n.id} value={n.id}>Va a {nodeLabel(n.id).toLowerCase()}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                     <p className="text-[11px] text-muted-foreground">
-                      {selectedHotspot.isCorrect
-                        ? 'Si no lleva a ninguna pantalla, tocarla termina el módulo.'
+                      {selectedHotspot.kind === 'text'
+                        ? 'Si la conectas, el vendedor escribe y presiona Listo para avanzar. Si la dejas en "sólo se llena", ' +
+                          'necesitas otra zona en esta pantalla —el botón de la captura— que lleve a la siguiente.'
+                        : selectedHotspot.isCorrect
+                        ? 'Elige a qué pantalla lleva este paso, o si con él termina el módulo.'
                         : 'Conéctala a la pantalla que saldría de verdad al tocar aquí: así el error se siente como en la herramienta real.'}
                     </p>
                   </div>
@@ -781,6 +804,34 @@ function Builder({
         </Card>
       </div>
     </div>
+  );
+}
+
+/**
+ * Textarea de "una opción por línea".
+ *
+ * Guarda el texto crudo mientras se escribe. Antes se parseaba en cada tecla y
+ * se volvía a unir con join('\n'): al presionar Enter, la línea vacía recién
+ * creada se filtraba y el cursor rebotaba a la línea anterior, así que era
+ * imposible capturar una segunda respuesta válida.
+ */
+function LinesTextarea({
+  lines, onChangeLines, ...props
+}: {
+  lines: string[];
+  onChangeLines: (lines: string[]) => void;
+} & Omit<React.ComponentProps<typeof Textarea>, 'value' | 'onChange'>) {
+  const [raw, setRaw] = useState(() => lines.join('\n'));
+
+  return (
+    <Textarea
+      {...props}
+      value={raw}
+      onChange={e => {
+        setRaw(e.target.value);
+        onChangeLines(e.target.value.split('\n').map(s => s.trim()).filter(Boolean));
+      }}
+    />
   );
 }
 

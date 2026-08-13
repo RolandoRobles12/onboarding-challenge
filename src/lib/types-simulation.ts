@@ -49,6 +49,15 @@ export interface SimHotspot {
   goToNodeId?: string;
   /** Legado del primer prototipo; equivale a `goToNodeId`. */
   nextNodeId?: string;
+  /**
+   * Tocar esta zona (o confirmar este campo) cierra el módulo.
+   *
+   * Es explícito a propósito. En la primera versión, "zona esperada sin
+   * destino" significaba terminar, y como toda zona nueva nace sin destino,
+   * cualquier zona a medio configurar terminaba el ejercicio de golpe. Ahora
+   * terminar es una decisión que se toma, no lo que pasa por omisión.
+   */
+  endsModule?: boolean;
   /** Mensaje breve al tocar, opcional. */
   feedback?: string;
   /** Pista de esta zona, se muestra sólo si el vendedor la pide. */
@@ -193,9 +202,27 @@ export type SimStep =
 export function resolveHotspotStep(hotspot: SimHotspot): SimStep {
   const target = hotspot.goToNodeId || hotspot.nextNodeId;
   if (target) return { type: 'go', nodeId: target };
-  // Semántica del primer prototipo: zona correcta sin destino = fin del módulo.
-  if (hotspot.kind === 'hotspot' && hotspot.isCorrect) return { type: 'finish' };
+  if (hotspot.endsModule) return { type: 'finish' };
+  // Módulos del primer prototipo, que nunca pasaron por el editor nuevo: ahí
+  // "zona esperada sin destino" sí quería decir fin del módulo.
+  if (hotspot.endsModule === undefined && hotspot.kind === 'hotspot' && hotspot.isCorrect) {
+    return { type: 'finish' };
+  }
   return { type: 'blocked' };
+}
+
+/**
+ * Deja explícito el `endsModule` de los módulos viejos, para que al reeditarlos
+ * en el editor nuevo sigan terminando donde terminaban.
+ */
+export function normalizeHotspots(nodes: SimNode[]): SimNode[] {
+  return nodes.map(node => ({
+    ...node,
+    hotspots: node.hotspots.map(hotspot => hotspot.endsModule !== undefined ? hotspot : {
+      ...hotspot,
+      endsModule: resolveHotspotStep(hotspot).type === 'finish',
+    }),
+  }));
 }
 
 /** true si llegar a esta pantalla termina el módulo. */
@@ -203,9 +230,35 @@ export function isFinishNode(node: SimNode): boolean {
   return node.isSuccess === true;
 }
 
+/**
+ * Zonas por las que sale la ruta esperada de una pantalla.
+ *
+ * Incluye los campos de texto con destino: escribir y confirmar es una forma
+ * legítima de avanzar —es lo que se hace en la herramienta real— y sin esto
+ * una pantalla de captura no tendría cómo continuar.
+ */
+export function expectedExits(node: SimNode): SimHotspot[] {
+  return node.hotspots.filter(hotspot => {
+    if (hotspot.kind === 'hotspot') return hotspot.isCorrect;
+    if (hotspot.kind === 'text') return resolveHotspotStep(hotspot).type !== 'blocked';
+    return false;
+  });
+}
+
 /** La zona que representa el paso esperado de una pantalla, si existe. */
 export function expectedHotspot(node: SimNode): SimHotspot | undefined {
-  return node.hotspots.find(h => h.kind === 'hotspot' && h.isCorrect);
+  return expectedExits(node)[0];
+}
+
+/**
+ * true si esta pantalla le pide algo al vendedor antes de poder cerrarse
+ * (llenar un campo, marcar una casilla).
+ *
+ * Una pantalla final con campos no puede terminar sola al llegar: acabaría el
+ * ejercicio antes de dejarlo escribir.
+ */
+export function nodeNeedsInput(node: SimNode): boolean {
+  return node.hotspots.some(h => h.kind === 'text' || h.kind === 'checkbox');
 }
 
 export interface SimExpectedPath {
@@ -213,6 +266,8 @@ export interface SimExpectedPath {
   nodes: string[];
   /** Toques que hacen falta para completarla. */
   steps: number;
+  /** Pantallas de la ruta. Es el número que ve el vendedor: "paso 2 de 4". */
+  screens: number;
 }
 
 /**
@@ -234,13 +289,12 @@ export function findExpectedPath(module: Pick<SimModule, 'nodes' | 'startNodeId'
     if (!node) continue;
 
     // Llegar a la pantalla de éxito no requiere un toque extra.
-    if (isFinishNode(node)) return { nodes: path, steps: path.length - 1 };
+    if (isFinishNode(node)) return { nodes: path, steps: path.length - 1, screens: path.length };
 
-    for (const hotspot of node.hotspots) {
-      if (hotspot.kind !== 'hotspot' || !hotspot.isCorrect) continue;
+    for (const hotspot of expectedExits(node)) {
       const step = resolveHotspotStep(hotspot);
       // Terminar tocando la zona sí cuenta como un toque más.
-      if (step.type === 'finish') return { nodes: path, steps: path.length };
+      if (step.type === 'finish') return { nodes: path, steps: path.length, screens: path.length };
       if (step.type === 'go' && byId.has(step.nodeId) && !seen.has(step.nodeId)) {
         seen.add(step.nodeId);
         queue.push([...path, step.nodeId]);
@@ -317,8 +371,12 @@ export function findModuleIssues(module: Pick<SimModule, 'nodes' | 'startNodeId'
     if (!isFinishNode(node) && node.hotspots.length === 0) {
       warnings.push(`${name} no tiene zonas ni está marcada como final: el vendedor se queda atorado ahí.`);
     }
-    if (!isFinishNode(node) && node.hotspots.length > 0 && !expectedHotspot(node)) {
-      warnings.push(`${name} no tiene un paso esperado: no hay forma de avanzar correctamente.`);
+    if (!isFinishNode(node) && node.hotspots.length > 0 && expectedExits(node).length === 0) {
+      const hasFields = node.hotspots.some(h => h.kind === 'text');
+      warnings.push(hasFields
+        ? `${name} tiene campos que llenar pero ninguna salida: conecta el campo —o el botón de la ` +
+          'captura— a la siguiente pantalla, si no el vendedor se queda ahí.'
+        : `${name} no tiene un paso esperado: no hay forma de avanzar correctamente.`);
     }
 
     for (const hotspot of node.hotspots) {
@@ -326,7 +384,7 @@ export function findModuleIssues(module: Pick<SimModule, 'nodes' | 'startNodeId'
       if (target && !byId.has(target)) {
         warnings.push(`En ${name}, la zona "${hotspot.label}" lleva a una pantalla que ya no existe.`);
       }
-      if (hotspot.kind === 'hotspot' && !hotspot.isCorrect && !target && !hotspot.feedback) {
+      if (hotspot.kind === 'hotspot' && !hotspot.isCorrect && !target && !hotspot.endsModule && !hotspot.feedback) {
         warnings.push(
           `En ${name}, la zona "${hotspot.label}" no lleva a ningún lado ni tiene retroalimentación: ` +
           'al tocarla no pasa nada.'
@@ -368,11 +426,31 @@ export function decideTap(input: {
   checked: string[];
   texts: Record<string, string>;
   nodeExists: (nodeId: string) => boolean;
+  /**
+   * 'tap' es un toque sobre la captura. 'submit' es confirmar un campo de
+   * texto (Enter o el botón del teclado), que es como se avanza en una
+   * pantalla de captura.
+   */
+  via?: 'tap' | 'submit';
 }): SimTapOutcome {
-  const { node, hotspot, checked, texts, nodeExists } = input;
+  const { node, hotspot, checked, texts, nodeExists, via = 'tap' } = input;
 
   // Tocar el vacío no penaliza: explorar es parte de aprender una herramienta.
-  if (!hotspot || hotspot.kind === 'text') return { kind: 'miss' };
+  if (!hotspot) return { kind: 'miss' };
+
+  if (hotspot.kind === 'text') {
+    // El borde del campo no hace nada; el input de encima maneja lo suyo.
+    if (via !== 'submit') return { kind: 'miss' };
+    const textStep = resolveHotspotStep(hotspot);
+    // Un campo que sólo se llena no avanza: lo hará el botón de la pantalla.
+    if (textStep.type === 'blocked') return { kind: 'miss' };
+    const missing = findPendingWork(node, checked, texts);
+    if (missing) return missing;
+    if (textStep.type === 'finish') return { kind: 'finish' };
+    if (nodeExists(textStep.nodeId)) return { kind: 'expected', nodeId: textStep.nodeId };
+    return { kind: 'broken', message: 'Este campo no lleva a ningún lado. Avísale a tu capacitador.' };
+  }
+
   if (hotspot.kind === 'checkbox') return { kind: 'toggle', hotspotId: hotspot.id };
 
   const step = resolveHotspotStep(hotspot);
@@ -398,7 +476,7 @@ export function decideTap(input: {
 }
 
 /** Lo que falta llenar o corregir en una pantalla antes de poder avanzar. */
-function findPendingWork(
+export function findPendingWork(
   node: SimNode,
   checked: string[],
   texts: Record<string, string>,

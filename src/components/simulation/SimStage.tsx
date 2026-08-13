@@ -63,11 +63,13 @@ export interface SimStageProps {
   disabled?: boolean;
   onTap: (hotspot: SimHotspot | null, xPct: number, yPct: number) => void;
   onChangeText: (hotspotId: string, value: string) => void;
+  /** El vendedor confirmó lo que escribió (Enter o el botón del teclado). */
+  onSubmitText?: (hotspotId: string) => void;
 }
 
 export function SimStage({
   node, checked, texts, textErrors, revealHotspotId, revealAll,
-  shakeToken = 0, disabled, onTap, onChangeText,
+  shakeToken = 0, disabled, onTap, onChangeText, onSubmitText,
 }: SimStageProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -380,7 +382,11 @@ export function SimStage({
               onChange={e => onChangeText(hotspot.id, e.target.value)}
               onFocus={e => handleFieldFocus(e.currentTarget)}
               onBlur={() => setKeyboardShift(0)}
-              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+              onKeyDown={e => {
+                if (e.key !== 'Enter') return;
+                e.currentTarget.blur();
+                onSubmitText?.(hotspot.id);
+              }}
               // El detector de gestos vive en el contenedor; sin esto, escribir
               // en el campo contaría además como un toque al fondo.
               onPointerDown={e => e.stopPropagation()}
