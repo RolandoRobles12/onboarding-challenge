@@ -36,14 +36,17 @@ import {
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import {
-  DEFAULT_MAX_WRONG_TAPS, findExpectedPath, findModuleIssues, normalizeHotspots,
+  DEFAULT_MAX_WRONG_TAPS, findExpectedPath, findModuleIssues, normalizeHotspots, screenLabel,
 } from '@/lib/types-simulation';
 import type {
-  SimAttempt, SimModule, SimNode, SimHotspot, SimHotspotKind,
+  SimAttempt, SimModule, SimNode, SimHotspot, SimHotspotKind, SimSwipeDirection, SimTransition,
 } from '@/lib/types-simulation';
+import { SimFlowMap } from '@/components/simulation/SimFlowMap';
+import { SimPreview } from '@/components/simulation/SimPreview';
 import {
   Plus, Trash2, ExternalLink, Upload, MousePointerClick, CheckSquare, Type, ArrowLeft,
-  Loader2, AlertTriangle, Flag, BarChart3, Info,
+  Loader2, AlertTriangle, Flag, BarChart3, Info, ChevronUp, ChevronDown, Hand, Move,
+  Play, Map as MapIcon, Images,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -72,6 +75,10 @@ const EMPTY_DRAFT = {
   active: true,
   maxWrongTaps: DEFAULT_MAX_WRONG_TAPS,
   allowBack: true,
+  scenario: '',
+  clientName: '',
+  successMessage: '',
+  frameColor: '',
   nodes: [] as SimNode[],
 };
 
@@ -110,6 +117,10 @@ export default function SimulationsAdminPage() {
       active: m.active,
       maxWrongTaps: m.maxWrongTaps ?? DEFAULT_MAX_WRONG_TAPS,
       allowBack: m.allowBack !== false,
+      scenario: m.scenario ?? '',
+      clientName: m.clientName ?? '',
+      successMessage: m.successMessage ?? '',
+      frameColor: m.frameColor ?? '',
       nodes: normalizeHotspots(m.nodes),
     });
     setView('builder');
@@ -155,6 +166,10 @@ export default function SimulationsAdminPage() {
         active: draft.active,
         maxWrongTaps: draft.maxWrongTaps,
         allowBack: draft.allowBack,
+        scenario: draft.scenario.trim(),
+        clientName: draft.clientName.trim(),
+        successMessage: draft.successMessage.trim(),
+        frameColor: draft.frameColor.trim(),
         nodes: draft.nodes,
       };
       if (editingId) {
@@ -284,7 +299,9 @@ function Builder({
   const [activeNodeId, setActiveNodeId] = useState<string | null>(draft.nodes[0]?.id ?? null);
   const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [panel, setPanel] = useState<'canvas' | 'map' | 'preview'>('canvas');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /**
@@ -363,32 +380,74 @@ function Builder({
     if (activeNodeId === nodeId) setActiveNodeId(null);
   }
 
-  async function handleUpload(file: File) {
+  /**
+   * Sube una captura y devuelve el nodo listo, con su proporción.
+   *
+   * La proporción se guarda porque con capturas nativas 1:1 el módulo tiene que
+   * ser consistente: una captura tomada en otro dispositivo reaparece con
+   * franjas negras, y el validador lo avisa.
+   */
+  function uploadOne(file: File): Promise<SimNode> {
+    return new Promise((resolve, reject) => {
+      const path = `simulations/${storageIdRef.current}/${Date.now()}_${file.name}`;
+      const task = uploadBytesResumable(ref(storage!, path), file);
+      task.on('state_changed', () => {}, reject, async () => {
+        try {
+          const url = await getDownloadURL(task.snapshot.ref);
+          const aspect = await new Promise<number | undefined>(done => {
+            const img = new window.Image();
+            img.onload = () => done(img.naturalWidth / img.naturalHeight);
+            img.onerror = () => done(undefined);
+            img.src = url;
+          });
+          resolve({ id: genId(), imageUrl: url, imagePath: path, aspect, hotspots: [] });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  async function handleUpload(files: File[]) {
     if (!storage) { toast({ variant: 'destructive', title: 'Storage no configurado' }); return; }
+    if (files.length === 0) return;
     setUploading(true);
-    const path = `simulations/${storageIdRef.current}/${Date.now()}_${file.name}`;
-    const task = uploadBytesResumable(ref(storage, path), file);
-    task.on(
-      'state_changed',
-      () => {},
-      error => {
+    setUploadProgress({ done: 0, total: files.length });
+
+    const uploaded: SimNode[] = [];
+    for (const file of files) {
+      try {
+        uploaded.push(await uploadOne(file));
+        setUploadProgress({ done: uploaded.length, total: files.length });
+      } catch (error) {
         console.error('Error al subir la captura:', error);
-        toast({ variant: 'destructive', title: 'Error al subir la captura' });
-        setUploading(false);
-      },
-      async () => {
-        const url = await getDownloadURL(task.snapshot.ref);
-        const newNode: SimNode = { id: genId(), imageUrl: url, imagePath: path, hotspots: [] };
-        update(prev => ({
-          ...prev,
-          nodes: [...prev.nodes, newNode],
-          startNodeId: prev.startNodeId || newNode.id,
-        }));
-        setActiveNodeId(newNode.id);
-        setSelectedHotspotId(null);
-        setUploading(false);
+        toast({ variant: 'destructive', title: `No se pudo subir "${file.name}"` });
       }
-    );
+    }
+
+    if (uploaded.length > 0) {
+      update(prev => ({
+        ...prev,
+        nodes: [...prev.nodes, ...uploaded],
+        startNodeId: prev.startNodeId || uploaded[0].id,
+      }));
+      setActiveNodeId(uploaded[uploaded.length - 1].id);
+      setSelectedHotspotId(null);
+    }
+    setUploading(false);
+    setUploadProgress(null);
+  }
+
+  /** Mover una pantalla en la lista: el orden es cómo las lee el capacitador. */
+  function moveNode(nodeId: string, delta: -1 | 1) {
+    update(prev => {
+      const index = prev.nodes.findIndex(n => n.id === nodeId);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= prev.nodes.length) return prev;
+      const nodes = [...prev.nodes];
+      [nodes[index], nodes[target]] = [nodes[target], nodes[index]];
+      return { ...prev, nodes };
+    });
   }
 
   async function handleSave() {
@@ -491,6 +550,63 @@ function Builder({
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">La situación</CardTitle>
+          <CardDescription className="text-xs">
+            Es lo primero que lee el vendedor. Un trabajo con un cliente enfrente se resuelve
+            distinto que un ejercicio numerado.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 space-y-1.5">
+            <Label>Qué está pasando</Label>
+            <Textarea
+              value={draft.scenario}
+              onChange={e => update(prev => ({ ...prev, scenario: e.target.value }))}
+              placeholder={`Ej. "Llegó el dueño de Ferretería López al kiosco y quiere renovar su crédito."`}
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Cliente</Label>
+            <Input
+              value={draft.clientName}
+              onChange={e => update(prev => ({ ...prev, clientName: e.target.value }))}
+              placeholder="Ferretería López"
+            />
+          </div>
+          <div className="md:col-span-2 space-y-1.5">
+            <Label>Qué se le dice al terminar bien</Label>
+            <Input
+              value={draft.successMessage}
+              onChange={e => update(prev => ({ ...prev, successMessage: e.target.value }))}
+              placeholder={`Ej. "Listo, el negocio ya está en tu embudo."`}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Color del marco</Label>
+            <div className="flex gap-2">
+              <Input
+                value={draft.frameColor}
+                onChange={e => update(prev => ({ ...prev, frameColor: e.target.value }))}
+                placeholder="Automático"
+              />
+              <input
+                type="color"
+                aria-label="Elegir color del marco"
+                value={draft.frameColor || '#f5f8fa'}
+                onChange={e => update(prev => ({ ...prev, frameColor: e.target.value }))}
+                className="h-10 w-12 rounded-md border bg-background p-1"
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Sólo se ve si la captura no llena la pantalla. Vacío = se toma del borde de la captura.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
       {(issues.errors.length > 0 || issues.warnings.length > 0) && (
         <Card className={cn(issues.errors.length > 0 ? 'border-destructive/50' : 'border-amber-500/50')}>
           <CardContent className="pt-6 space-y-2">
@@ -521,54 +637,114 @@ function Builder({
           <CardHeader className="pb-3"><CardTitle className="text-sm">Pantallas</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {draft.nodes.map((n, i) => (
-              <button
+              <div
                 key={n.id}
-                onClick={() => { setActiveNodeId(n.id); setSelectedHotspotId(null); }}
                 className={cn(
-                  'w-full flex items-center gap-2 rounded-md border p-1.5 text-left text-xs hover:bg-accent',
+                  'group flex items-center gap-1.5 rounded-md border p-1.5 text-xs',
                   activeNodeId === n.id && 'ring-2 ring-primary'
                 )}
               >
-                <img src={n.imageUrl} alt="" className="h-10 w-10 rounded object-cover border shrink-0" />
-                <span className="flex-1 truncate">
-                  Pantalla {i + 1}
-                  {n.id === startNodeId && <span className="text-muted-foreground"> · inicio</span>}
-                </span>
-                {n.isSuccess
-                  ? <Flag className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  : <span className="text-muted-foreground">{n.hotspots.length}z</span>}
-              </button>
+                <button
+                  onClick={() => { setActiveNodeId(n.id); setSelectedHotspotId(null); }}
+                  className="flex flex-1 items-center gap-2 text-left min-w-0 hover:opacity-80"
+                >
+                  <img src={n.imageUrl} alt="" className="h-10 w-10 rounded object-cover border shrink-0" />
+                  <span className="flex-1 min-w-0">
+                    <span className="block truncate">{screenLabel(draft.nodes, n.id)}</span>
+                    <span className="block text-[10px] text-muted-foreground truncate">
+                      {n.id === startNodeId ? 'inicio · ' : ''}{n.isSuccess ? 'final' : `${n.hotspots.length} zona${n.hotspots.length === 1 ? '' : 's'}`}
+                    </span>
+                  </span>
+                </button>
+                <div className="flex flex-col opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => moveNode(n.id, -1)}
+                    disabled={i === 0}
+                    aria-label="Subir"
+                    className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ChevronUp className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={() => moveNode(n.id, 1)}
+                    disabled={i === draft.nodes.length - 1}
+                    aria-label="Bajar"
+                    className="p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
             ))}
             <input
-              ref={fileInputRef} type="file" accept="image/*" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+              ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
+              onChange={e => { handleUpload([...(e.target.files ?? [])]); e.target.value = ''; }}
             />
             <Button variant="outline" size="sm" className="w-full" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-              {uploading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1.5" />}
-              Agregar pantalla
+              {uploading ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Images className="h-3.5 w-3.5 mr-1.5" />}
+              {uploadProgress ? `Subiendo ${uploadProgress.done}/${uploadProgress.total}` : 'Agregar capturas'}
             </Button>
+            <p className="text-[10px] text-muted-foreground leading-snug">
+              Puedes seleccionar varias a la vez; se agregan en orden.
+            </p>
           </CardContent>
         </Card>
 
-        {/* Lienzo */}
+        {/* Lienzo, mapa y vista previa */}
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm">
-              {activeNode ? 'Arrastra sobre la imagen para dibujar una zona' : 'Selecciona o agrega una pantalla'}
-            </CardTitle>
-            {activeNode && (
+          <CardHeader className="pb-3 space-y-3">
+            <div className="flex items-center gap-1 rounded-lg bg-muted p-1 w-fit">
+              {([
+                ['canvas', 'Lienzo', MousePointerClick],
+                ['map', 'Recorrido', MapIcon],
+                ['preview', 'Vista previa', Play],
+              ] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => setPanel(key)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+                    panel === key ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />{label}
+                </button>
+              ))}
+            </div>
+            {panel === 'canvas' && (
               <CardDescription className="text-xs">
-                Toca una zona para editarla, o arrástrala para moverla.
+                {activeNode
+                  ? 'Arrastra sobre la imagen para dibujar una zona. Toca una zona para editarla, arrástrala para moverla o jala su esquina para cambiarle el tamaño.'
+                  : 'Selecciona o agrega una pantalla.'}
               </CardDescription>
             )}
           </CardHeader>
           <CardContent>
-            {activeNode ? (
+            {panel === 'map' ? (
+              <SimFlowMap
+                nodes={draft.nodes}
+                startNodeId={startNodeId}
+                selectedId={activeNodeId}
+                onSelect={id => { setActiveNodeId(id); setSelectedHotspotId(null); setPanel('canvas'); }}
+              />
+            ) : panel === 'preview' ? (
+              activeNode ? (
+                <SimPreview
+                  nodes={draft.nodes}
+                  fromNodeId={activeNode.id}
+                  frameColor={draft.frameColor || undefined}
+                  onClose={() => setPanel('canvas')}
+                />
+              ) : (
+                <p className="text-xs text-muted-foreground">Selecciona una pantalla para probar desde ahí.</p>
+              )
+            ) : activeNode ? (
               <NodeCanvas
                 node={activeNode}
                 selectedHotspotId={selectedHotspotId}
                 onSelectHotspot={setSelectedHotspotId}
                 onMoveHotspot={(id, xPct, yPct) => updateHotspot(activeNode.id, id, { xPct, yPct })}
+                onResizeHotspot={(id, wPct, hPct) => updateHotspot(activeNode.id, id, { wPct, hPct })}
                 onCreateHotspot={rect => addHotspot(activeNode.id, {
                   id: genId(),
                   label: `Zona ${activeNode.hotspots.length + 1}`,
@@ -584,8 +760,16 @@ function Builder({
               </div>
             )}
 
-            {activeNode && (
+            {activeNode && panel === 'canvas' && (
               <div className="mt-4 space-y-3 border-t pt-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Nombre de la pantalla (sólo para ti)</Label>
+                  <Input
+                    value={activeNode.name || ''}
+                    onChange={e => updateNode(activeNode.id, { name: e.target.value })}
+                    placeholder={`Ej. "Tablero de negocios"`}
+                  />
+                </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Objetivo de este paso (lo ve el vendedor)</Label>
                   <Input
@@ -650,6 +834,8 @@ function Builder({
                   >
                     {h.kind === 'checkbox' ? <CheckSquare className="h-3.5 w-3.5 shrink-0" />
                       : h.kind === 'text' ? <Type className="h-3.5 w-3.5 shrink-0" />
+                      : h.kind === 'swipe' ? <Move className="h-3.5 w-3.5 shrink-0" />
+                      : h.kind === 'longpress' ? <Hand className="h-3.5 w-3.5 shrink-0" />
                       : <MousePointerClick className="h-3.5 w-3.5 shrink-0" />}
                     <span className="flex-1 truncate">{h.label}</span>
                     {h.kind === 'hotspot' && h.isCorrect && (
@@ -678,6 +864,8 @@ function Builder({
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="hotspot">Zona táctil (se toca)</SelectItem>
+                      <SelectItem value="swipe">Deslizar (swipe)</SelectItem>
+                      <SelectItem value="longpress">Mantener presionado</SelectItem>
                       <SelectItem value="checkbox">Casilla (marcar / desmarcar)</SelectItem>
                       <SelectItem value="text">Campo de texto (escribir)</SelectItem>
                     </SelectContent>
@@ -722,10 +910,34 @@ function Builder({
                   </div>
                 )}
 
+                {selectedHotspot.kind === 'swipe' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Hacia dónde se desliza</Label>
+                    <Select
+                      value={selectedHotspot.swipeDirection || 'left'}
+                      onValueChange={(v: SimSwipeDirection) => updateHotspot(activeNode.id, selectedHotspot.id, { swipeDirection: v })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="left">Hacia la izquierda</SelectItem>
+                        <SelectItem value="right">Hacia la derecha</SelectItem>
+                        <SelectItem value="up">Hacia arriba</SelectItem>
+                        <SelectItem value="down">Hacia abajo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      Tocar esta zona no hace nada: sólo responde al deslizamiento, como en la app real.
+                    </p>
+                  </div>
+                )}
+
                 {selectedHotspot.kind !== 'checkbox' && (
                   <div className="space-y-1.5">
                     <Label className="text-xs">
-                      {selectedHotspot.kind === 'text' ? 'Al confirmar lo que escriba' : 'Al tocarla'}
+                      {selectedHotspot.kind === 'text' ? 'Al confirmar lo que escriba'
+                        : selectedHotspot.kind === 'swipe' ? 'Al deslizar'
+                        : selectedHotspot.kind === 'longpress' ? 'Al mantener presionado'
+                        : 'Al tocarla'}
                     </Label>
                     <Select
                       value={destinationValue(selectedHotspot)}
@@ -838,17 +1050,19 @@ function LinesTextarea({
 // ─── Lienzo de una pantalla: dibuja, selecciona y mueve zonas ────────────────
 
 function NodeCanvas({
-  node, selectedHotspotId, onSelectHotspot, onCreateHotspot, onMoveHotspot,
+  node, selectedHotspotId, onSelectHotspot, onCreateHotspot, onMoveHotspot, onResizeHotspot,
 }: {
   node: SimNode;
   selectedHotspotId: string | null;
   onSelectHotspot: (id: string | null) => void;
   onCreateHotspot: (rect: { xPct: number; yPct: number; wPct: number; hPct: number }) => void;
   onMoveHotspot: (hotspotId: string, xPct: number, yPct: number) => void;
+  onResizeHotspot: (hotspotId: string, wPct: number, hPct: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draw, setDraw] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
+  const resizeRef = useRef<{ id: string } | null>(null);
 
   function pctFromEvent(e: React.PointerEvent) {
     const rect = containerRef.current!.getBoundingClientRect();
@@ -869,6 +1083,14 @@ function NodeCanvas({
   function handlePointerDown(e: React.PointerEvent) {
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     const { x, y } = pctFromEvent(e);
+
+    // La esquina de la zona seleccionada cambia el tamaño.
+    const handleId = (e.target as HTMLElement).dataset?.resize;
+    if (handleId) {
+      resizeRef.current = { id: handleId };
+      return;
+    }
+
     const hit = hitTest(x, y);
 
     // Sobre una zona existente: seleccionar y mover, no dibujar encima.
@@ -882,6 +1104,19 @@ function NodeCanvas({
   }
 
   function handlePointerMove(e: React.PointerEvent) {
+    const resize = resizeRef.current;
+    if (resize) {
+      const { x, y } = pctFromEvent(e);
+      const hotspot = node.hotspots.find(h => h.id === resize.id);
+      if (!hotspot) return;
+      onResizeHotspot(
+        resize.id,
+        Math.max(1.5, Math.min(100 - hotspot.xPct, x - hotspot.xPct)),
+        Math.max(1.5, Math.min(100 - hotspot.yPct, y - hotspot.yPct)),
+      );
+      return;
+    }
+
     const drag = dragRef.current;
     if (drag) {
       const { x, y } = pctFromEvent(e);
@@ -901,6 +1136,7 @@ function NodeCanvas({
 
   function handlePointerUp() {
     dragRef.current = null;
+    resizeRef.current = null;
     if (!draw) return;
     const xPct = Math.min(draw.x0, draw.x1);
     const yPct = Math.min(draw.y0, draw.y1);
@@ -928,12 +1164,23 @@ function NodeCanvas({
             'absolute border-2 rounded-sm cursor-move',
             h.kind === 'checkbox' ? 'border-emerald-500 bg-emerald-500/20'
               : h.kind === 'text' ? 'border-amber-500 bg-amber-500/20'
+              : h.kind === 'swipe' ? 'border-violet-500 bg-violet-500/20'
+              : h.kind === 'longpress' ? 'border-fuchsia-500 bg-fuchsia-500/20'
               : h.isCorrect ? 'border-sky-500 bg-sky-500/25'
               : 'border-neutral-400 bg-neutral-400/20',
             selectedHotspotId === h.id && 'ring-2 ring-offset-1 ring-primary'
           )}
           style={{ left: `${h.xPct}%`, top: `${h.yPct}%`, width: `${h.wPct}%`, height: `${h.hPct}%` }}
-        />
+        >
+          {selectedHotspotId === h.id && (
+            <span
+              data-resize={h.id}
+              role="button"
+              aria-label="Cambiar el tamaño de la zona"
+              className="absolute -bottom-1.5 -right-1.5 h-3 w-3 rounded-sm border-2 border-primary bg-background cursor-se-resize"
+            />
+          )}
+        </div>
       ))}
       {draw && (
         <div

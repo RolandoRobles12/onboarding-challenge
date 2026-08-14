@@ -140,6 +140,20 @@ export default {
           '0%': { transform: 'scale(0.3)', opacity: '0.55' },
           '100%': { transform: 'scale(1.6)', opacity: '0' },
         },
+        // Entradas de pantalla de una simulación: avanzar, regresar y aparecer
+        // en su lugar (menús y diálogos, que no cambian de vista).
+        'sim-push': {
+          '0%': { transform: 'translateX(14%)', opacity: '0.6' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        'sim-push-back': {
+          '0%': { transform: 'translateX(-14%)', opacity: '0.6' },
+          '100%': { transform: 'translateX(0)', opacity: '1' },
+        },
+        'sim-fade': {
+          '0%': { opacity: '0', transform: 'scale(1.012)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
@@ -151,6 +165,9 @@ export default {
         'float': 'float 3s ease-in-out infinite',
         'star-pop': 'star-pop 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards',
         'sim-ripple': 'sim-ripple 0.6s ease-out forwards',
+        'sim-push': 'sim-push 0.26s cubic-bezier(0.32, 0.72, 0, 1) both',
+        'sim-push-back': 'sim-push-back 0.26s cubic-bezier(0.32, 0.72, 0, 1) both',
+        'sim-fade': 'sim-fade 0.18s ease-out both',
       },
     },
   },

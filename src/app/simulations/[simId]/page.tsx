@@ -3,19 +3,23 @@
 /**
  * Runner de simulaciones: la pantalla donde el vendedor opera la herramienta.
  *
- * Principios del rediseño, en orden de importancia:
+ * El modelo es "captura nativa 1:1": las capturas se toman desde la app de
+ * HubSpot o Slack en la misma tablet donde trabaja el vendedor, así que la
+ * imagen calza exacta con la pantalla. Con eso, todo lo que separa al vendedor
+ * de una copia perfecta de la app es lo que nosotros le pongamos encima — y por
+ * eso aquí no hay barras permanentes.
  *
- * 1. Emular, no examinar. Un toque equivocado no saca un letrero rojo: hace lo
- *    que haría la herramienta real. Si el capacitador conectó esa zona a otra
- *    pantalla, el vendedor termina ahí y tiene que darse cuenta y regresar —
- *    que es exactamente la habilidad que se está midiendo. Si no lleva a nada,
- *    no pasa nada, igual que al picarle a un pedazo de interfaz que no es botón.
- * 2. Nunca dejarlo atorado sin salida. Siempre hay atrás, ayuda progresiva y
- *    salida; una pantalla rota se explica en vez de quedarse en negro.
- * 3. Ayuda que cuesta pero no castiga. Pedir una pista es gratis en el momento
- *    y se registra al final; adivinar a ciegas no enseña nada.
- * 4. Todo intento deja rastro. El registro se crea al empezar y se actualiza en
- *    cada pantalla, así que abandonar a la mitad también es un dato.
+ * Principios, en orden:
+ *
+ * 1. Emular, no examinar. Un toque equivocado hace lo que haría la herramienta
+ *    real: si el capacitador conectó esa zona a otra pantalla, el vendedor
+ *    termina ahí y tiene que darse cuenta y regresar. Si no lleva a nada, no
+ *    pasa nada, igual que al picarle a un pedazo de interfaz que no es botón.
+ * 2. El cromo se quita de en medio. El objetivo aparece al llegar y se repliega;
+ *    los controles se esconden solos y vuelven con cualquier toque. Regresar es
+ *    un deslizamiento desde el borde, como en el teléfono.
+ * 3. Nunca dejarlo atorado. Siempre hay atrás, ayuda progresiva y salida.
+ * 4. Todo intento deja rastro, incluso el que se abandona a la mitad.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -29,21 +33,27 @@ import {
   findExpectedPath, findPendingWork, isFinishNode, nodeNeedsInput, resolveHotspotStep,
 } from '@/lib/types-simulation';
 import type {
-  SimAttemptState, SimHotspot, SimModule, SimNode, SimTapEvent, SimTapOutcome,
+  SimAttemptState, SimHotspot, SimModule, SimNode, SimTapEvent, SimTapOutcome, SimTransition,
 } from '@/lib/types-simulation';
+import { haptic } from '@/lib/haptics';
 import { SimStage } from '@/components/simulation/SimStage';
+import type { SimInteraction } from '@/components/simulation/SimStage';
 import { SimBrief, SimExitDialog, SimHintPanel, SimResult } from '@/components/simulation/SimScreens';
 import type { SimHintStep } from '@/components/simulation/SimScreens';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Check, HelpCircle, Loader2, Undo2, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, HelpCircle, Loader2, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-/** Cuánto espera la pantalla de éxito antes de mostrar el resultado. */
+/** Cuánto espera la pantalla de éxito antes de mostrar el cierre. */
 const SUCCESS_BEAT_MS = 900;
 /** Cuánto dura el resaltado de la pista "muéstrame dónde". */
 const REVEAL_MS = 4000;
 /** Silencio antes de ofrecer ayuda por iniciativa propia. */
 const NUDGE_MS = 25000;
+/** Cuánto se queda el objetivo a la vista al llegar a una pantalla. */
+const GOAL_MS = 3500;
+/** Inactividad tras la cual los controles se esconden. */
+const CHROME_IDLE_MS = 4000;
 
 // ─── Estado del intento ──────────────────────────────────────────────────────
 
@@ -176,7 +186,7 @@ export default function SimulationRunnerPage() {
   );
 }
 
-type LoadStatus = 'loading' | 'ready' | 'missing' | 'broken' | 'inactive';
+type LoadStatus = 'loading' | 'ready' | 'missing' | 'broken';
 type Phase = 'brief' | 'running' | 'result';
 
 function SimulationRunner() {
@@ -190,17 +200,23 @@ function SimulationRunner() {
   const [run, dispatch] = useReducer(runReducer, initialRunState(''));
 
   const [message, setMessage] = useState<{ tone: 'error' | 'detour'; text: string } | null>(null);
-  const [shakeToken, setShakeToken] = useState(0);
   const [offTrack, setOffTrack] = useState(false);
   const [hintOpen, setHintOpen] = useState(false);
   const [hintLevel, setHintLevel] = useState(0);
+  const [revealedNodes, setRevealedNodes] = useState<string[]>([]);
   const [revealHotspotId, setRevealHotspotId] = useState<string | null>(null);
   const [nudge, setNudge] = useState(false);
   const [revealAll, setRevealAll] = useState(false);
   const [exiting, setExiting] = useState(false);
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const [goalExpanded, setGoalExpanded] = useState(true);
+  const [transition, setTransition] = useState<{ type: SimTransition; direction: 'forward' | 'back' } | null>(null);
+  const [needsZoomHint, setNeedsZoomHint] = useState(false);
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const attemptIdRef = useRef<string | null>(null);
   const finalizedRef = useRef(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runRef = useRef(run);
   runRef.current = run;
 
@@ -213,8 +229,7 @@ function SimulationRunner() {
         if (!active) return;
         if (!loaded) { setStatus('missing'); return; }
         setModule(loaded);
-        if (!loaded.nodes?.length) { setStatus('broken'); return; }
-        setStatus('ready');
+        setStatus(loaded.nodes?.length ? 'ready' : 'broken');
       })
       .catch(error => {
         console.error('No se pudo cargar la simulación:', error);
@@ -237,8 +252,44 @@ function SimulationRunner() {
     [module, run.currentNodeId]
   );
 
-  const nodeIndex = module && node ? module.nodes.findIndex(n => n.id === node.id) : -1;
   const canGoBack = allowBack && run.history.length > 1;
+
+  // ─── Pantalla completa: la copia 1:1 no aguanta la barra del navegador ─────
+
+  const enterFullscreen = useCallback(() => {
+    const el = rootRef.current;
+    if (!el || document.fullscreenElement) return;
+    // Falla en silencio donde no se puede (iOS): dentro del PWA no hace falta.
+    el.requestFullscreen?.({ navigationUI: 'hide' }).catch(() => {});
+  }, []);
+
+  const leaveFullscreen = useCallback(() => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }, []);
+
+  useEffect(() => () => leaveFullscreen(), [leaveFullscreen]);
+
+  // ─── Cromo que se quita de en medio ────────────────────────────────────────
+
+  const noteActivity = useCallback(() => {
+    setChromeVisible(true);
+    if (idleTimer.current) clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => setChromeVisible(false), CHROME_IDLE_MS);
+  }, []);
+
+  useEffect(() => {
+    if (phase !== 'running') return;
+    noteActivity();
+    return () => { if (idleTimer.current) clearTimeout(idleTimer.current); };
+  }, [phase, run.currentNodeId, noteActivity]);
+
+  // El objetivo se muestra al llegar y se repliega solo.
+  useEffect(() => {
+    if (phase !== 'running') return;
+    setGoalExpanded(true);
+    const timer = setTimeout(() => setGoalExpanded(false), GOAL_MS);
+    return () => clearTimeout(timer);
+  }, [run.currentNodeId, phase]);
 
   // ─── Registro del intento ──────────────────────────────────────────────────
 
@@ -257,7 +308,7 @@ function SimulationRunner() {
     const manualReview = needsManualReview(current.texts);
     const evaluation = evaluateAttempt({
       wrongTaps: current.wrongTaps,
-      stepsTaken: current.steps,
+      stepsTaken: current.steps + 1,
       optimalSteps: expected?.screens ?? null,
       maxWrongTaps,
       needsManualReview: manualReview,
@@ -305,13 +356,16 @@ function SimulationRunner() {
 
   const startRun = useCallback(async () => {
     if (!module || !startNodeId) return;
+    enterFullscreen();
     dispatch({ type: 'start', nodeId: startNodeId });
     setPhase('running');
     setMessage(null);
     setOffTrack(false);
     setHintOpen(false);
     setHintLevel(0);
+    setRevealedNodes([]);
     setRevealHotspotId(null);
+    setTransition(null);
     finalizedRef.current = false;
     attemptIdRef.current = null;
 
@@ -339,7 +393,7 @@ function SimulationRunner() {
       // Sin registro el ejercicio sigue siendo útil: no bloqueamos al vendedor.
       console.error('No se pudo registrar el inicio del intento:', error);
     }
-  }, [module, startNodeId, expected, user, profile]);
+  }, [module, startNodeId, expected, user, profile, enterFullscreen]);
 
   // Guarda el avance en cada cambio de pantalla: si abandona, sabemos dónde quedó.
   useEffect(() => {
@@ -358,13 +412,13 @@ function SimulationRunner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run.currentNodeId, phase]);
 
-  // Cierre del intento al terminar.
   useEffect(() => {
     if (phase === 'running' && run.finishedAt) {
       finalize('completed');
+      leaveFullscreen();
       setPhase('result');
     }
-  }, [run.finishedAt, phase, finalize]);
+  }, [run.finishedAt, phase, finalize, leaveFullscreen]);
 
   // Cerrar la pestaña a media simulación cuenta como abandono.
   useEffect(() => {
@@ -398,6 +452,7 @@ function SimulationRunner() {
 
   function openHints() {
     setNudge(false);
+    noteActivity();
     if (hintLevel === 0 && hintSteps.length > 0) {
       setHintLevel(1);
       dispatch({ type: 'hint' });
@@ -414,7 +469,12 @@ function SimulationRunner() {
     if (!node) return;
     const target = expectedHotspot(node);
     if (!target) return;
-    dispatch({ type: 'hint' });
+    // Sólo se cobra la primera vez en esta pantalla: volver a pedir lo mismo no
+    // es ayuda nueva, y antes inflaba el contador sin límite.
+    if (!revealedNodes.includes(node.id)) {
+      dispatch({ type: 'hint' });
+      setRevealedNodes(prev => [...prev, node.id]);
+    }
     setRevealHotspotId(target.id);
     setHintOpen(false);
     setTimeout(() => setRevealHotspotId(current => (current === target.id ? null : current)), REVEAL_MS);
@@ -427,43 +487,11 @@ function SimulationRunner() {
     setTimeout(() => setMessage(current => (current?.text === text ? null : current)), 3200);
   }, []);
 
-  function handleTap(hotspot: SimHotspot | null, xPct: number, yPct: number) {
-    if (!module || !node || run.finishedAt) return;
-    applyOutcome(
-      decideTap({
-        node,
-        hotspot,
-        checked: run.checkedByNode[node.id] ?? [],
-        texts: run.texts,
-        nodeExists: id => module.nodes.some(n => n.id === id),
-      }),
-      { nodeId: node.id, xPct, yPct, at: Date.now(), hotspotId: hotspot?.id },
-    );
-  }
-
-  /**
-   * El vendedor confirmó lo que escribió. Si ese campo lleva a otra pantalla,
-   * escribir y presionar Listo es la forma de avanzar — igual que en la
-   * herramienta real, donde nadie escribe y luego busca otro botón inventado.
-   */
-  function handleSubmitText(hotspotId: string) {
-    if (!module || !node || run.finishedAt) return;
-    const hotspot = node.hotspots.find(h => h.id === hotspotId);
-    if (!hotspot) return;
-    applyOutcome(
-      decideTap({
-        node,
-        hotspot,
-        checked: run.checkedByNode[node.id] ?? [],
-        texts: run.texts,
-        nodeExists: id => module.nodes.some(n => n.id === id),
-        via: 'submit',
-      }),
-      { nodeId: node.id, xPct: hotspot.xPct, yPct: hotspot.yPct, at: Date.now(), hotspotId },
-    );
-  }
-
-  function applyOutcome(outcome: SimTapOutcome, base: Omit<SimTapEvent, 'kind' | 'hit'>) {
+  function applyOutcome(
+    outcome: SimTapOutcome,
+    base: Omit<SimTapEvent, 'kind' | 'hit'>,
+    hotspot: SimHotspot | null,
+  ) {
     if (!node) return;
     switch (outcome.kind) {
       case 'miss':
@@ -480,15 +508,20 @@ function SimulationRunner() {
         return;
 
       case 'expected':
+        setTransition({ type: hotspot?.transition ?? 'push', direction: 'forward' });
+        haptic('advance');
         dispatch({ type: 'advance', nodeId: outcome.nodeId, event: { ...base, kind: 'expected', hit: true } });
         setOffTrack(false);
         return;
 
       case 'finish':
+        haptic('advance');
         dispatch({ type: 'complete', event: { ...base, kind: 'expected', hit: true } });
         return;
 
       case 'detour':
+        setTransition({ type: hotspot?.transition ?? 'push', direction: 'forward' });
+        haptic('advance');
         dispatch({ type: 'advance', nodeId: outcome.nodeId, event: { ...base, kind: 'detour', hit: true } });
         setOffTrack(true);
         showMessage('detour', outcome.message);
@@ -497,7 +530,7 @@ function SimulationRunner() {
       case 'wrong':
         if (outcome.textErrors) dispatch({ type: 'textErrors', errors: outcome.textErrors });
         dispatch({ type: 'wrong', event: { ...base, kind: 'wrong', hit: false } });
-        setShakeToken(token => token + 1);
+        haptic('error');
         showMessage('error', outcome.message);
         return;
 
@@ -509,18 +542,39 @@ function SimulationRunner() {
     }
   }
 
+  function handleInteraction(
+    hotspot: SimHotspot | null,
+    via: SimInteraction,
+    detail: { xPct: number; yPct: number; swipeDirection?: 'left' | 'right' | 'up' | 'down' },
+  ) {
+    if (!module || !node || run.finishedAt) return;
+    applyOutcome(
+      decideTap({
+        node,
+        hotspot,
+        checked: run.checkedByNode[node.id] ?? [],
+        texts: run.texts,
+        nodeExists: id => module.nodes.some(n => n.id === id),
+        via,
+        swipeDirection: detail.swipeDirection,
+      }),
+      { nodeId: node.id, xPct: detail.xPct, yPct: detail.yPct, at: Date.now(), hotspotId: hotspot?.id },
+      hotspot,
+    );
+  }
+
   function handleBack() {
+    if (!canGoBack) return;
+    setTransition({ type: 'push', direction: 'back' });
     dispatch({ type: 'back' });
     setOffTrack(false);
     setMessage(null);
+    noteActivity();
   }
 
-  // Llegar a la pantalla final termina el módulo, pero con una pausa para que
-  // el vendedor alcance a ver la confirmación, como en la herramienta real.
-  //
-  // Si esa pantalla todavía le pide algo —un campo por llenar, una casilla—,
-  // no se cierra sola: terminaría el ejercicio antes de dejarlo escribir. En
-  // ese caso espera a que confirme con "Terminar".
+  // Llegar a la pantalla final cierra el módulo, con una pausa para que el
+  // vendedor alcance a ver la confirmación. Si esa pantalla todavía le pide
+  // algo, espera: si no, terminaría antes de dejarlo escribir.
   const finishNeedsConfirm = !!node && isFinishNode(node) && nodeNeedsInput(node);
 
   useEffect(() => {
@@ -535,15 +589,14 @@ function SimulationRunner() {
     const missing = findPendingWork(node, run.checkedByNode[node.id] ?? [], run.texts);
     if (missing) {
       if (missing.textErrors) dispatch({ type: 'textErrors', errors: missing.textErrors });
-      setShakeToken(token => token + 1);
+      haptic('error');
       showMessage('error', missing.message);
       return;
     }
     dispatch({ type: 'finish' });
   }
 
-  // Precarga las pantallas siguientes: sin esto cada avance espera a la red y
-  // parece que la app se trabó.
+  // Precarga las pantallas siguientes: sin esto cada avance espera a la red.
   useEffect(() => {
     if (!module || !node || typeof window === 'undefined') return;
     const targets = new Set(
@@ -562,6 +615,7 @@ function SimulationRunner() {
 
   async function exitSimulation() {
     if (phase === 'running') await finalize('abandoned');
+    leaveFullscreen();
     router.push('/');
   }
 
@@ -623,72 +677,18 @@ function SimulationRunner() {
     maxWrongTaps,
     needsManualReview: needsManualReview(run.texts),
   });
-  // El paso se saca de dónde está parado el vendedor dentro de la ruta
-  // esperada, no de cuántos toques buenos lleva: así regresar con "Atrás"
-  // devuelve el contador, y un desvío se ve como lo que es, no como avance.
+
   const routeIndex = expected ? expected.nodes.indexOf(run.currentNodeId) : -1;
-  const onRoute = routeIndex >= 0;
-  const progress = expected && onRoute
+  const progress = expected && routeIndex >= 0
     ? Math.round((routeIndex / Math.max(1, expected.screens - 1)) * 100)
     : 0;
+  const goalText = node?.goal || module.instructions || module.title;
 
   return (
-    <div className="relative min-h-[100dvh] h-[100dvh] flex flex-col bg-neutral-950 text-white overscroll-none">
-      {/* Barra de tarea: qué tengo que lograr aquí, y las dos salidas siempre visibles. */}
-      <header className="shrink-0 border-b border-white/10">
-        <div className="flex items-center gap-2 px-2 py-2">
-          <button
-            type="button"
-            onClick={() => setExiting(true)}
-            aria-label="Salir de la simulación"
-            className="rounded-full p-2 text-white/60 hover:text-white hover:bg-white/10 shrink-0"
-          >
-            <X className="h-5 w-5" />
-          </button>
-
-          <div className="min-w-0 flex-1 text-center px-1">
-            <p className="text-sm font-medium leading-tight line-clamp-2">
-              {node?.goal || module.instructions || module.title}
-            </p>
-            {expected ? (
-              <p className={cn('text-[11px]', onRoute ? 'text-white/40' : 'text-amber-300/80')}>
-                {onRoute ? `Paso ${routeIndex + 1} de ${expected.screens}` : 'Fuera de la ruta esperada'}
-              </p>
-            ) : null}
-          </div>
-
-          <button
-            type="button"
-            onClick={openHints}
-            aria-label="Pedir ayuda"
-            className={cn(
-              'rounded-full p-2 shrink-0 text-white/60 hover:text-white hover:bg-white/10',
-              nudge && 'text-amber-300 animate-pulse-ring'
-            )}
-          >
-            <HelpCircle className="h-5 w-5" />
-          </button>
-        </div>
-
-        {expected ? (
-          <div className="h-0.5 bg-white/10">
-            <div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${progress}%` }} />
-          </div>
-        ) : null}
-      </header>
-
-      {/* Aviso de desvío: la corrección tiene que estar a un toque. */}
-      {offTrack && canGoBack && (
-        <button
-          type="button"
-          onClick={handleBack}
-          className="shrink-0 flex items-center justify-center gap-2 bg-amber-500/15 border-b border-amber-500/25 px-4 py-2 text-xs text-amber-200"
-        >
-          <Undo2 className="h-3.5 w-3.5" />
-          Te saliste de la ruta esperada — regresar
-        </button>
-      )}
-
+    <div
+      ref={rootRef}
+      className="relative min-h-[100dvh] h-[100dvh] flex flex-col bg-neutral-950 text-white overscroll-none"
+    >
       {node ? (
         <SimStage
           node={node}
@@ -697,50 +697,121 @@ function SimulationRunner() {
           textErrors={run.textErrors}
           revealHotspotId={revealHotspotId}
           revealAll={revealAll && isTrainer}
-          shakeToken={shakeToken}
           disabled={!!run.finishedAt}
-          onTap={handleTap}
+          frameColor={module.frameColor}
+          forceZoom={module.allowZoom}
+          transition={transition}
+          onInteraction={handleInteraction}
           onChangeText={(hotspotId, value) => dispatch({ type: 'text', hotspotId, value })}
-          onSubmitText={handleSubmitText}
+          onEdgeBack={canGoBack ? handleBack : undefined}
+          onActivity={noteActivity}
+          onFitChange={fits => setNeedsZoomHint(!fits)}
         />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
-          <p className="text-sm text-white/70">
-            Esta pantalla ya no existe en el módulo.
-          </p>
+          <p className="text-sm text-white/70">Esta pantalla ya no existe en el módulo.</p>
           <Button variant="secondary" onClick={canGoBack ? handleBack : () => dispatch({ type: 'start', nodeId: startNodeId })}>
             {canGoBack ? 'Regresar' : 'Empezar de nuevo'}
           </Button>
         </div>
       )}
 
-      {/* Atrás abajo a la izquierda: donde cae el pulgar, como en cualquier app. */}
-      {(canGoBack || finishNeedsConfirm) && !run.finishedAt && (
-        <div className="shrink-0 border-t border-white/10 px-2 py-2 flex items-center justify-between gap-2">
+      {/* Progreso: una línea en el borde. Sin "paso 2 de 5": en la app real
+          nadie te dice en qué paso vas. */}
+      {expected && (
+        <div className="absolute top-0 inset-x-0 h-[3px] bg-black/15 z-20 pointer-events-none">
+          <div className="h-full bg-emerald-400 transition-all duration-300" style={{ width: `${progress}%` }} />
+        </div>
+      )}
+
+      {/* El objetivo aparece al llegar y se repliega en una pestaña. */}
+      {!run.finishedAt && (
+        <div className="absolute top-[3px] inset-x-0 z-20 flex justify-center pointer-events-none">
+          <button
+            type="button"
+            onClick={() => { setGoalExpanded(v => !v); noteActivity(); }}
+            className={cn(
+              'pointer-events-auto max-w-[86%] rounded-b-xl bg-neutral-900/85 backdrop-blur',
+              'text-white/90 shadow-lg transition-all duration-300',
+              goalExpanded ? 'px-4 py-2' : 'px-3 py-1'
+            )}
+          >
+            {goalExpanded ? (
+              <span className="text-[13px] leading-snug line-clamp-2 text-left block">{goalText}</span>
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 text-white/60" />
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Aviso de desvío: la corrección tiene que estar a un toque. */}
+      {offTrack && canGoBack && !run.finishedAt && (
+        <button
+          type="button"
+          onClick={handleBack}
+          className="absolute top-14 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-full bg-amber-500/90 px-4 py-2 text-xs font-medium text-amber-950 shadow-lg animate-fade-in"
+        >
+          <Undo2 className="h-3.5 w-3.5" />
+          Este no era el camino — regresar
+        </button>
+      )}
+
+      {/* Controles flotantes: se esconden solos y vuelven con cualquier toque. */}
+      {!run.finishedAt && (
+        <div
+          className={cn(
+            'absolute bottom-5 inset-x-0 z-20 flex items-center justify-between px-5 transition-opacity duration-300',
+            chromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          )}
+        >
           {canGoBack ? (
             <button
               type="button"
               onClick={handleBack}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm text-white/70 hover:text-white hover:bg-white/10"
+              aria-label="Regresar"
+              className="h-11 w-11 rounded-full bg-neutral-900/45 backdrop-blur flex items-center justify-center text-white/90 shadow-lg border border-white/10"
             >
-              <ArrowLeft className="h-4 w-4" />
-              Atrás
+              <ArrowLeft className="h-5 w-5" />
             </button>
           ) : <span />}
 
-          {finishNeedsConfirm && (
-            <Button size="sm" onClick={handleConfirmFinish}>
-              <Check className="h-4 w-4 mr-1.5" />Terminar
-            </Button>
-          )}
+          <button
+            type="button"
+            onClick={openHints}
+            aria-label="Pedir ayuda"
+            className={cn(
+              'h-11 w-11 rounded-full backdrop-blur flex items-center justify-center shadow-lg border',
+              nudge
+                ? 'bg-amber-500/90 text-amber-950 border-amber-300/40 animate-pulse-ring'
+                : 'bg-neutral-900/45 text-white/90 border-white/10'
+            )}
+          >
+            <HelpCircle className="h-5 w-5" />
+          </button>
         </div>
+      )}
+
+      {/* Una pantalla final con campos espera confirmación explícita. */}
+      {finishNeedsConfirm && !run.finishedAt && (
+        <div className="absolute bottom-20 inset-x-0 z-20 flex justify-center">
+          <Button size="lg" className="shadow-xl" onClick={handleConfirmFinish}>
+            <Check className="h-4 w-4 mr-2" />Terminar
+          </Button>
+        </div>
+      )}
+
+      {needsZoomHint && chromeVisible && !run.finishedAt && (
+        <p className="absolute bottom-20 inset-x-0 z-10 text-center text-[11px] text-white/50 pointer-events-none">
+          Pellizca para acercar
+        </p>
       )}
 
       {message && (
         <div
           role="status"
           className={cn(
-            'absolute left-1/2 -translate-x-1/2 bottom-20 z-20 max-w-[85%] rounded-xl px-4 py-2.5 text-sm text-center shadow-lg border animate-fade-in',
+            'absolute left-1/2 -translate-x-1/2 bottom-24 z-20 max-w-[85%] rounded-xl px-4 py-2.5 text-sm text-center shadow-lg border animate-fade-in',
             message.tone === 'detour'
               ? 'bg-amber-500/15 border-amber-500/30 text-amber-100'
               : 'bg-neutral-900/95 border-white/15 text-white/90'
@@ -755,17 +826,18 @@ function SimulationRunner() {
           steps={hintSteps}
           level={hintLevel}
           canReveal={!!node && !!expectedHotspot(node)}
+          revealUsed={!!node && revealedNodes.includes(node.id)}
+          canGoBack={canGoBack}
           onAdvance={advanceHint}
           onReveal={revealAnswer}
+          onBack={() => { setHintOpen(false); handleBack(); }}
+          onExit={() => { setHintOpen(false); setExiting(true); }}
           onClose={() => setHintOpen(false)}
         />
       )}
 
       {exiting && (
-        <SimExitDialog
-          onConfirm={exitSimulation}
-          onCancel={() => setExiting(false)}
-        />
+        <SimExitDialog onConfirm={exitSimulation} onCancel={() => setExiting(false)} />
       )}
 
       {phase === 'result' && (
@@ -779,7 +851,7 @@ function SimulationRunner() {
           optimalSteps={expected?.screens ?? null}
           taps={run.taps}
           onRetry={startRun}
-          onExit={() => router.push('/')}
+          onExit={() => { leaveFullscreen(); router.push('/'); }}
         />
       )}
     </div>
