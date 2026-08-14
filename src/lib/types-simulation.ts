@@ -24,7 +24,17 @@
 
 import type { Timestamp, FieldValue } from 'firebase/firestore';
 
-export type SimHotspotKind = 'hotspot' | 'checkbox' | 'text';
+export type SimHotspotKind = 'hotspot' | 'checkbox' | 'text' | 'swipe' | 'longpress';
+
+/** Hacia dónde se desliza una zona de tipo 'swipe'. */
+export type SimSwipeDirection = 'left' | 'right' | 'up' | 'down';
+
+/**
+ * Cómo entra la pantalla siguiente. 'push' desliza —cambiaste de vista—; 'fade'
+ * aparece en su lugar, que es lo que hace un menú o un diálogo encima de lo
+ * mismo. Elegir bien es la mitad de la orientación del vendedor.
+ */
+export type SimTransition = 'push' | 'fade';
 
 export interface SimHotspot {
   id: string;
@@ -71,6 +81,10 @@ export interface SimHotspot {
   validAnswers?: string[];
   /** Solo kind 'text': texto guía dentro del campo. */
   placeholder?: string;
+  /** Solo kind 'swipe': hacia dónde hay que deslizar. */
+  swipeDirection?: SimSwipeDirection;
+  /** Cómo entra la pantalla a la que lleva. Default: 'push'. */
+  transition?: SimTransition;
 }
 
 export interface SimNode {
@@ -86,6 +100,14 @@ export interface SimNode {
   hint?: string;
   /** Llegar a esta pantalla termina el módulo con éxito. */
   isSuccess?: boolean;
+  /**
+   * Nombre que le pone el capacitador ("Tablero de negocios"). Sin esto, un
+   * módulo de doce pantallas es una lista de "Pantalla 7" y los avisos del
+   * validador no se pueden leer.
+   */
+  name?: string;
+  /** Proporción ancho/alto de la captura, para avisar si el módulo mezcla formatos. */
+  aspect?: number;
   hotspots: SimHotspot[];
 }
 
@@ -100,6 +122,22 @@ export interface SimModule {
   maxWrongTaps?: number;
   /** Permite regresar a la pantalla anterior. undefined = permitido. */
   allowBack?: boolean;
+  /**
+   * La situación que enmarca el trabajo: "Llegó Ferretería López al kiosco y
+   * quiere renovar". Es lo que convierte un examen en una tarea.
+   */
+  scenario?: string;
+  /** Nombre del cliente de la situación, si lo hay. */
+  clientName?: string;
+  /** Lo que se le dice al vendedor cuando termina bien, en términos del trabajo. */
+  successMessage?: string;
+  /**
+   * Color del marco alrededor de la captura cuando no calza exacta. Vacío = se
+   * toma del borde de la propia captura, para que no se vea un corte.
+   */
+  frameColor?: string;
+  /** Fuerza el zoom aunque la captura calce. Normalmente no hace falta. */
+  allowZoom?: boolean;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   createdBy?: string;
@@ -239,10 +277,52 @@ export function isFinishNode(node: SimNode): boolean {
  */
 export function expectedExits(node: SimNode): SimHotspot[] {
   return node.hotspots.filter(hotspot => {
-    if (hotspot.kind === 'hotspot') return hotspot.isCorrect;
+    if (hotspot.kind === 'hotspot' || hotspot.kind === 'swipe' || hotspot.kind === 'longpress') {
+      return hotspot.isCorrect;
+    }
     if (hotspot.kind === 'text') return resolveHotspotStep(hotspot).type !== 'blocked';
     return false;
   });
+}
+
+/** Nombre legible de una pantalla, para el editor y para los avisos. */
+export function screenLabel(nodes: SimNode[], nodeId: string): string {
+  const index = nodes.findIndex(n => n.id === nodeId);
+  if (index < 0) return 'una pantalla eliminada';
+  return nodes[index].name?.trim() || `Pantalla ${index + 1}`;
+}
+
+/**
+ * Pantallas desde las que todavía se puede llegar al final.
+ *
+ * Es la comprobación que faltaba: verificar que todas las pantallas se
+ * *alcanzan* no dice nada sobre si desde ellas se puede *terminar*. Un desvío
+ * que no regresa a la ruta deja al vendedor encerrado.
+ */
+export function nodesThatCanFinish(module: Pick<SimModule, 'nodes'>): Set<string> {
+  const canFinish = new Set<string>();
+  for (const node of module.nodes) {
+    if (isFinishNode(node)) canFinish.add(node.id);
+    else if (node.hotspots.some(h => resolveHotspotStep(h).type === 'finish')) canFinish.add(node.id);
+  }
+
+  // Punto fijo: una pantalla sirve si alguna de sus salidas lleva a otra que sirve.
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const node of module.nodes) {
+      if (canFinish.has(node.id)) continue;
+      const reaches = node.hotspots.some(hotspot => {
+        const step = resolveHotspotStep(hotspot);
+        return step.type === 'go' && canFinish.has(step.nodeId);
+      });
+      if (reaches) {
+        canFinish.add(node.id);
+        grew = true;
+      }
+    }
+  }
+  return canFinish;
 }
 
 /** La zona que representa el paso esperado de una pantalla, si existe. */
@@ -342,10 +422,7 @@ export function findModuleIssues(module: Pick<SimModule, 'nodes' | 'startNodeId'
   const errors: string[] = [];
   const warnings: string[] = [];
   const byId = new Map(module.nodes.map(n => [n.id, n]));
-  const label = (id: string) => {
-    const index = module.nodes.findIndex(n => n.id === id);
-    return index >= 0 ? `Pantalla ${index + 1}` : 'una pantalla eliminada';
-  };
+  const label = (id: string) => screenLabel(module.nodes, id);
 
   if (module.nodes.length === 0) {
     errors.push('El módulo no tiene ninguna pantalla.');
@@ -356,12 +433,22 @@ export function findModuleIssues(module: Pick<SimModule, 'nodes' | 'startNodeId'
   }
   if (!findExpectedPath(module)) {
     errors.push(
-      'No hay una ruta esperada que termine el módulo. Marca la última pantalla como "Pantalla final" ' +
-      'o deja una zona esperada sin destino para cerrar el ejercicio.'
+      'No hay una ruta esperada que termine el módulo. Marca la última pantalla como "Pantalla final", ' +
+      'o pon una zona con "Termina el módulo".'
     );
   }
 
   const reachable = reachableNodeIds(module);
+  const canFinish = nodesThatCanFinish(module);
+  const route = findExpectedPath(module);
+  const onRoute = new Set(route?.nodes ?? []);
+  /**
+   * A quién se le exige un paso esperado. Con ruta conocida, sólo a las
+   * pantallas de la ruta: una pantalla de desvío existe justamente para no
+   * tenerlo, y avisarlo era ruido. Sin ruta, a todas las alcanzables, porque
+   * cualquiera de ellas puede ser donde se olvidó marcar el paso.
+   */
+  const needsExpectedExit = (id: string) => (route ? onRoute.has(id) : reachable.has(id));
   for (const node of module.nodes) {
     const name = label(node.id);
 
@@ -371,12 +458,22 @@ export function findModuleIssues(module: Pick<SimModule, 'nodes' | 'startNodeId'
     if (!isFinishNode(node) && node.hotspots.length === 0) {
       warnings.push(`${name} no tiene zonas ni está marcada como final: el vendedor se queda atorado ahí.`);
     }
-    if (!isFinishNode(node) && node.hotspots.length > 0 && expectedExits(node).length === 0) {
+    // Sólo se le exige un paso esperado a las pantallas de la ruta. Una pantalla
+    // de desvío existe justamente para no tenerlo, y avisarlo era ruido que
+    // enseñaba a ignorar este panel.
+    if (!isFinishNode(node) && needsExpectedExit(node.id) && node.hotspots.length > 0 && expectedExits(node).length === 0) {
       const hasFields = node.hotspots.some(h => h.kind === 'text');
       warnings.push(hasFields
         ? `${name} tiene campos que llenar pero ninguna salida: conecta el campo —o el botón de la ` +
           'captura— a la siguiente pantalla, si no el vendedor se queda ahí.'
         : `${name} no tiene un paso esperado: no hay forma de avanzar correctamente.`);
+    }
+
+    if (canFinish.size > 0 && reachable.has(node.id) && !canFinish.has(node.id)) {
+      warnings.push(
+        `Desde ${name} ya no se puede terminar el módulo: el vendedor que llegue ahí queda encerrado. ` +
+        'Conecta alguna zona de regreso a la ruta.'
+      );
     }
 
     for (const hotspot of node.hotspots) {
@@ -393,6 +490,25 @@ export function findModuleIssues(module: Pick<SimModule, 'nodes' | 'startNodeId'
       if (hotspot.kind === 'text' && (hotspot.validAnswers?.length ?? 0) === 0) {
         warnings.push(`En ${name}, el campo "${hotspot.label}" es abierto: el intento quedará pendiente de revisión.`);
       }
+      if (hotspot.kind === 'swipe' && !hotspot.swipeDirection) {
+        warnings.push(`En ${name}, la zona "${hotspot.label}" no dice hacia dónde deslizar; se asume izquierda.`);
+      }
+    }
+  }
+
+  // Con capturas nativas 1:1, mezclar formatos es lo que hace reaparecer las
+  // franjas negras: una captura de otro dispositivo ya no calza con la pantalla.
+  const aspects = module.nodes.map(n => n.aspect).filter((a): a is number => typeof a === 'number');
+  if (aspects.length > 1) {
+    const min = Math.min(...aspects);
+    const max = Math.max(...aspects);
+    if (max - min > 0.02) {
+      const odd = module.nodes.filter(n => typeof n.aspect === 'number' && Math.abs(n.aspect - min) > 0.02);
+      warnings.push(
+        'Las capturas no tienen todas la misma proporción: ' +
+        `${odd.slice(0, 3).map(n => screenLabel(module.nodes, n.id)).join(', ')} se ven distintas al resto. ` +
+        'Conviene capturarlas todas en el mismo dispositivo y la misma orientación.'
+      );
     }
   }
 
@@ -427,16 +543,26 @@ export function decideTap(input: {
   texts: Record<string, string>;
   nodeExists: (nodeId: string) => boolean;
   /**
-   * 'tap' es un toque sobre la captura. 'submit' es confirmar un campo de
-   * texto (Enter o el botón del teclado), que es como se avanza en una
-   * pantalla de captura.
+   * Cómo interactuó el vendedor. Una zona sólo responde a su gesto: deslizar
+   * sobre un renglón que se desliza avanza; tocarlo no hace nada, igual que en
+   * la app real.
    */
-  via?: 'tap' | 'submit';
+  via?: 'tap' | 'submit' | 'swipe' | 'longpress';
+  /** Sólo con via 'swipe': hacia dónde deslizó. */
+  swipeDirection?: SimSwipeDirection;
 }): SimTapOutcome {
-  const { node, hotspot, checked, texts, nodeExists, via = 'tap' } = input;
+  const { node, hotspot, checked, texts, nodeExists, via = 'tap', swipeDirection } = input;
 
   // Tocar el vacío no penaliza: explorar es parte de aprender una herramienta.
   if (!hotspot) return { kind: 'miss' };
+
+  // Los gestos y los toques no son intercambiables: cada zona responde al suyo.
+  if (hotspot.kind === 'swipe' && (via !== 'swipe' || swipeDirection !== (hotspot.swipeDirection ?? 'left'))) {
+    return { kind: 'miss' };
+  }
+  if (hotspot.kind === 'longpress' && via !== 'longpress') return { kind: 'miss' };
+  if (hotspot.kind !== 'swipe' && via === 'swipe') return { kind: 'miss' };
+  if (hotspot.kind !== 'longpress' && via === 'longpress') return { kind: 'miss' };
 
   if (hotspot.kind === 'text') {
     // El borde del campo no hace nada; el input de encima maneja lo suyo.
