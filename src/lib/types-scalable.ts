@@ -1187,10 +1187,20 @@ export interface DailyPulse {
   status: 'scheduled' | 'active' | 'closed';
   sentAt?: Timestamp;    // cuándo se envió la notificación de Slack
   closedAt?: Timestamp;  // cuándo cerró la ventana de respuesta
+  /** Resultado del último envío de Slack de este pulso (automático o manual). */
+  slackResult?: PulseSlackResult;
   totalResponses: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   createdBy: string;     // 'system' o userId del admin
+}
+
+export interface PulseSlackResult {
+  ok: number;
+  failed: number;
+  error?: string;
+  at: Timestamp;
+  trigger: 'auto' | 'manual';
 }
 
 /** Respuesta individual de una pregunta dentro del pulso */
@@ -1230,6 +1240,8 @@ export interface PulseAttempt {
   percentage: number;
 
   startedAt: Timestamp;
+  /** Última respuesta guardada (las respuestas se guardan una por una). */
+  lastAnswerAt?: Timestamp;
   completedAt?: Timestamp;
   status: 'in_progress' | 'completed' | 'expired';
 }
@@ -1249,6 +1261,9 @@ export interface PulseBacklogItem {
   pulseDate: string;     // de qué pulso proviene
   status: 'pending' | 'resolved';
   resolvedAt?: Timestamp;
+  /** Veces que el vendedor intentó repasar la pregunta desde el backlog. */
+  reviewAttempts?: number;
+  lastReviewedAt?: Timestamp;
   linkedVideoIds?: string[]; // videos de remediación sugeridos
 }
 
@@ -1267,7 +1282,8 @@ export interface SlackChannel {
   channelId: string;   // ID del canal en Slack (ej: C01234567)
   channelName: string; // Nombre visible (ej: #conocimiento-diario)
   description?: string;
-  vertical?: string;   // Vertical de producto asociada (ej: 'Aviva Tu Compra') o vacío para todos
+  /** Etiqueta informativa: el pulso es el mismo para todas las verticales. */
+  vertical?: string;
   active: boolean;
 }
 
@@ -1280,11 +1296,14 @@ export interface SlackNotificationConfig {
   organizationId: string;
   active: boolean;
   sendAt: string;        // HH:MM en horario local del equipo (ej: "08:00")
-  closeAt: string;       // HH:MM límite para responder (ej: "12:00")
+  /** @deprecated La hora de cierre vive en PulseConfig.closeAt. */
+  closeAt?: string;
   appUrl: string;        // URL base de la app, sin barra final (ej: https://app.avivacredito.com)
   messageTemplate: string; // Plantilla del mensaje. Soporta {date}, {link}
   channels: SlackChannel[];
   directRecipients?: SlackDirectRecipient[];
+  /** Si es true (default), también se manda DM a los vendedores con Slack ID en su perfil. */
+  dmSellers?: boolean;
   updatedAt: Timestamp;
   updatedBy: string;
 }
@@ -1399,4 +1418,17 @@ export interface PulseConfig {
   autoDailyPulse: boolean;
   updatedAt?: Timestamp;
   updatedBy?: string;
+}
+
+/**
+ * Estado del proceso programado del pulso (/api/pulse/cron).
+ * Se almacena en `pulse_cron_status/{orgId}` para que el admin vea si la
+ * automatización está corriendo.
+ */
+export interface PulseCronStatus {
+  organizationId: string;
+  lastRunAt: Timestamp;
+  /** Acciones que tomó la última ejecución (ej. "Pulso creado", "Slack enviado"). */
+  lastActions: string[];
+  lastError?: string;
 }

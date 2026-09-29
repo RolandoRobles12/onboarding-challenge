@@ -20,6 +20,8 @@ import {
   writeBatch,
   increment,
   onSnapshot,
+  runTransaction,
+  documentId,
   QueryConstraint,
   DocumentData,
   WithFieldValue,
@@ -55,6 +57,8 @@ import type {
   PulseAttempt,
   PulseAnswer,
   PulseBacklogItem,
+  PulseSlackResult,
+  PulseCronStatus,
   SlackNotificationConfig,
   PulseConfig,
   KnowledgeModule,
@@ -63,6 +67,7 @@ import type {
   PulseCategory,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-scalable';
+import { addDaysStr, buildAutoPool, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
 import type {
   Course,
   CourseEnrollment,
@@ -119,6 +124,7 @@ const COLLECTIONS = {
   PULSE_BACKLOGS: 'pulse_backlogs',
   SLACK_CONFIG: 'slack_config',
   PULSE_CONFIG: 'pulse_config',
+  PULSE_CRON_STATUS: 'pulse_cron_status',
   // --- Tokens de Organización ---
   ORG_TOKENS: 'org_tokens',
   // --- Pulse Categories ---
@@ -2304,6 +2310,9 @@ export async function deleteVideoComment(commentId: string): Promise<void> {
 // ============================================================================
 // KNOWLEDGE PULSE — PULSO DE CONOCIMIENTO DIARIO
 // ============================================================================
+//
+// Nota: las consultas de esta sección filtran por un solo campo y completan el
+// filtrado en memoria, para no depender de índices compuestos de Firestore.
 
 // ----------- Daily Pulse -----------
 
@@ -2319,7 +2328,7 @@ export async function getDailyPulse(date: string, orgId = DEFAULT_ORG_ID): Promi
   }
 }
 
-/** Lista los pulsos de un rango de fechas. */
+/** Lista los pulsos de un rango de fechas (más recientes primero). */
 export async function getDailyPulses(
   startDate: string,
   endDate: string,
@@ -2328,13 +2337,14 @@ export async function getDailyPulses(
   try {
     const q = query(
       getCollectionRef(COLLECTIONS.DAILY_PULSES),
-      where('organizationId', '==', orgId),
       where('date', '>=', startDate),
       where('date', '<=', endDate),
       orderBy('date', 'desc')
     );
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as DailyPulse));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as DailyPulse))
+      .filter(p => p.organizationId === orgId);
   } catch (error) {
     console.error('Error listing daily pulses:', error);
     return [];
@@ -2342,8 +2352,9 @@ export async function getDailyPulses(
 }
 
 /**
- * Crea o actualiza el pulso de un día con las 7 preguntas seleccionadas.
- * Usa rotación automática si no se proveen IDs.
+ * Crea o actualiza el pool de preguntas de un día.
+ * Si el pulso ya estaba cerrado conserva su estado; los vendedores que ya
+ * empezaron conservan las preguntas que se les asignaron.
  */
 export async function upsertDailyPulse(
   date: string,
@@ -2362,19 +2373,42 @@ export async function upsertDailyPulse(
       : {};
     await updateDoc(docRef, { questionIds, updatedAt: serverTimestamp(), ...statusPatch });
   } else {
-    const pulse: Omit<DailyPulse, 'id'> = {
-      organizationId: orgId,
-      date,
-      questionIds,
-      status: 'scheduled',
-      totalResponses: 0,
-      createdAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
-      updatedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
-      createdBy,
-    };
-    await setDoc(docRef, stripUndefined(pulse));
+    await setDoc(docRef, stripUndefined(newDailyPulse(date, questionIds, createdBy, orgId)));
   }
   return id;
+}
+
+function newDailyPulse(date: string, questionIds: string[], createdBy: string, orgId: string): Omit<DailyPulse, 'id'> {
+  return {
+    organizationId: orgId,
+    date,
+    questionIds,
+    status: 'scheduled',
+    totalResponses: 0,
+    createdAt: serverTimestamp() as unknown as Timestamp,
+    updatedAt: serverTimestamp() as unknown as Timestamp,
+    createdBy,
+  };
+}
+
+/**
+ * Crea el pulso del día solo si no existe (transacción: si varios vendedores
+ * abren la app al mismo tiempo, se crea una sola vez).
+ * Devuelve true si lo creó.
+ */
+export async function createDailyPulseIfMissing(
+  date: string,
+  questionIds: string[],
+  createdBy = 'auto',
+  orgId = DEFAULT_ORG_ID
+): Promise<boolean> {
+  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(docRef);
+    if (snap.exists()) return false;
+    tx.set(docRef, stripUndefined(newDailyPulse(date, questionIds, createdBy, orgId)));
+    return true;
+  });
 }
 
 /** Actualiza el estado del pulso (active → closed, etc.) */
@@ -2388,6 +2422,35 @@ export async function updatePulseStatus(
   if (status === 'active') extra.sentAt = serverTimestamp();
   if (status === 'closed') extra.closedAt = serverTimestamp();
   await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, id), extra);
+}
+
+/**
+ * Reserva el envío de Slack del pulso: pasa de 'scheduled' a 'active' en una
+ * transacción para que dos ejecuciones simultáneas no manden el aviso dos veces.
+ * Devuelve true si esta llamada obtuvo la reserva.
+ */
+export async function claimPulseSlackSend(date: string, orgId = DEFAULT_ORG_ID): Promise<boolean> {
+  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(docRef);
+    if (!snap.exists()) return false;
+    const data = snap.data() as DailyPulse;
+    if (data.status !== 'scheduled' || data.sentAt) return false;
+    tx.update(docRef, { status: 'active', sentAt: serverTimestamp(), updatedAt: serverTimestamp() });
+    return true;
+  });
+}
+
+/** Guarda el resultado del envío de Slack en el pulso del día. */
+export async function recordPulseSlackResult(
+  date: string,
+  result: Omit<PulseSlackResult, 'at'>,
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`), stripUndefined({
+    slackResult: { ...result, at: serverTimestamp() },
+    updatedAt: serverTimestamp(),
+  }));
 }
 
 // ----------- Pulse Attempts -----------
@@ -2404,80 +2467,123 @@ export async function getPulseAttempt(userId: string, date: string, orgId = DEFA
   }
 }
 
-/** Inicia un intento de pulso.
- *  @param questionIds  IDs de las preguntas asignadas a este usuario (subconjunto del pool).
- *                      Si se pasan, se almacenan en el documento para que el usuario siempre
- *                      vea las mismas preguntas aunque recargue antes de terminar.
+/**
+ * Inicia el intento del día, o devuelve el existente si ya hay uno.
+ * Nunca sobrescribe un intento: así recargar la página no reinicia el pulso
+ * ni permite volver a responder preguntas ya vistas.
+ *
+ * @param questionIds  Preguntas asignadas a este usuario. Se guardan en el
+ *                     intento para que siempre vea las mismas.
  */
 export async function startPulseAttempt(
   userId: string,
   userName: string,
   date: string,
   segmentation: { vertical?: string; hub?: string; estado?: string; cosecha?: string },
-  questionIds?: string[],
+  questionIds: string[],
   orgId = DEFAULT_ORG_ID
-): Promise<string> {
+): Promise<PulseAttempt> {
   const id = `${userId}_${date}`;
-  const attempt: Omit<PulseAttempt, 'id'> = {
-    userId,
-    userName,
-    pulseId: `${orgId}_${date}`,
-    date,
-    organizationId: orgId,
-    ...segmentation,
-    ...(questionIds ? { questionIds } : {}),
-    answers: [],
-    totalQuestions: questionIds?.length ?? 7,
-    correctAnswers: 0,
-    percentage: 0,
-    startedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
-    status: 'in_progress',
-  };
-  await setDoc(getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id), stripUndefined(attempt));
-  return id;
+  const docRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id);
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(docRef);
+    if (snap.exists()) return { id: snap.id, ...snap.data() } as PulseAttempt;
+    const attempt: Omit<PulseAttempt, 'id'> = {
+      userId,
+      userName,
+      pulseId: `${orgId}_${date}`,
+      date,
+      organizationId: orgId,
+      ...segmentation,
+      questionIds,
+      answers: [],
+      totalQuestions: questionIds.length,
+      correctAnswers: 0,
+      percentage: 0,
+      startedAt: serverTimestamp() as unknown as Timestamp,
+      status: 'in_progress',
+    };
+    tx.set(docRef, stripUndefined(attempt));
+    return { id, ...attempt, startedAt: Timestamp.now() };
+  });
 }
 
-/** Registra la respuesta final del pulso con todos los answers. */
+/**
+ * Guarda una respuesta en cuanto el vendedor la confirma.
+ * Si la pregunta ya tenía respuesta, conserva la primera (no se puede corregir
+ * después de ver la solución). Devuelve las respuestas guardadas.
+ */
+export async function savePulseAnswer(
+  userId: string,
+  date: string,
+  answer: PulseAnswer
+): Promise<PulseAnswer[]> {
+  const docRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, `${userId}_${date}`);
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(docRef);
+    if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
+    const data = snap.data() as PulseAttempt;
+    const answers = data.answers ?? [];
+    if (data.status !== 'in_progress' || answers.some(a => a.questionId === answer.questionId)) {
+      return answers;
+    }
+    const next = [...answers, answer];
+    tx.update(docRef, {
+      answers: next,
+      correctAnswers: next.filter(a => a.isCorrect).length,
+      lastAnswerAt: serverTimestamp(),
+    });
+    return next;
+  });
+}
+
+/**
+ * Cierra el intento con las respuestas guardadas. Es idempotente: si ya estaba
+ * completado no vuelve a sumar la respuesta al contador del pulso.
+ */
 export async function submitPulseAttempt(
   userId: string,
   date: string,
-  answers: PulseAnswer[],
   orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  const id = `${userId}_${date}`;
-  const correctAnswers = answers.filter(a => a.isCorrect).length;
-  const percentage = Math.round((correctAnswers / answers.length) * 100);
-  await updateDoc(getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id), {
-    answers,
-    correctAnswers,
-    percentage,
-    completedAt: serverTimestamp(),
-    status: 'completed',
-  });
-  // Incrementar contador de respuestas en el pulso del día
-  const pulseId = `${orgId}_${date}`;
-  await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, pulseId), {
-    totalResponses: increment(1),
-    updatedAt: serverTimestamp(),
+): Promise<PulseAttempt> {
+  const attemptRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, `${userId}_${date}`);
+  const pulseRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(attemptRef);
+    if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
+    const data = { id: snap.id, ...snap.data() } as PulseAttempt;
+    if (data.status === 'completed') return data;
+    const answers = data.answers ?? [];
+    const total = data.questionIds?.length || data.totalQuestions || answers.length;
+    const correctAnswers = answers.filter(a => a.isCorrect).length;
+    const percentage = total > 0 ? Math.round((correctAnswers / total) * 100) : 0;
+    const patch = {
+      totalQuestions: total,
+      correctAnswers,
+      percentage,
+      completedAt: serverTimestamp(),
+      status: 'completed' as const,
+    };
+    tx.update(attemptRef, patch);
+    tx.update(pulseRef, { totalResponses: increment(1), updatedAt: serverTimestamp() });
+    return { ...data, ...patch, completedAt: Timestamp.now() };
   });
 }
 
-/** Lista intentos de un usuario (últimos 30 días por defecto). */
+/** Lista los intentos de un usuario (más recientes primero). */
 export async function getUserPulseAttempts(
   userId: string,
   limitCount = 30,
   orgId = DEFAULT_ORG_ID
 ): Promise<PulseAttempt[]> {
   try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
-      where('userId', '==', userId),
-      where('organizationId', '==', orgId),
-      orderBy('date', 'desc'),
-      limit(limitCount)
-    );
+    const q = query(getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS), where('userId', '==', userId));
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PulseAttempt));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as PulseAttempt))
+      .filter(a => a.organizationId === orgId)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, limitCount);
   } catch (error) {
     console.error('Error getting user pulse attempts:', error);
     return [];
@@ -2490,13 +2596,11 @@ export async function getPulseAttemptsByDate(
   orgId = DEFAULT_ORG_ID
 ): Promise<PulseAttempt[]> {
   try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
-      where('date', '==', date),
-      where('organizationId', '==', orgId)
-    );
+    const q = query(getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS), where('date', '==', date));
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PulseAttempt));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as PulseAttempt))
+      .filter(a => a.organizationId === orgId);
   } catch (error) {
     console.error('Error getting pulse attempts by date:', error);
     return [];
@@ -2525,35 +2629,65 @@ export async function getPulseAttemptsByDateRange(
   }
 }
 
+/**
+ * Marca como 'expired' los intentos que quedaron a medias en días anteriores.
+ * Devuelve cuántos actualizó.
+ */
+export async function expireStalePulseAttempts(
+  today: string,
+  lookbackStart: string,
+  orgId = DEFAULT_ORG_ID
+): Promise<number> {
+  const q = query(
+    getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
+    where('date', '>=', lookbackStart),
+    where('date', '<', today),
+  );
+  const snap = await getDocs(q);
+  const stale = snap.docs.filter(d => {
+    const a = d.data() as PulseAttempt;
+    return a.organizationId === orgId && a.status === 'in_progress';
+  });
+  if (stale.length === 0) return 0;
+  const batch = writeBatch(ensureFirestore());
+  for (const d of stale) batch.update(d.ref, { status: 'expired' });
+  await batch.commit();
+  return stale.length;
+}
+
 // ----------- Pulse Backlog (MVP2) -----------
 
-/** Obtiene el backlog pendiente de un usuario. */
+/** Obtiene el backlog pendiente de un usuario (más antiguos primero). */
 export async function getUserPulseBacklog(userId: string, orgId = DEFAULT_ORG_ID): Promise<PulseBacklogItem[]> {
   try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.PULSE_BACKLOGS),
-      where('userId', '==', userId),
-      where('organizationId', '==', orgId),
-      where('status', '==', 'pending'),
-      orderBy('addedAt', 'asc')
-    );
+    const q = query(getCollectionRef(COLLECTIONS.PULSE_BACKLOGS), where('userId', '==', userId));
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() } as PulseBacklogItem));
+    return snap.docs
+      .map(d => ({ id: d.id, ...d.data() } as PulseBacklogItem))
+      .filter(b => b.organizationId === orgId && b.status === 'pending')
+      .sort((a, b) => (a.addedAt?.toMillis?.() ?? 0) - (b.addedAt?.toMillis?.() ?? 0));
   } catch (error) {
     console.error('Error getting pulse backlog:', error);
     return [];
   }
 }
 
-/** Agrega preguntas incorrectas al backlog del usuario. */
+/**
+ * Agrega preguntas incorrectas al backlog del usuario. Si la pregunta ya está
+ * pendiente en su backlog no se duplica.
+ */
 export async function addToPulseBacklog(
   userId: string,
   questions: { questionId: string; questionText: string; module: KnowledgeModule; linkedVideoIds?: string[] }[],
   pulseDate: string,
   orgId = DEFAULT_ORG_ID
 ): Promise<void> {
+  const pending = await getUserPulseBacklog(userId, orgId);
+  const alreadyPending = new Set(pending.map(b => b.questionId));
+  const toAdd = questions.filter(q => !alreadyPending.has(q.questionId));
+  if (toAdd.length === 0) return;
   const batch = writeBatch(ensureFirestore());
-  for (const q of questions) {
+  for (const q of toAdd) {
     const docRef = doc(getCollectionRef(COLLECTIONS.PULSE_BACKLOGS));
     const item: Omit<PulseBacklogItem, 'id'> = {
       userId,
@@ -2561,9 +2695,10 @@ export async function addToPulseBacklog(
       questionId: q.questionId,
       questionText: q.questionText,
       module: q.module,
-      addedAt: serverTimestamp() as unknown as import('firebase/firestore').Timestamp,
+      addedAt: serverTimestamp() as unknown as Timestamp,
       pulseDate,
       status: 'pending',
+      reviewAttempts: 0,
       linkedVideoIds: q.linkedVideoIds,
     };
     batch.set(docRef, stripUndefined(item));
@@ -2576,6 +2711,18 @@ export async function resolvePulseBacklogItem(itemId: string): Promise<void> {
   await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
     status: 'resolved',
     resolvedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Registra un repaso de una pregunta del backlog. Solo se resuelve cuando el
+ * vendedor la responde correctamente.
+ */
+export async function recordPulseBacklogReview(itemId: string, correct: boolean): Promise<void> {
+  await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
+    reviewAttempts: increment(1),
+    lastReviewedAt: serverTimestamp(),
+    ...(correct ? { status: 'resolved', resolvedAt: serverTimestamp() } : {}),
   });
 }
 
@@ -2592,9 +2739,13 @@ export async function getSlackConfig(orgId = DEFAULT_ORG_ID): Promise<SlackNotif
   }
 }
 
-/** Guarda o actualiza la configuración de Slack. */
+/**
+ * Guarda campos de la configuración de Slack. Hace merge: cada pantalla guarda
+ * solo lo que edita (mensaje y horario desde el Pulso, destinatarios desde
+ * Configuración Slack) sin borrar lo de la otra.
+ */
 export async function saveSlackConfig(
-  config: Omit<SlackNotificationConfig, 'organizationId' | 'updatedAt'>,
+  config: Partial<Omit<SlackNotificationConfig, 'organizationId' | 'updatedAt' | 'updatedBy'>>,
   updatedBy: string,
   orgId = DEFAULT_ORG_ID
 ): Promise<void> {
@@ -2603,7 +2754,7 @@ export async function saveSlackConfig(
     organizationId: orgId,
     updatedAt: serverTimestamp(),
     updatedBy,
-  }));
+  }), { merge: true });
 }
 
 // ----------- Pulse Config -----------
@@ -2621,7 +2772,7 @@ const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updated
 export async function getPulseConfig(orgId = DEFAULT_ORG_ID): Promise<PulseConfig> {
   try {
     const snap = await getDoc(getDocRef(COLLECTIONS.PULSE_CONFIG, orgId));
-    if (snap.exists()) return { id: snap.id, ...snap.data() } as PulseConfig;
+    if (snap.exists()) return { ...DEFAULT_PULSE_CONFIG, id: snap.id, ...snap.data() } as PulseConfig;
     return { ...DEFAULT_PULSE_CONFIG, organizationId: orgId };
   } catch (error) {
     console.error('Error getting pulse config:', error);
@@ -2643,36 +2794,75 @@ export async function savePulseConfig(
   }));
 }
 
+// ----------- Cron status -----------
+
+export async function getPulseCronStatus(orgId = DEFAULT_ORG_ID): Promise<PulseCronStatus | null> {
+  try {
+    const snap = await getDoc(getDocRef(COLLECTIONS.PULSE_CRON_STATUS, orgId));
+    return snap.exists() ? (snap.data() as PulseCronStatus) : null;
+  } catch (error) {
+    console.error('Error getting pulse cron status:', error);
+    return null;
+  }
+}
+
+export async function savePulseCronStatus(
+  status: { lastActions: string[]; lastError?: string },
+  orgId = DEFAULT_ORG_ID
+): Promise<void> {
+  await setDoc(getDocRef(COLLECTIONS.PULSE_CRON_STATUS, orgId), stripUndefined({
+    organizationId: orgId,
+    lastRunAt: serverTimestamp(),
+    lastActions: status.lastActions,
+    lastError: status.lastError ?? null,
+  }));
+}
+
+// ----------- Questions for the pulse -----------
+
+/** Carga las preguntas de un pulso en paralelo, conservando el orden recibido. */
+export async function getPulseQuestions(ids: string[]): Promise<Question[]> {
+  const unique = Array.from(new Set(ids));
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
+  const snaps = await Promise.all(chunks.map(chunk =>
+    getDocs(query(getCollectionRef(COLLECTIONS.QUESTIONS), where(documentId(), 'in', chunk)))
+  ));
+  const byId = new Map<string, Question>();
+  for (const snap of snaps) {
+    for (const d of snap.docs) byId.set(d.id, { id: d.id, ...d.data() } as Question);
+  }
+  return ids.map(id => byId.get(id)).filter((q): q is Question => !!q);
+}
+
 // ----------- Auto-scheduling helpers -----------
 
 /**
- * Retorna TODAS las preguntas activas del catálogo ordenadas por correctRate asc
- * (las más difíciles primero) para usarlas como pool del DailyPulse.
- * Cuando sameQuestionsForAll=false, cada usuario elige aleatoriamente
- * questionsPerPulse (7) de este pool al iniciar.
+ * Arma el pool automático del día (ver `buildAutoPool`): respeta los módulos
+ * activos, distribuye por módulo, prioriza las preguntas con menos aciertos y
+ * evita repetir las de los últimos días. Las primeras `questionsPerPulse` son
+ * las que ve todo el equipo cuando "mismas preguntas para todos" está activo.
  */
 export async function scheduleAutoPulse(
-  orgId = DEFAULT_ORG_ID
+  orgId = DEFAULT_ORG_ID,
+  date = pulseDateStr()
 ): Promise<string[]> {
   const q = query(
     getCollectionRef(COLLECTIONS.QUESTIONS),
     where('organizationId', '==', orgId),
     where('active', '==', true),
   );
-  const [snap, cfg] = await Promise.all([getDocs(q), getPulseConfig(orgId)]);
-  const activeModules = new Set(cfg.activeModules ?? []);
-  const allQuestions = snap.docs
-    .map(d => ({ id: d.id, ...d.data() }) as import('./types-scalable').Question)
-    // Solo preguntas con módulo asignado (preguntas del pulso, no de quizzes)
-    .filter(question => !!question.module)
-    // Vacío = todos los módulos activos; si el admin restringió módulos en
-    // PulseConfig, el pool automático debe respetarlo.
-    .filter(question => activeModules.size === 0 || activeModules.has(question.module!));
-
-  // Ordenar por correctRate asc (más difíciles primero) para priorizar refuerzo
-  allQuestions.sort((a, b) => a.averageCorrectRate - b.averageCorrectRate);
-
-  return allQuestions.map(question => question.id);
+  const [snap, cfg, recentPulses] = await Promise.all([
+    getDocs(q),
+    getPulseConfig(orgId),
+    getDailyPulses(addDaysStr(date, -RECENT_USE_WINDOW_DAYS), addDaysStr(date, -1), orgId),
+  ]);
+  const questions = snap.docs.map(d => ({ id: d.id, ...d.data() }) as Question);
+  return buildAutoPool(questions, {
+    activeModules: cfg.activeModules,
+    lastUsed: lastUsedByQuestion(recentPulses, cfg.questionsPerPulse),
+    date,
+  });
 }
 
 // ----------- Org Tokens -----------

@@ -22,6 +22,7 @@ import {
   getLevelFromConfig,
   getDailyPulse,
   getPulseAttempt,
+  getPulseConfig,
   getProducts,
   getCourse,
   getExplorableJourneys,
@@ -32,6 +33,7 @@ import type {
   Journey, JourneyStep, JourneyStage, JourneyMilestone, Product, QuizAttempt, UserBadge,
 } from '@/lib/types-scalable';
 import type { Course } from '@/lib/types-lms';
+import { formatCountdown, formatHHMM, getPulsePhase, minutesUntilClose, pulseDateStr } from '@/lib/pulse-utils';
 import {
   getEntryDate, buildJourneySummary, groupStagesByMilestone,
   getMilestoneSchedule, getStageSchedule, formatDate,
@@ -815,19 +817,30 @@ function JourneyHero({ color, narrative, summary, doneCount, totalCount, pct, fi
 // ─── Pulse Today Card ─────────────────────────────────────────────────────────
 
 function PulseTodayCard({ userId }: { userId: string }) {
-  const [status, setStatus] = useState<'loading' | 'no_pulse' | 'pending' | 'done' | 'closed'>('loading');
-  const [correctAnswers, setCorrectAnswers] = useState<number | null>(null);
+  const [status, setStatus] = useState<'loading' | 'no_pulse' | 'pending' | 'in_progress' | 'done' | 'closed'>('loading');
+  const [detail, setDetail] = useState('');
 
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    Promise.all([getDailyPulse(today), getPulseAttempt(userId, today)]).then(([pulse, attempt]) => {
-      if (!pulse || pulse.status === 'scheduled') { setStatus('no_pulse'); return; }
+    const today = pulseDateStr();
+    Promise.all([getDailyPulse(today), getPulseAttempt(userId, today), getPulseConfig()]).then(([pulse, attempt, cfg]) => {
       if (attempt?.status === 'completed') {
-        setCorrectAnswers(attempt.correctAnswers);
+        setDetail(`${attempt.correctAnswers}/${attempt.totalQuestions} respuestas correctas`);
         setStatus('done');
         return;
       }
-      if (pulse.status === 'closed') { setStatus('closed'); return; }
+      if (attempt?.status === 'in_progress') {
+        setDetail(`Llevas ${attempt.answers?.length ?? 0} de ${attempt.totalQuestions} · tus respuestas están guardadas`);
+        setStatus('in_progress');
+        return;
+      }
+      const phase = getPulsePhase(pulse, cfg.closeAt);
+      if (phase === 'sin_pulso' || phase === 'programado') { setStatus('no_pulse'); return; }
+      if (phase === 'cerrado') {
+        setDetail(`Cerró a las ${formatHHMM(cfg.closeAt)}`);
+        setStatus('closed');
+        return;
+      }
+      setDetail(`${cfg.questionsPerPulse} preguntas · cierra a las ${formatHHMM(cfg.closeAt)} (quedan ${formatCountdown(minutesUntilClose(cfg.closeAt))})`);
       setStatus('pending');
     }).catch(() => setStatus('no_pulse'));
   }, [userId]);
@@ -859,15 +872,15 @@ function PulseTodayCard({ userId }: { userId: string }) {
           <p className={cn('font-semibold text-sm',
             status === 'done' ? 'text-green-700' : status === 'closed' ? 'text-muted-foreground' : 'text-primary'
           )}>
-            {status === 'done' ? '¡Pulso completado!' : status === 'closed' ? 'Pulso cerrado' : 'Pulso de hoy disponible'}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
             {status === 'done'
-              ? `${correctAnswers}/7 respuestas correctas`
+              ? '¡Pulso completado!'
               : status === 'closed'
-              ? 'El tiempo de respuesta terminó'
-              : '7 preguntas · Responde antes de las 12 PM'}
+              ? 'Pulso cerrado'
+              : status === 'in_progress'
+              ? 'Continúa tu pulso de hoy'
+              : 'Pulso de hoy disponible'}
           </p>
+          <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
         </div>
         <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
       </div>

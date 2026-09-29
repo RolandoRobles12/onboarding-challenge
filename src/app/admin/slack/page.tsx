@@ -22,9 +22,10 @@ import {
   Pencil,
   X,
   CheckCircle,
+  AtSign,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UserProfile, SlackNotificationConfig, SlackChannel } from '@/lib/types-scalable';
+import type { UserProfile, SlackChannel, SlackDirectRecipient } from '@/lib/types-scalable';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -106,7 +107,8 @@ function SlackUsersTab() {
           Usuarios y sus Slack IDs
         </CardTitle>
         <CardDescription>
-          Asocia el Slack ID de cada usuario para que reciba notificaciones directas. El formato es U01234567.
+          Asocia el Slack ID de cada usuario (formato U01234567). Los vendedores activos con Slack ID reciben el aviso
+          diario del Pulso por mensaje directo; el de un admin se usa para enviarle las pruebas.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -273,7 +275,6 @@ interface ChannelsTabProps {
 }
 
 function SlackChannelsTab({ userId }: ChannelsTabProps) {
-  const [config, setConfig] = useState<SlackNotificationConfig | null>(null);
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -287,7 +288,6 @@ function SlackChannelsTab({ userId }: ChannelsTabProps) {
     setLoading(true);
     try {
       const data = await getSlackConfig();
-      setConfig(data);
       setChannels(data?.channels ?? []);
     } catch {
       toast({ title: 'Error', description: 'No se pudo cargar la configuración de Slack.', variant: 'destructive' });
@@ -327,17 +327,8 @@ function SlackChannelsTab({ userId }: ChannelsTabProps) {
   async function saveChannels() {
     setSaving(true);
     try {
-      const configToSave: Omit<SlackNotificationConfig, 'organizationId' | 'updatedAt'> = {
-        active: config?.active ?? false,
-        sendAt: config?.sendAt ?? '08:00',
-        closeAt: config?.closeAt ?? '12:00',
-        appUrl: config?.appUrl ?? '',
-        messageTemplate: config?.messageTemplate ?? '',
-        channels,
-        directRecipients: config?.directRecipients ?? [],
-        updatedBy: userId,
-      };
-      await saveSlackConfig(configToSave, userId);
+      // Solo se guardan los canales; el mensaje y el horario se editan en Admin → Pulso → Slack.
+      await saveSlackConfig({ channels }, userId);
       toast({ title: 'Guardado', description: 'Los canales de Slack han sido actualizados.' });
       await loadConfig();
     } catch {
@@ -357,7 +348,8 @@ function SlackChannelsTab({ userId }: ChannelsTabProps) {
             Canales configurados
           </CardTitle>
           <CardDescription>
-            Los mensajes del Knowledge Pulse se envían a estos canales. El campo "Vertical" filtra por producto (vacío = todos).
+            El aviso diario del Pulso se publica en estos canales. La vertical es solo una etiqueta para organizarlos
+            (el pulso es el mismo para todas las verticales).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -490,6 +482,97 @@ function SlackChannelsTab({ userId }: ChannelsTabProps) {
   );
 }
 
+// ── Direct Recipients Tab ────────────────────────────────────────────────────
+
+function SlackRecipientsTab({ userId }: ChannelsTabProps) {
+  const [recipients, setRecipients] = useState<SlackDirectRecipient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [newUserId, setNewUserId] = useState('');
+  const [newName, setNewName] = useState('');
+
+  useEffect(() => {
+    getSlackConfig()
+      .then(data => setRecipients(data?.directRecipients ?? []))
+      .catch(() => toast({ title: 'Error', description: 'No se pudo cargar la configuración de Slack.', variant: 'destructive' }))
+      .finally(() => setLoading(false));
+  }, []);
+
+  function addRecipient() {
+    const slackUserId = newUserId.trim();
+    const displayName = newName.trim();
+    if (!slackUserId || !displayName) {
+      toast({ title: 'Campos requeridos', description: 'El Slack ID y el nombre son obligatorios.', variant: 'destructive' });
+      return;
+    }
+    setRecipients(prev => [...prev, { id: generateId(), slackUserId, displayName }]);
+    setNewUserId('');
+    setNewName('');
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await saveSlackConfig({ directRecipients: recipients }, userId);
+      toast({ title: 'Guardado', description: 'Destinatarios actualizados.' });
+    } catch {
+      toast({ title: 'Error', description: 'No se pudieron guardar los destinatarios.', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <AtSign className="h-5 w-5" />
+          Destinatarios extra
+        </CardTitle>
+        <CardDescription>
+          Personas que reciben el aviso diario por mensaje directo además de los vendedores (por ejemplo, líderes o
+          capacitadores). Si no tienes Slack ID en tu perfil, las pruebas se envían a esta lista.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading ? (
+          <Skeleton className="h-16" />
+        ) : recipients.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-4">Sin destinatarios extra.</p>
+        ) : (
+          <div className="space-y-2">
+            {recipients.map(r => (
+              <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{r.displayName}</p>
+                  <code className="text-xs text-muted-foreground font-mono">{r.slackUserId}</code>
+                </div>
+                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                  onClick={() => setRecipients(prev => prev.filter(x => x.id !== r.id))}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] border-t pt-4">
+          <Input placeholder="Slack ID (U01234567)" className="font-mono" value={newUserId} onChange={e => setNewUserId(e.target.value)} />
+          <Input placeholder="Nombre" value={newName} onChange={e => setNewName(e.target.value)} />
+          <Button variant="outline" onClick={addRecipient} disabled={loading}>
+            <Plus className="h-4 w-4 mr-2" /> Agregar
+          </Button>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={save} disabled={saving || loading}>
+            <Save className="h-4 w-4 mr-2" />
+            {saving ? 'Guardando...' : 'Guardar destinatarios'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SlackAdminPage() {
@@ -506,7 +589,8 @@ export default function SlackAdminPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Configuración Slack</h1>
           <p className="text-sm text-muted-foreground">
-            Gestiona los Slack IDs de usuarios y los canales de notificación del Knowledge Pulse.
+            A quién le llega el aviso del Pulso: Slack IDs de usuarios, canales y destinatarios extra.
+            El mensaje y la hora de envío se configuran en Gestión del Pulso → Slack.
           </p>
         </div>
       </div>
@@ -521,6 +605,10 @@ export default function SlackAdminPage() {
             <Hash className="h-4 w-4" />
             Canales Slack
           </TabsTrigger>
+          <TabsTrigger value="recipients" className="flex items-center gap-2">
+            <AtSign className="h-4 w-4" />
+            Destinatarios extra
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users">
@@ -529,6 +617,10 @@ export default function SlackAdminPage() {
 
         <TabsContent value="channels">
           <SlackChannelsTab userId={userId} />
+        </TabsContent>
+
+        <TabsContent value="recipients">
+          <SlackRecipientsTab userId={userId} />
         </TabsContent>
       </Tabs>
     </div>
