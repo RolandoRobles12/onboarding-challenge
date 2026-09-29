@@ -1,151 +1,80 @@
 /**
  * POST /api/pulse/send-slack
- * Envía el mensaje del Pulso de Conocimiento a los canales de Slack configurados
- * y como DM a todos los usuarios que tienen slackId configurado en su perfil.
+ * Envía el aviso del Pulso de Conocimiento por Slack desde el panel de admin.
  *
- * Variable de entorno requerida:
- *   SLACK_BOT_TOKEN  — Token del bot de Slack (xoxb-...)
+ * Body: { date: "YYYY-MM-DD", test?: boolean, testSlackId?: string }
+ *  - test=true: solo al admin que la pide (testSlackId) o a los destinatarios
+ *    directos. No cambia el estado del pulso.
+ *  - test=false: envío real a canales, vendedores y destinatarios directos,
+ *    aunque el envío automático esté apagado. Marca el pulso como "aviso
+ *    enviado" y guarda el resultado (también si falla).
  *
- * La URL de la app se configura en /admin/knowledge-pulse → Config Slack → "URL de la app".
- *
- * Body: { date: "YYYY-MM-DD", test?: boolean }
+ * El envío automático a la hora configurada lo hace /api/pulse/cron.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSlackConfig, getOrgToken, getAllUsers } from '@/lib/firestore-service';
-
-async function sendSlackMessage(
-  token: string,
-  channel: string,
-  text: string,
-  blocks: unknown[]
-): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch('https://slack.com/api/chat.postMessage', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ channel, text, blocks, unfurl_links: false }),
-  });
-  return res.json() as Promise<{ ok: boolean; error?: string }>;
-}
+import { claimPulseSlackSend, getDailyPulse, recordPulseSlackResult } from '@/lib/firestore-service';
+import { sendPulseSlack, summarizeSlackResults, PulseSlackError } from '@/lib/pulse-slack';
 
 export async function POST(req: NextRequest) {
   try {
-    const { date, test = false } = await req.json() as { date: string; test?: boolean };
+    const { date, test = false, testSlackId } = await req.json() as { date: string; test?: boolean; testSlackId?: string };
+    if (!date) return NextResponse.json({ error: 'Falta la fecha del pulso' }, { status: 400 });
 
-    // Leer token desde Firestore primero; si no existe, usar variable de entorno como respaldo
-    const storedToken = await getOrgToken('slack_bot_token');
-    const token = storedToken?.value || process.env.SLACK_BOT_TOKEN;
-    if (!token) {
-      return NextResponse.json(
-        { error: 'SLACK_BOT_TOKEN no configurado. Agrégalo en Admin → Sistema → Tokens o como variable de entorno.' },
-        { status: 500 }
-      );
-    }
-
-    const cfg = await getSlackConfig();
-    if (!cfg) {
-      return NextResponse.json({ error: 'Configuración de Slack no encontrada. Guarda la config en Admin → Knowledge Pulse → Slack.' }, { status: 404 });
-    }
-    if (!cfg.active && !test) {
-      return NextResponse.json({ error: 'Notificaciones de Slack desactivadas' }, { status: 400 });
-    }
-
-    // Build pulse link — prefer stored appUrl, fall back to the request host so the
-    // button is always present even when appUrl hasn't been saved in Firestore yet.
     const proto = req.headers.get('x-forwarded-proto') || 'https';
     const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
-    const baseUrl = cfg.appUrl?.trim()
-      ? cfg.appUrl.replace(/\/$/, '')
-      : host ? `${proto}://${host}` : '';
-    const pulseLink = baseUrl ? `${baseUrl}/pulse` : '';
 
-    const [y, m, d] = date.split('-').map(Number);
-    const displayDate = new Date(y, m - 1, d).toLocaleDateString('es-MX', {
-      weekday: 'long', day: 'numeric', month: 'long',
-    });
-
-    const textBody = (cfg.messageTemplate || '¡Es hora del Pulso de Conocimiento diario! 📚')
-      .replace('{date}', displayDate)
-      .replace(/\{link\}/g, '')
-      .trim();
-
-    const testPrefix = test ? '🧪 *[PRUEBA]* ' : '';
-    const finalText = testPrefix + textBody;
-    const fallbackText = pulseLink ? `${finalText} ${pulseLink}` : finalText;
-
-    const blocks: unknown[] = [
-      { type: 'section', text: { type: 'mrkdwn', text: finalText } },
-      ...(pulseLink ? [{
-        type: 'actions',
-        elements: [{
-          type: 'button',
-          text: { type: 'plain_text', text: '📚 Responder el Pulso →', emoji: true },
-          style: 'primary',
-          url: pulseLink,
-        }],
-      }] : []),
-    ];
-
-    const results: { target: string; type: 'channel' | 'dm'; ok: boolean; error?: string }[] = [];
-
-    // 1. Send to active channels (if any)
-    const activeChannels = cfg.channels?.filter(ch => ch.active) ?? [];
-    for (const ch of activeChannels) {
-      const data = await sendSlackMessage(token, ch.channelId, fallbackText, blocks);
-      results.push({ target: ch.channelName, type: 'channel', ok: data.ok, error: data.error });
+    let pulse = null;
+    if (!test) {
+      pulse = await getDailyPulse(date);
+      if (!pulse || (pulse.questionIds ?? []).length === 0) {
+        return NextResponse.json({ error: 'El pulso de ese día no existe o no tiene preguntas.' }, { status: 400 });
+      }
+      // Primer envío: se reserva antes de mandar para no coincidir con el proceso
+      // programado. Un reenvío (ya estaba 'active') es una decisión explícita del admin.
+      if (pulse.status === 'scheduled' && !(await claimPulseSlackSend(date))) {
+        return NextResponse.json({ error: 'El aviso de este pulso ya se está enviando o ya se envió.' }, { status: 409 });
+      }
     }
 
-    // 2. Send DMs to all users with slackId configured in their profile
-    const allUsers = await getAllUsers();
-    const usersWithSlack = allUsers.filter(u => u.slackId?.trim());
-    const sentSlackIds = new Set<string>();
-    for (const user of usersWithSlack) {
-      const slackId = user.slackId!.trim();
-      sentSlackIds.add(slackId);
-      const data = await sendSlackMessage(token, slackId, fallbackText, blocks);
-      results.push({ target: user.nombre || user.email, type: 'dm', ok: data.ok, error: data.error });
+    let results;
+    try {
+      results = await sendPulseSlack({
+        date,
+        test,
+        testSlackId,
+        fallbackBaseUrl: host ? `${proto}://${host}` : undefined,
+      });
+    } catch (err) {
+      // Deja constancia del fallo en el pulso para que el panel lo muestre.
+      if (!test && pulse) {
+        const message = err instanceof Error ? err.message : String(err);
+        await recordPulseSlackResult(date, { ok: 0, failed: 0, error: message, trigger: 'manual' }).catch(() => {});
+      }
+      throw err;
     }
 
-    // 3. Send DMs to directRecipients configured in the Slack config (de-duped)
-    const directRecipients = cfg.directRecipients ?? [];
-    for (const recipient of directRecipients) {
-      const slackId = recipient.slackUserId?.trim();
-      if (!slackId || sentSlackIds.has(slackId)) continue; // skip if already sent via user profile
-      const data = await sendSlackMessage(token, slackId, fallbackText, blocks);
-      results.push({ target: recipient.displayName, type: 'dm', ok: data.ok, error: data.error });
-    }
-
-    // If nothing was configured to send, return an informative error
-    if (results.length === 0) {
-      return NextResponse.json({
-        error: 'Nada que enviar: no hay canales activos ni usuarios con Slack ID configurado.',
-      }, { status: 400 });
+    if (!test && pulse) {
+      await recordPulseSlackResult(date, { ...summarizeSlackResults(results), trigger: 'manual' });
     }
 
     const failed = results.filter(r => !r.ok);
-    const succeeded = results.filter(r => r.ok);
-
+    const succeeded = results.length - failed.length;
     if (failed.length === results.length) {
       return NextResponse.json({ message: 'Todos los envíos fallaron', results }, { status: 502 });
     }
     if (failed.length > 0) {
-      return NextResponse.json({
-        message: `${succeeded.length} enviados, ${failed.length} fallaron`,
-        results,
-        partialSuccess: true,
-      }, { status: 207 });
+      return NextResponse.json({ message: `${succeeded} enviados, ${failed.length} fallaron`, results, partialSuccess: true }, { status: 207 });
     }
-
     return NextResponse.json({
       message: `${results.length} mensaje${results.length !== 1 ? 's' : ''} enviado${results.length !== 1 ? 's' : ''}`,
       results,
     });
   } catch (err: unknown) {
+    if (err instanceof PulseSlackError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
     console.error('[send-slack] Error:', err);
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }
 }
-

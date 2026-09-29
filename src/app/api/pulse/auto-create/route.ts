@@ -3,48 +3,43 @@
  * Genera automáticamente el pulso del día si aún no existe y la opción
  * "autoDailyPulse" está habilitada en la configuración del pulso.
  *
- * Puede llamarse desde:
- *  - Un cron job externo (p.ej. Cloud Scheduler, GitHub Actions, cron-job.org)
- *  - La propia app al cargar la página de pulso del usuario
+ * Lo llama la página del vendedor al abrirse, como respaldo de /api/pulse/cron.
+ * Es idempotente: si el pulso ya existe no hace nada.
  *
- * Body (opcional): { date?: "YYYY-MM-DD" }  — si se omite, usa la fecha de hoy.
+ * Body (opcional): { date?: "YYYY-MM-DD" } — si se omite, usa la fecha de hoy
+ * en la zona horaria del equipo.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getPulseConfig,
   getDailyPulse,
-  upsertDailyPulse,
+  createDailyPulseIfMissing,
   scheduleAutoPulse,
 } from '@/lib/firestore-service';
-
-function todayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
+import { pulseDateStr } from '@/lib/pulse-utils';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({})) as { date?: string };
-    const date = body.date ?? todayStr();
+    const today = pulseDateStr();
+    // Solo se permite crear el pulso de hoy (evita crear días arbitrarios desde el cliente).
+    const date = body.date && body.date === today ? body.date : today;
 
-    // 1. Check if autoDailyPulse is enabled
     const config = await getPulseConfig();
     if (!config.autoDailyPulse) {
       return NextResponse.json(
-        { message: 'autoDailyPulse está desactivado. Actívalo en Admin → Knowledge Pulse → Ajustes.' },
+        { message: 'autoDailyPulse está desactivado. Actívalo en Admin → Pulso → Ajustes.' },
         { status: 400 }
       );
     }
 
-    // 2. Check if pulse already exists for this date
     const existing = await getDailyPulse(date);
     if (existing) {
       return NextResponse.json({ message: `El pulso para ${date} ya existe.`, alreadyExists: true });
     }
 
-    // 3. Generate question pool and create the pulse
-    const questionIds = await scheduleAutoPulse();
+    const questionIds = await scheduleAutoPulse(undefined, date);
     if (questionIds.length === 0) {
       return NextResponse.json(
         { error: 'No hay preguntas activas con módulo asignado. Agrega preguntas en el banco.' },
@@ -52,11 +47,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    await upsertDailyPulse(date, questionIds, 'auto');
-
+    const created = await createDailyPulseIfMissing(date, questionIds, 'auto');
     return NextResponse.json({
-      message: `Pulso creado automáticamente para ${date} con ${questionIds.length} preguntas en el pool.`,
+      message: created
+        ? `Pulso creado automáticamente para ${date} con ${questionIds.length} preguntas en el pool.`
+        : `El pulso para ${date} ya existe.`,
       date,
+      alreadyExists: !created,
       questionsInPool: questionIds.length,
     });
   } catch (err: unknown) {

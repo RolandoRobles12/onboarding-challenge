@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useQuestions } from '@/hooks/use-firestore';
 import {
@@ -15,17 +16,35 @@ import {
   savePulseConfig,
   getPulseAttemptsByDate,
   getPulseCategories,
+  getPulseCronStatus,
+  getAllUsers,
 } from '@/lib/firestore-service';
 import type {
   DailyPulse,
-  SlackChannel,
-  SlackDirectRecipient,
   PulseAttempt,
   PulseConfig,
   PulseCategory,
+  PulseCronStatus,
   KnowledgeModule,
+  Question,
+  SlackNotificationConfig,
+  UserProfile,
 } from '@/lib/types-scalable';
-import { KNOWLEDGE_MODULE_LABELS, KNOWLEDGE_MODULES } from '@/lib/types-scalable';
+import { KNOWLEDGE_MODULE_LABELS, KNOWLEDGE_MODULES, SEGMENTATION_FIELD_KEYS } from '@/lib/types-scalable';
+import {
+  addDaysStr,
+  applySlackTemplate,
+  formatHHMM,
+  formatPulseDate,
+  getPulsePhase,
+  isPulseWindowOpen,
+  lastUsedByQuestion,
+  pulseDateStr,
+  DEFAULT_SLACK_TEMPLATE,
+  PULSE_PASS_PERCENTAGE,
+  PULSE_TIMEZONE,
+  type PulsePhase,
+} from '@/lib/pulse-utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,73 +57,58 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 import {
-  Radio, Settings, Zap, ChevronLeft, ChevronRight,
-  Plus, Trash2, Send, RefreshCw, Users, CheckCircle, Clock,
-  BarChart2, ListChecks, Edit3, AlertTriangle, Globe,
+  Radio, Settings, Zap, ChevronLeft, ChevronRight, Send, RefreshCw, Users, CheckCircle, Clock,
+  BarChart2, ListChecks, Edit3, AlertTriangle, Globe, Download, Search, Lock, Unlock, Activity,
+  ExternalLink, Copy,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function dateToStr(d: Date) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function todayStr() {
-  return dateToStr(new Date());
-}
-
-function formatDateLong(dateStr: string) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('es-MX', {
-    weekday: 'long', day: 'numeric', month: 'long',
-  });
-}
-
-function formatDateShort(dateStr: string) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
-}
-
-function addDays(dateStr: string, n: number) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return dateToStr(new Date(y, m - 1, d + n));
-}
-
 function getWeekDays(anchor: string): string[] {
-  const days: string[] = [];
-  // Monday of the week containing anchor
   const [y, m, d] = anchor.split('-').map(Number);
-  const date = new Date(y, m - 1, d);
-  const day = date.getDay(); // 0=Sun
-  const monday = new Date(y, m - 1, d - ((day === 0 ? 7 : day) - 1));
-  for (let i = 0; i < 7; i++) {
-    days.push(dateToStr(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i)));
-  }
-  return days;
+  const day = new Date(y, m - 1, d, 12).getDay(); // 0=Sun
+  const monday = addDaysStr(anchor, -((day === 0 ? 7 : day) - 1));
+  return Array.from({ length: 7 }, (_, i) => addDaysStr(monday, i));
 }
 
-const STATUS_META = {
-  scheduled: {
+const shortDate = (date: string) => formatPulseDate(date, { weekday: 'short', day: 'numeric', month: 'short' });
+
+function timeAgo(date: Date, now: Date): string {
+  const mins = Math.round((now.getTime() - date.getTime()) / 60_000);
+  if (mins < 1) return 'hace un momento';
+  if (mins < 60) return `hace ${mins} min`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  return `hace ${Math.round(hours / 24)} días`;
+}
+
+function timeOf(ts: { toDate?: () => Date } | undefined): string {
+  const d = ts?.toDate?.();
+  return d ? d.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit', timeZone: PULSE_TIMEZONE }) : '';
+}
+
+const PHASE_META: Record<Exclude<PulsePhase, 'sin_pulso'>, { label: string; dot: string; badge: string; hero: string; icon: typeof Clock }> = {
+  programado: {
     label: 'Programado',
     dot: 'bg-yellow-400',
     badge: 'bg-yellow-50 text-yellow-700 border border-yellow-200',
-    icon: Clock,
     hero: 'from-yellow-50 to-amber-50/30 border-yellow-200',
+    icon: Clock,
   },
-  active: {
-    label: 'Activo ahora',
+  disponible: {
+    label: 'Disponible ahora',
     dot: 'bg-green-500',
     badge: 'bg-green-50 text-green-700 border border-green-200',
-    icon: Radio,
     hero: 'from-green-50 to-emerald-50/30 border-green-200',
+    icon: Radio,
   },
-  closed: {
+  cerrado: {
     label: 'Cerrado',
     dot: 'bg-gray-400',
     badge: 'bg-gray-50 text-gray-600 border border-gray-200',
-    icon: CheckCircle,
     hero: 'from-gray-50 to-slate-50/30 border-gray-200',
+    icon: CheckCircle,
   },
 };
 
@@ -117,6 +121,59 @@ const MODULE_COLORS: Record<KnowledgeModule, string> = {
   incentivos: 'bg-yellow-500/10 text-yellow-700',
 };
 
+type ParticipantStatus = 'completado' | 'en_progreso' | 'vencido' | 'pendiente';
+
+interface ParticipantRow {
+  key: string;
+  name: string;
+  email?: string;
+  hub?: string;
+  vertical?: string;
+  status: ParticipantStatus;
+  attempt?: PulseAttempt;
+}
+
+const PARTICIPANT_STATUS_META: Record<ParticipantStatus, { label: string; className: string }> = {
+  completado: { label: 'Completado', className: 'bg-green-500/10 text-green-700' },
+  en_progreso: { label: 'En progreso', className: 'bg-blue-500/10 text-blue-700' },
+  vencido: { label: 'Sin terminar', className: 'bg-orange-500/10 text-orange-700' },
+  pendiente: { label: 'Pendiente', className: 'bg-muted text-muted-foreground' },
+};
+
+function userHub(u: UserProfile) {
+  return u.onboardingData?.[SEGMENTATION_FIELD_KEYS.hub] || u.assignedKiosko || undefined;
+}
+
+function csvEscape(value: unknown): string {
+  const s = value === undefined || value === null ? '' : String(value);
+  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCsv(filename: string, rows: (string | number | undefined)[][]) {
+  const content = '﻿' + rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+type PulseConfigForm = Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'>;
+type SlackForm = Pick<SlackNotificationConfig, 'active' | 'sendAt' | 'appUrl' | 'messageTemplate'> & { dmSellers: boolean };
+
+const DEFAULT_CONFIG_FORM: PulseConfigForm = {
+  questionsPerPulse: 7,
+  activeModules: [],
+  closeAt: '12:00',
+  sameQuestionsForAll: true,
+  randomizeAnswerOrder: false,
+  autoDailyPulse: false,
+};
+
+/** Si el proceso programado no corre en este tiempo, se muestra una alerta. */
+const CRON_STALE_MINUTES = 45;
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function KnowledgePulsePage() {
@@ -124,69 +181,107 @@ export default function KnowledgePulsePage() {
   const { questions, loading: loadingQ } = useQuestions();
 
   const [mainTab, setMainTab] = useState('pulsos');
+  const [now, setNow] = useState(() => new Date());
+  const today = pulseDateStr(now);
+
   const [categories, setCategories] = useState<PulseCategory[]>([]);
-  const categoryMap = Object.fromEntries(categories.map(c => [c.key, c])) as Record<string, PulseCategory>;
-  const moduleLabel = (mod: KnowledgeModule) => categoryMap[mod]?.name ?? KNOWLEDGE_MODULE_LABELS[mod];
-  const moduleColor = (mod: KnowledgeModule) => categoryMap[mod]?.color ?? MODULE_COLORS[mod];
-  useEffect(() => {
-    getPulseCategories().then(setCategories).catch(() => {});
-  }, []);
-  const [weekAnchor, setWeekAnchor] = useState(todayStr());
-  const [selectedDate, setSelectedDate] = useState(todayStr());
+  const categoryMap = useMemo(
+    () => Object.fromEntries(categories.map(c => [c.key, c])) as Record<string, PulseCategory>,
+    [categories],
+  );
+  const moduleLabel = useCallback((mod: KnowledgeModule) => categoryMap[mod]?.name ?? KNOWLEDGE_MODULE_LABELS[mod] ?? mod, [categoryMap]);
+  const moduleColor = useCallback((mod: KnowledgeModule) => categoryMap[mod]?.color ?? MODULE_COLORS[mod] ?? 'bg-muted text-muted-foreground', [categoryMap]);
+  const moduleKeys = useMemo<KnowledgeModule[]>(() => {
+    const active = categories.filter(c => c.active).map(c => c.key as KnowledgeModule);
+    return active.length > 0 ? active : KNOWLEDGE_MODULES;
+  }, [categories]);
+
+  // Configuración (se carga una vez; cambiar de pestaña no descarta lo editado)
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [savedConfig, setSavedConfig] = useState<PulseConfigForm>(DEFAULT_CONFIG_FORM);
+  const [configForm, setConfigForm] = useState<PulseConfigForm>(DEFAULT_CONFIG_FORM);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const [slackConfig, setSlackConfig] = useState<SlackNotificationConfig | null>(null);
+  const [savedSlack, setSavedSlack] = useState<SlackForm | null>(null);
+  const [slackForm, setSlackForm] = useState<SlackForm>({ active: false, sendAt: '08:00', appUrl: '', messageTemplate: DEFAULT_SLACK_TEMPLATE, dmSellers: true });
+  const [savingSlack, setSavingSlack] = useState(false);
+  const [sendingTest, setSendingTest] = useState(false);
+
+  const [cronStatus, setCronStatus] = useState<PulseCronStatus | null>(null);
+  const [sellers, setSellers] = useState<UserProfile[]>([]);
+
+  // Pulsos
+  const [weekAnchor, setWeekAnchor] = useState(today);
+  const [selectedDate, setSelectedDate] = useState(today);
   const [pulses, setPulses] = useState<DailyPulse[]>([]);
   const [loadingPulses, setLoadingPulses] = useState(true);
-  const [selectedPulse, setSelectedPulse] = useState<DailyPulse | null | undefined>(undefined); // undefined = not loaded yet
+  const [selectedPulse, setSelectedPulse] = useState<DailyPulse | null | undefined>(undefined); // undefined = cargando
   const [pulseAttempts, setPulseAttempts] = useState<PulseAttempt[]>([]);
-  const [loadingAttempts, setLoadingAttempts] = useState(false);
-  const [detailTab, setDetailTab] = useState('preguntas');
+  const [detailTab, setDetailTab] = useState('participacion');
   const [scheduling, setScheduling] = useState(false);
   const [actioning, setActioning] = useState(false);
 
-  // Pulse config (Ajustes tab)
-  const [loadingPulseConfig, setLoadingPulseConfig] = useState(false);
-  const [savingPulseConfig, setSavingPulseConfig] = useState(false);
-  const [pulseConfigForm, setPulseConfigForm] = useState<Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'>>({
-    questionsPerPulse: 7,
-    activeModules: [],
-    closeAt: '12:00',
-    sameQuestionsForAll: true,
-    randomizeAnswerOrder: false,
-    autoDailyPulse: false,
-  });
-
-  // Slack config (Slack tab)
-  const [loadingSlack, setLoadingSlack] = useState(false);
-  const [savingSlack, setSavingSlack] = useState(false);
-  const [sendingTest, setSendingTest] = useState(false);
-  const [slackForm, setSlackForm] = useState({
-    active: false,
-    sendAt: '08:00',
-    appUrl: '',
-    messageTemplate: '📡 *Pulso de Conocimiento* — {date}\n\nResponde tus 7 preguntas antes de las 12:00 PM. ¡Tienes hasta las 12:00 PM de hoy!',
-  });
-  const [channels, setChannels] = useState<SlackChannel[]>([]);
-  const [directRecipients, setDirectRecipients] = useState<SlackDirectRecipient[]>([]);
-  const [newChannelId, setNewChannelId] = useState('');
-  const [newChannelName, setNewChannelName] = useState('');
-  const [newChannelVertical, setNewChannelVertical] = useState('');
-  const [channelVerticalFilter, setChannelVerticalFilter] = useState('todos');
-  const [newDMUserId, setNewDMUserId] = useState('');
-  const [newDMUserName, setNewDMUserName] = useState('');
-
-  // Edit dialog
+  // Diálogo de preguntas
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingPulse, setEditingPulse] = useState<{ date: string; questionIds: string[] } | null>(null);
 
-  // ── Load pulses for current week window ───────────────────────────────
+  const configDirty = JSON.stringify(configForm) !== JSON.stringify(savedConfig);
+  const slackDirty = !!savedSlack && JSON.stringify(slackForm) !== JSON.stringify(savedSlack);
+
+  // ── Carga inicial ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    getPulseCategories().then(setCategories).catch(() => {});
+    getPulseCronStatus().then(setCronStatus).catch(() => {});
+    getAllUsers()
+      .then(users => setSellers(users.filter(u => u.rol === 'seller' && u.active !== false)))
+      .catch(() => {});
+    getPulseConfig().then(cfg => {
+      const form: PulseConfigForm = {
+        questionsPerPulse: cfg.questionsPerPulse,
+        activeModules: cfg.activeModules ?? [],
+        closeAt: cfg.closeAt,
+        sameQuestionsForAll: cfg.sameQuestionsForAll,
+        randomizeAnswerOrder: cfg.randomizeAnswerOrder,
+        autoDailyPulse: cfg.autoDailyPulse ?? false,
+      };
+      setSavedConfig(form);
+      setConfigForm(form);
+    }).finally(() => setLoadingConfig(false));
+    getSlackConfig().then(cfg => {
+      const detectedUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const form: SlackForm = {
+        active: cfg?.active ?? false,
+        sendAt: cfg?.sendAt ?? '08:00',
+        appUrl: cfg?.appUrl || detectedUrl,
+        messageTemplate: cfg?.messageTemplate || DEFAULT_SLACK_TEMPLATE,
+        dmSellers: cfg?.dmSellers !== false,
+      };
+      setSlackConfig(cfg);
+      setSavedSlack(form);
+      setSlackForm(form);
+    });
+  }, []);
+
+  // Aviso al salir de la página con cambios sin guardar
+  useEffect(() => {
+    if (!configDirty && !slackDirty) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [configDirty, slackDirty]);
 
   const loadPulses = useCallback(async () => {
     setLoadingPulses(true);
     try {
       const days = getWeekDays(weekAnchor);
-      const start = addDays(days[0], -1);
-      const end = addDays(days[6], 1);
-      const list = await getDailyPulses(start, end);
-      setPulses(list);
+      setPulses(await getDailyPulses(days[0], days[6]));
     } finally {
       setLoadingPulses(false);
     }
@@ -194,103 +289,67 @@ export default function KnowledgePulsePage() {
 
   useEffect(() => { loadPulses(); }, [loadPulses]);
 
-  // ── Load selected day ──────────────────────────────────────────────────
-
   const loadSelectedDay = useCallback(async (date: string) => {
-    setSelectedPulse(undefined); // loading
-    setLoadingAttempts(true);
-    const [pulse, attempts] = await Promise.all([
-      getDailyPulse(date),
-      getPulseAttemptsByDate(date),
-    ]);
-    setSelectedPulse(pulse); // null = no pulse
+    setSelectedPulse(undefined);
+    const [pulse, attempts] = await Promise.all([getDailyPulse(date), getPulseAttemptsByDate(date)]);
+    setSelectedPulse(pulse);
     setPulseAttempts(attempts);
-    setLoadingAttempts(false);
   }, []);
 
-  // Auto-load today on mount and whenever selected date changes
   useEffect(() => { loadSelectedDay(selectedDate); }, [selectedDate, loadSelectedDay]);
 
-  // ── Pulse config (Ajustes tab) ─────────────────────────────────────────
+  const refreshDay = (date: string) => Promise.all([loadPulses(), loadSelectedDay(date)]);
 
-  useEffect(() => {
-    if (mainTab !== 'ajustes') return;
-    setLoadingPulseConfig(true);
-    getPulseConfig().then(cfg => {
-      setPulseConfigForm({
-        questionsPerPulse: cfg.questionsPerPulse,
-        activeModules: cfg.activeModules,
-        closeAt: cfg.closeAt,
-        sameQuestionsForAll: cfg.sameQuestionsForAll,
-        randomizeAnswerOrder: cfg.randomizeAnswerOrder,
-        autoDailyPulse: cfg.autoDailyPulse ?? false,
-      });
-    }).finally(() => setLoadingPulseConfig(false));
-  }, [mainTab]);
-
-  // ── Slack config ───────────────────────────────────────────────────────
-
-  useEffect(() => {
-    if (mainTab !== 'slack') return;
-    setLoadingSlack(true);
-    getSlackConfig().then(cfg => {
-      // Auto-detect current app URL as default when not configured yet
-      const detectedUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      if (cfg) {
-        setSlackForm({
-          active: cfg.active,
-          sendAt: cfg.sendAt,
-          appUrl: cfg.appUrl || detectedUrl,
-          messageTemplate: cfg.messageTemplate,
-        });
-        setChannels(cfg.channels);
-        setDirectRecipients(cfg.directRecipients ?? []);
-      } else {
-        // First time — pre-fill the URL
-        setSlackForm(f => ({ ...f, appUrl: detectedUrl }));
-      }
-    }).finally(() => setLoadingSlack(false));
-  }, [mainTab]);
-
-  // ── Actions ────────────────────────────────────────────────────────────
+  // ── Acciones del pulso ─────────────────────────────────────────────────
 
   const handleAutoSchedule = async (date: string) => {
     setScheduling(true);
     try {
-      const qIds = await scheduleAutoPulse();
+      const qIds = await scheduleAutoPulse(undefined, date);
       if (qIds.length === 0) {
-        toast({ variant: 'destructive', title: 'Sin preguntas', description: 'No hay preguntas activas. Agrega preguntas en el banco.' });
+        toast({ variant: 'destructive', title: 'Sin preguntas', description: 'No hay preguntas activas con módulo en los módulos seleccionados.' });
         return;
       }
       await upsertDailyPulse(date, qIds, profile?.uid || 'admin');
-      toast({ title: 'Pulso creado', description: `Pool de ${qIds.length} preguntas disponibles para ${formatDateShort(date)}` });
-      await Promise.all([loadPulses(), loadSelectedDay(date)]);
+      toast({ title: 'Pulso creado', description: `${Math.min(savedConfig.questionsPerPulse, qIds.length)} preguntas por vendedor · pool de ${qIds.length} para ${shortDate(date)}` });
+      await refreshDay(date);
     } finally {
       setScheduling(false);
     }
   };
 
-  const handleActivate = async (date: string) => {
+  const handleSendSlack = async (date: string, resend: boolean) => {
+    if (resend && !window.confirm('El aviso de hoy ya se envió. ¿Enviarlo otra vez a todo el equipo?')) return;
     setActioning(true);
     try {
-      await updatePulseStatus(date, 'active');
-      toast({ title: 'Pulso activado', description: 'El equipo ya puede responder.' });
-      await Promise.all([loadPulses(), loadSelectedDay(date)]);
-    } catch {
-      toast({ variant: 'destructive', title: 'Error al activar' });
+      const res = await fetch('/api/pulse/send-slack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date }),
+      });
+      const data = await res.json() as { message?: string; error?: string };
+      if (!res.ok && res.status !== 207) {
+        toast({ variant: 'destructive', title: 'No se envió el aviso', description: data.error ?? data.message ?? `HTTP ${res.status}` });
+      } else {
+        toast({ title: res.status === 207 ? '⚠️ Aviso enviado con errores' : 'Aviso enviado', description: data.message });
+      }
+      await refreshDay(date);
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'Error al enviar', description: err instanceof Error ? err.message : String(err) });
     } finally {
       setActioning(false);
     }
   };
 
-  const handleClose = async (date: string) => {
+  const handleSetClosed = async (date: string, closed: boolean) => {
     setActioning(true);
     try {
-      await updatePulseStatus(date, 'closed');
-      toast({ title: 'Pulso cerrado' });
-      await Promise.all([loadPulses(), loadSelectedDay(date)]);
+      if (closed) await updatePulseStatus(date, 'closed');
+      else await updatePulseStatus(date, selectedPulse?.sentAt ? 'active' : 'scheduled', undefined, false);
+      toast({ title: closed ? 'Pulso cerrado' : 'Pulso reabierto' });
+      await refreshDay(date);
     } catch {
-      toast({ variant: 'destructive', title: 'Error al cerrar' });
+      toast({ variant: 'destructive', title: 'No se pudo actualizar el pulso' });
     } finally {
       setActioning(false);
     }
@@ -302,32 +361,35 @@ export default function KnowledgePulsePage() {
       await upsertDailyPulse(editingPulse.date, editingPulse.questionIds, profile?.uid || 'admin');
       toast({ title: 'Pulso actualizado' });
       setEditDialogOpen(false);
-      await Promise.all([loadPulses(), loadSelectedDay(editingPulse.date)]);
+      await refreshDay(editingPulse.date);
     } catch {
       toast({ variant: 'destructive', title: 'Error al actualizar' });
     }
   };
 
-  // Pulse config
-  const handleSavePulseConfig = async () => {
+  // ── Guardar configuración ──────────────────────────────────────────────
+
+  const handleSaveConfig = async () => {
     if (!profile) return;
-    setSavingPulseConfig(true);
+    setSavingConfig(true);
     try {
-      await savePulseConfig(pulseConfigForm, profile.uid);
+      await savePulseConfig(configForm, profile.uid);
+      setSavedConfig(configForm);
       toast({ title: 'Ajustes del pulso guardados' });
     } catch {
       toast({ variant: 'destructive', title: 'Error al guardar' });
     } finally {
-      setSavingPulseConfig(false);
+      setSavingConfig(false);
     }
   };
 
-  // Slack
   const handleSaveSlack = async () => {
     if (!profile) return;
     setSavingSlack(true);
     try {
-      await saveSlackConfig({ ...slackForm, closeAt: '12:00', channels, directRecipients }, profile.uid);
+      await saveSlackConfig(slackForm, profile.uid);
+      setSavedSlack(slackForm);
+      setSlackConfig(prev => prev ? { ...prev, ...slackForm } : prev);
       toast({ title: 'Configuración de Slack guardada' });
     } catch {
       toast({ variant: 'destructive', title: 'Error al guardar' });
@@ -336,100 +398,170 @@ export default function KnowledgePulsePage() {
     }
   };
 
-  const handleAddChannel = () => {
-    const id = newChannelId.trim(); const name = newChannelName.trim();
-    if (!id || !name) return;
-    setChannels(prev => [...prev, { id: crypto.randomUUID(), channelId: id, channelName: name, vertical: newChannelVertical.trim() || undefined, active: true }]);
-    setNewChannelId(''); setNewChannelName(''); setNewChannelVertical('');
-  };
-
-  const handleAddDM = () => {
-    const uid = newDMUserId.trim(); const name = newDMUserName.trim();
-    if (!uid || !name) return;
-    setDirectRecipients(prev => [...prev, { id: crypto.randomUUID(), slackUserId: uid, displayName: name }]);
-    setNewDMUserId(''); setNewDMUserName('');
-  };
-
   const handleSendTestSlack = async () => {
     setSendingTest(true);
     try {
       const res = await fetch('/api/pulse/send-slack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: todayStr(), test: true }),
+        body: JSON.stringify({ date: today, test: true, testSlackId: profile?.slackId }),
       });
-      const data = await res.json() as {
-        message?: string;
-        error?: string;
-        results?: { target: string; type: string; ok: boolean; error?: string }[];
-      };
-
+      const data = await res.json() as { message?: string; error?: string; results?: { target: string; ok: boolean; error?: string }[] };
+      const failed = (data.results ?? []).filter(r => !r.ok);
       if (!res.ok && !data.results) {
-        // Hard error (no results at all — token missing, config missing, etc.)
-        toast({
-          variant: 'destructive',
-          title: 'Error al enviar',
-          description: data.error ?? `HTTP ${res.status}`,
-        });
-        return;
-      }
-
-      const results = data.results ?? [];
-      const failed = results.filter(r => !r.ok);
-      const succeeded = results.filter(r => r.ok);
-
-      if (failed.length === 0) {
-        const channels = succeeded.filter(r => r.type === 'channel').length;
-        const dms = succeeded.filter(r => r.type === 'dm').length;
-        const parts = [
-          channels > 0 ? `${channels} canal${channels !== 1 ? 'es' : ''}` : '',
-          dms > 0 ? `${dms} DM${dms !== 1 ? 's' : ''}` : '',
-        ].filter(Boolean).join(', ');
-        toast({ title: '✅ Prueba enviada', description: `Enviado a: ${parts || 'sin destinatarios'}` });
+        toast({ variant: 'destructive', title: 'Error al enviar', description: data.error ?? `HTTP ${res.status}` });
+      } else if (failed.length > 0) {
+        toast({ variant: 'destructive', title: 'La prueba falló', description: failed.map(r => `${r.target}: ${r.error ?? 'error'}`).join(' · ') });
       } else {
-        const details = failed.map(r => `${r.target}: ${r.error ?? 'error desconocido'}`).join(' · ');
-        toast({
-          variant: 'destructive',
-          title: `⚠️ ${succeeded.length} ok, ${failed.length} fallaron`,
-          description: details,
-        });
+        toast({ title: '✅ Prueba enviada', description: 'Revisa tus mensajes directos de Slack. Se usó la configuración guardada.' });
       }
-    } catch (err: unknown) {
+    } catch (err) {
       toast({ variant: 'destructive', title: 'Error al enviar', description: err instanceof Error ? err.message : String(err) });
     } finally {
       setSendingTest(false);
     }
   };
 
-  // ── Derived ────────────────────────────────────────────────────────────
+  // ── Derivados ──────────────────────────────────────────────────────────
 
+  const closeAt = savedConfig.closeAt;
+  const perPulse = savedConfig.questionsPerPulse;
   const weekDays = getWeekDays(weekAnchor);
   const getPulseForDate = (d: string) => pulses.find(p => p.date === d) ?? null;
+  const isToday = selectedDate === today;
+  const selectedPhase = getPulsePhase(selectedPulse, closeAt, now);
+  const pulsePool = selectedPulse?.questionIds ?? [];
 
-  const pulseQuestions = selectedPulse
-    ? questions.filter(q => (selectedPulse.questionIds ?? []).includes(q.id))
-    : [];
+  const pulseQuestions = useMemo(() => {
+    const byId = new Map(questions.map(q => [q.id, q]));
+    return pulsePool.map(id => byId.get(id)).filter((q): q is Question => !!q);
+  }, [questions, pulsePool]);
 
-  const avgCorrect = pulseAttempts.length > 0
-    ? Math.round(pulseAttempts.reduce((s, a) => s + a.percentage, 0) / pulseAttempts.length)
+  // Participación: vendedores activos que ya existían ese día + quien haya respondido.
+  const participants = useMemo<ParticipantRow[]>(() => {
+    const endOfDay = selectedDate;
+    const byUser = new Map(pulseAttempts.map(a => [a.userId, a]));
+    const rows: ParticipantRow[] = [];
+    const seen = new Set<string>();
+    for (const u of sellers) {
+      const created = u.createdAt?.toDate ? pulseDateStr(u.createdAt.toDate()) : '';
+      const attempt = byUser.get(u.uid);
+      if (!attempt && created && created > endOfDay) continue;
+      seen.add(u.uid);
+      rows.push({
+        key: u.uid,
+        name: u.nombre || u.email,
+        email: u.email,
+        hub: attempt?.hub ?? userHub(u),
+        vertical: attempt?.vertical ?? u.onboardingData?.[SEGMENTATION_FIELD_KEYS.vertical],
+        status: !attempt ? 'pendiente'
+          : attempt.status === 'completed' ? 'completado'
+          : attempt.status === 'expired' || attempt.date < today ? 'vencido'
+          : 'en_progreso',
+        attempt,
+      });
+    }
+    for (const a of pulseAttempts) {
+      if (seen.has(a.userId)) continue;
+      rows.push({
+        key: a.userId, name: a.userName, hub: a.hub, vertical: a.vertical,
+        status: a.status === 'completed' ? 'completado' : a.status === 'expired' || a.date < today ? 'vencido' : 'en_progreso',
+        attempt: a,
+      });
+    }
+    return rows;
+  }, [sellers, pulseAttempts, selectedDate, today]);
+
+  const completedAttempts = pulseAttempts.filter(a => a.status === 'completed');
+  const avgCorrect = completedAttempts.length > 0
+    ? Math.round(completedAttempts.reduce((s, a) => s + a.percentage, 0) / completedAttempts.length)
+    : null;
+  const participationPct = participants.length > 0
+    ? Math.round((completedAttempts.length / participants.length) * 100)
     : null;
 
-  const channelVerticals = Array.from(new Set(channels.map(c => c.vertical).filter(Boolean))) as string[];
+  const exportCsv = () => {
+    const header = ['Nombre', 'Email', 'Hub', 'Vertical', 'Estado', 'Correctas', 'Total', '% aciertos', 'Tiempo (s)', 'Terminó'];
+    const rows = participants.map(p => [
+      p.name, p.email, p.hub, p.vertical, PARTICIPANT_STATUS_META[p.status].label,
+      p.attempt?.status === 'completed' ? p.attempt.correctAnswers : p.attempt?.answers?.filter(a => a.isCorrect).length,
+      p.attempt?.totalQuestions,
+      p.attempt?.status === 'completed' ? p.attempt.percentage : undefined,
+      p.attempt ? (p.attempt.answers ?? []).reduce((s, a) => s + (a.timeSpent || 0), 0) : undefined,
+      timeOf(p.attempt?.completedAt),
+    ]);
+    downloadCsv(`pulso-${selectedDate}.csv`, [header, ...rows]);
+  };
 
-  const isToday = selectedDate === todayStr();
+  // Salud de la automatización
+  const cronLastRun = cronStatus?.lastRunAt?.toDate?.();
+  const cronMinutesAgo = cronLastRun ? (now.getTime() - cronLastRun.getTime()) / 60_000 : null;
+  const cronHealthy = cronMinutesAgo !== null && cronMinutesAgo <= CRON_STALE_MINUTES;
+  const modulePoolSize = useMemo(() => {
+    const active = new Set(savedConfig.activeModules ?? []);
+    return questions.filter(q => q.module && (active.size === 0 || active.has(q.module))).length;
+  }, [questions, savedConfig.activeModules]);
+  const sellersWithSlack = sellers.filter(u => u.slackId?.trim()).length;
+  const activeChannels = (slackConfig?.channels ?? []).filter(c => c.active).length;
+  const directRecipients = slackConfig?.directRecipients?.length ?? 0;
+
+  const warnings: { text: string; action?: { label: string; onClick?: () => void; href?: string } }[] = [];
+  if (!cronHealthy) {
+    warnings.push({
+      text: cronLastRun
+        ? `El proceso programado no corre desde ${timeAgo(cronLastRun, now)}. Sin él, el aviso de Slack no sale solo ni se crea el pulso automático al inicio del día.`
+        : 'El proceso programado nunca se ha ejecutado. Sin él, el aviso de Slack no sale solo ni se crea el pulso automático al inicio del día.',
+      action: { label: 'Cómo configurarlo', onClick: () => setMainTab('ajustes') },
+    });
+  }
+  if (cronStatus?.lastError) warnings.push({ text: `La última ejecución del proceso programado falló: ${cronStatus.lastError}` });
+  if (!loadingQ && !loadingConfig && modulePoolSize === 0) {
+    warnings.push({ text: 'No hay preguntas activas en los módulos seleccionados: no se puede crear el pulso.', action: { label: 'Banco de preguntas', href: '/admin/questions' } });
+  } else if (!loadingQ && !loadingConfig && modulePoolSize < perPulse) {
+    warnings.push({ text: `Solo hay ${modulePoolSize} preguntas activas en los módulos seleccionados; el pulso pide ${perPulse}.` });
+  }
+  if (slackConfig?.active && activeChannels === 0 && directRecipients === 0 && (!slackForm.dmSellers || sellersWithSlack === 0)) {
+    warnings.push({ text: 'Slack está activo pero no hay canales, destinatarios ni vendedores con Slack ID.', action: { label: 'Configurar Slack', href: '/admin/slack' } });
+  }
+  const todayPulse = getPulseForDate(today);
+  if (todayPulse?.slackResult && (todayPulse.slackResult.failed > 0 || todayPulse.slackResult.error)) {
+    warnings.push({ text: `El aviso de hoy tuvo errores: ${todayPulse.slackResult.error ?? `${todayPulse.slackResult.failed} envíos fallidos`}` });
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Radio className="h-7 w-7 text-primary" /> Pulso de Conocimiento
-          </h1>
-          <p className="text-muted-foreground mt-1">Cuestionario diario de 7 preguntas para el equipo comercial</p>
+      <div>
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <Radio className="h-7 w-7 text-primary" /> Pulso de Conocimiento
+        </h1>
+        <p className="text-muted-foreground mt-1">
+          Cuestionario diario de {perPulse} preguntas para el equipo comercial · cierra a las {formatHHMM(closeAt)}
+        </p>
+      </div>
+
+      {/* Salud de la automatización */}
+      <div className="rounded-xl border bg-card px-4 py-3 space-y-2">
+        <div className="flex items-center gap-2 text-sm flex-wrap">
+          <Activity className={cn('h-4 w-4', cronHealthy ? 'text-green-600' : 'text-amber-500')} />
+          <span className="font-medium">Automatización:</span>
+          <span className="text-muted-foreground">
+            {cronLastRun ? `última ejecución ${timeAgo(cronLastRun, now)}` : 'sin ejecuciones registradas'}
+          </span>
         </div>
+        {warnings.map((w, i) => (
+          <div key={i} className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span className="flex-1">{w.text}</span>
+            {w.action && (w.action.href ? (
+              <Link href={w.action.href} className="font-semibold underline shrink-0">{w.action.label}</Link>
+            ) : (
+              <button onClick={w.action.onClick} className="font-semibold underline shrink-0">{w.action.label}</button>
+            ))}
+          </div>
+        ))}
       </div>
 
       <Tabs value={mainTab} onValueChange={setMainTab}>
@@ -438,511 +570,368 @@ export default function KnowledgePulsePage() {
             <BarChart2 className="h-4 w-4 mr-1.5" /> Pulsos
           </TabsTrigger>
           <TabsTrigger value="ajustes">
-            <Settings className="h-4 w-4 mr-1.5" /> Ajustes
+            <Settings className="h-4 w-4 mr-1.5" /> Ajustes {configDirty && <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-amber-500" />}
           </TabsTrigger>
           <TabsTrigger value="slack">
-            <Send className="h-4 w-4 mr-1.5" /> Slack
+            <Send className="h-4 w-4 mr-1.5" /> Slack {slackDirty && <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-amber-500" />}
           </TabsTrigger>
         </TabsList>
 
-        {/* ─────────────────── PULSOS TAB ─────────────────────────────── */}
+        {/* ─────────────────── PULSOS ─────────────────────────────────── */}
         <TabsContent value="pulsos" className="space-y-5 mt-5">
-
-          {/* ── HERO: selected day status ─────────────────────────── */}
           {selectedPulse === undefined ? (
             <Skeleton className="h-40 rounded-2xl" />
           ) : selectedPulse === null ? (
-            /* No pulse for this day */
             <div className="rounded-2xl border-2 border-dashed border-muted-foreground/20 bg-muted/20 p-8">
               <div className="flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    {isToday ? 'Hoy' : formatDateShort(selectedDate)} · Sin pulso programado
+                    {isToday ? 'Hoy' : shortDate(selectedDate)} · Sin pulso programado
                   </p>
-                  <h2 className="text-2xl font-bold capitalize">{formatDateLong(selectedDate)}</h2>
+                  <h2 className="text-2xl font-bold first-letter:uppercase">{formatPulseDate(selectedDate)}</h2>
                   <p className="text-muted-foreground text-sm mt-1">
-                    El equipo no tiene preguntas programadas para este día.
+                    {selectedDate < today ? 'Este día no tuvo pulso.' : 'El equipo no tiene preguntas programadas para este día.'}
                   </p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-3 shrink-0">
-                  <Button size="lg" className="font-semibold" onClick={() => handleAutoSchedule(selectedDate)} disabled={scheduling}>
-                    {scheduling
-                      ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creando...</>
-                      : <><Zap className="h-4 w-4 mr-2" /> Crear automáticamente</>
-                    }
-                  </Button>
-                  <Button size="lg" variant="outline" onClick={() => {
-                    setEditingPulse({ date: selectedDate, questionIds: [] });
-                    setEditDialogOpen(true);
-                  }}>
-                    <Edit3 className="h-4 w-4 mr-2" /> Elegir preguntas
-                  </Button>
-                </div>
+                {selectedDate >= today && (
+                  <div className="flex flex-col sm:flex-row gap-3 shrink-0">
+                    <Button size="lg" className="font-semibold" onClick={() => handleAutoSchedule(selectedDate)} disabled={scheduling}>
+                      {scheduling
+                        ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Creando...</>
+                        : <><Zap className="h-4 w-4 mr-2" /> Crear automáticamente</>}
+                    </Button>
+                    <Button size="lg" variant="outline" onClick={() => {
+                      setEditingPulse({ date: selectedDate, questionIds: [] });
+                      setEditDialogOpen(true);
+                    }}>
+                      <Edit3 className="h-4 w-4 mr-2" /> Elegir preguntas
+                    </Button>
+                  </div>
+                )}
               </div>
-              <p className="text-xs text-muted-foreground mt-4">
-                La creación automática selecciona 7 preguntas priorizando las de menor tasa de aciertos y distribuyendo por módulo.
-              </p>
+              {selectedDate >= today && (
+                <p className="text-xs text-muted-foreground mt-4">
+                  La creación automática reparte las preguntas entre módulos, prioriza las de menor tasa de aciertos y
+                  evita las usadas en los últimos días. Cada vendedor recibe {perPulse}.
+                </p>
+              )}
             </div>
-          ) : (
-            /* Has pulse */
-            (() => {
-              const meta = STATUS_META[selectedPulse.status] ?? STATUS_META['scheduled'];
-              const StatusIcon = meta.icon;
-              return (
-                <div className={cn('rounded-2xl border bg-gradient-to-br p-6 space-y-4', meta.hero)}>
-                  {/* Top row */}
-                  <div className="flex items-start justify-between gap-4 flex-wrap">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                        {isToday ? 'Hoy' : formatDateShort(selectedDate)}
-                      </p>
-                      <h2 className="text-2xl font-bold capitalize">{formatDateLong(selectedDate)}</h2>
-                    </div>
-                    <span className={cn('flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full', meta.badge)}>
-                      <StatusIcon className="h-3.5 w-3.5" />
-                      {meta.label}
-                    </span>
+          ) : (() => {
+            const meta = PHASE_META[selectedPhase === 'sin_pulso' ? 'programado' : selectedPhase];
+            const StatusIcon = meta.icon;
+            const slackResult = selectedPulse.slackResult;
+            const manuallyClosed = selectedPulse.status === 'closed';
+            return (
+              <div className={cn('rounded-2xl border bg-gradient-to-br p-6 space-y-4', meta.hero)}>
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      {isToday ? 'Hoy' : shortDate(selectedDate)}
+                    </p>
+                    <h2 className="text-2xl font-bold first-letter:uppercase">{formatPulseDate(selectedDate)}</h2>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {selectedPulse.sentAt
+                        ? `Aviso de Slack enviado a las ${timeOf(slackResult?.at ?? selectedPulse.sentAt)}${slackResult ? ` · ${slackResult.ok} entregados${slackResult.failed ? `, ${slackResult.failed} fallidos` : ''} (${slackResult.trigger === 'auto' ? 'automático' : 'manual'})` : ''}`
+                        : selectedPhase === 'cerrado' ? 'No se envió aviso de Slack'
+                        : savedSlack?.active ? `Aviso de Slack pendiente (programado a las ${formatHHMM(savedSlack.sendAt)})` : 'Envío automático de Slack desactivado'}
+                    </p>
+                    {slackResult?.error && <p className="text-xs text-red-600 mt-0.5">{slackResult.error}</p>}
                   </div>
-
-                  {/* Stats row */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                    <div className="bg-white/60 rounded-xl p-3">
-                      <p className="text-xs text-muted-foreground mb-0.5">Respuestas</p>
-                      <p className="text-2xl font-bold">{pulseAttempts.length}</p>
-                    </div>
-                    <div className="bg-white/60 rounded-xl p-3">
-                      <p className="text-xs text-muted-foreground mb-0.5">% Aciertos prom.</p>
-                      <p className={cn(
-                        'text-2xl font-bold',
-                        avgCorrect === null ? 'text-muted-foreground' :
-                        avgCorrect >= 70 ? 'text-green-600' : 'text-orange-500'
-                      )}>
-                        {avgCorrect !== null ? `${avgCorrect}%` : '—'}
-                      </p>
-                    </div>
-                    <div className="bg-white/60 rounded-xl p-3 col-span-2 sm:col-span-1">
-                      <p className="text-xs text-muted-foreground mb-0.5">Preguntas</p>
-                      <p className="text-2xl font-bold">{(selectedPulse.questionIds ?? []).length}</p>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex flex-wrap gap-2">
-                    {(selectedPulse.status === 'scheduled' || !selectedPulse.status) && (
-                      <Button onClick={() => handleActivate(selectedDate)} disabled={actioning} size="sm" className="font-semibold">
-                        <Radio className="h-4 w-4 mr-1.5" />
-                        {actioning ? 'Activando...' : 'Activar ahora'}
-                      </Button>
-                    )}
-                    {(selectedPulse.status === 'scheduled' || !selectedPulse.status) && (selectedPulse.questionIds ?? []).length === 0 && (
-                      <Button onClick={() => handleAutoSchedule(selectedDate)} disabled={scheduling} size="sm" variant="outline">
-                        <Zap className="h-4 w-4 mr-1.5" />
-                        {scheduling ? 'Asignando...' : 'Auto-asignar preguntas'}
-                      </Button>
-                    )}
-                    {selectedPulse.status === 'active' && (
-                      <Button onClick={() => handleClose(selectedDate)} disabled={actioning} size="sm" variant="outline" className="font-semibold border-green-300 text-green-700 hover:bg-green-50">
-                        <CheckCircle className="h-4 w-4 mr-1.5" />
-                        {actioning ? 'Cerrando...' : 'Cerrar pulso'}
-                      </Button>
-                    )}
-                    {selectedPulse.status !== 'closed' && (
-                      <Button variant="ghost" size="sm" onClick={() => {
-                        setEditingPulse({ date: selectedPulse.date, questionIds: [...(selectedPulse.questionIds ?? [])] });
-                        setEditDialogOpen(true);
-                      }}>
-                        <Edit3 className="h-4 w-4 mr-1.5" /> Editar preguntas
-                      </Button>
-                    )}
-                  </div>
+                  <span className={cn('flex items-center gap-1.5 text-sm font-semibold px-3 py-1.5 rounded-full', meta.badge)}>
+                    <StatusIcon className="h-3.5 w-3.5" />
+                    {meta.label}
+                  </span>
                 </div>
-              );
-            })()
-          )}
 
-          {/* ── WEEK STRIP ────────────────────────────────────────── */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <Stat label="Respondieron" value={`${completedAttempts.length}${participants.length ? ` / ${participants.length}` : ''}`}
+                    hint={participationPct !== null ? `${participationPct}% de participación` : undefined} />
+                  <Stat label="En progreso" value={String(pulseAttempts.filter(a => a.status === 'in_progress').length)} />
+                  <Stat label="% aciertos prom." value={avgCorrect !== null ? `${avgCorrect}%` : '—'}
+                    tone={avgCorrect === null ? undefined : avgCorrect >= PULSE_PASS_PERCENTAGE ? 'good' : 'warn'} />
+                  <Stat label="Preguntas" value={`${Math.min(perPulse, pulsePool.length)} por vendedor`} hint={`pool de ${pulsePool.length}`} />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {isToday && selectedPhase === 'disponible' && (
+                    <Button onClick={() => handleSendSlack(selectedDate, !!selectedPulse.sentAt)} disabled={actioning} size="sm" className="font-semibold">
+                      <Send className="h-4 w-4 mr-1.5" />
+                      {selectedPulse.sentAt ? 'Reenviar aviso de Slack' : 'Enviar aviso de Slack ahora'}
+                    </Button>
+                  )}
+                  {isToday && selectedPhase === 'disponible' && (
+                    <Button onClick={() => handleSetClosed(selectedDate, true)} disabled={actioning} size="sm" variant="outline">
+                      <Lock className="h-4 w-4 mr-1.5" /> Cerrar ahora
+                    </Button>
+                  )}
+                  {isToday && manuallyClosed && isPulseWindowOpen(closeAt, now) && (
+                    <Button onClick={() => handleSetClosed(selectedDate, false)} disabled={actioning} size="sm" variant="outline">
+                      <Unlock className="h-4 w-4 mr-1.5" /> Reabrir
+                    </Button>
+                  )}
+                  {selectedPhase !== 'cerrado' && pulsePool.length === 0 && (
+                    <Button onClick={() => handleAutoSchedule(selectedDate)} disabled={scheduling} size="sm" variant="outline">
+                      <Zap className="h-4 w-4 mr-1.5" /> {scheduling ? 'Asignando...' : 'Auto-asignar preguntas'}
+                    </Button>
+                  )}
+                  {selectedPhase !== 'cerrado' && (
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      setEditingPulse({ date: selectedPulse.date, questionIds: [...pulsePool] });
+                      setEditDialogOpen(true);
+                    }}>
+                      <Edit3 className="h-4 w-4 mr-1.5" /> Editar preguntas
+                    </Button>
+                  )}
+                  {participants.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={exportCsv}>
+                      <Download className="h-4 w-4 mr-1.5" /> Exportar CSV
+                    </Button>
+                  )}
+                </div>
+                {isToday && selectedPhase === 'disponible' && pulseAttempts.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Editar el pool no cambia las preguntas de quien ya empezó.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Week strip */}
           <div className="flex items-center gap-2">
             <button
               className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors shrink-0"
-              onClick={() => setWeekAnchor(d => addDays(d, -7))}
+              onClick={() => setWeekAnchor(d => addDaysStr(d, -7))}
+              aria-label="Semana anterior"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-
             <div className="flex-1 grid grid-cols-7 gap-1">
               {loadingPulses
                 ? [...Array(7)].map((_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)
                 : weekDays.map(date => {
                     const pulse = getPulseForDate(date);
-                    const isTodayDate = date === todayStr();
+                    const phase = getPulsePhase(pulse, closeAt, now);
                     const isSelected = date === selectedDate;
-                    const [, , dayNum] = date.split('-');
-                    const weekday = new Date(date + 'T12:00').toLocaleDateString('es-MX', { weekday: 'narrow' });
-
                     return (
                       <button
                         key={date}
                         onClick={() => setSelectedDate(date)}
                         className={cn(
                           'flex flex-col items-center py-2 px-1 rounded-xl border-2 transition-all text-center',
-                          isSelected
-                            ? 'border-primary bg-primary/5 shadow-sm'
-                            : 'border-transparent hover:border-muted hover:bg-muted/40',
+                          isSelected ? 'border-primary bg-primary/5 shadow-sm' : 'border-transparent hover:border-muted hover:bg-muted/40',
                         )}
                       >
-                        <span className={cn(
-                          'text-[10px] font-semibold uppercase tracking-wide',
-                          isTodayDate ? 'text-primary' : 'text-muted-foreground'
-                        )}>
-                          {weekday}
+                        <span className={cn('text-[10px] font-semibold uppercase tracking-wide', date === today ? 'text-primary' : 'text-muted-foreground')}>
+                          {formatPulseDate(date, { weekday: 'narrow' })}
                         </span>
-                        <span className={cn(
-                          'text-base font-bold leading-tight',
-                          isTodayDate ? 'text-primary' : ''
-                        )}>
-                          {dayNum}
+                        <span className={cn('text-base font-bold leading-tight', date === today ? 'text-primary' : '')}>
+                          {Number(date.slice(8))}
                         </span>
                         <div className="mt-1.5 h-2 flex items-center justify-center">
-                          {pulse ? (
-                            <span className={cn('h-2 w-2 rounded-full', (STATUS_META[pulse.status] ?? STATUS_META['scheduled']).dot)} />
-                          ) : (
-                            <span className="h-1 w-4 rounded-full bg-muted" />
-                          )}
+                          {phase !== 'sin_pulso'
+                            ? <span className={cn('h-2 w-2 rounded-full', PHASE_META[phase].dot)} />
+                            : <span className="h-1 w-4 rounded-full bg-muted" />}
                         </div>
                       </button>
                     );
-                  })
-              }
+                  })}
             </div>
-
             <button
               className="p-1.5 rounded-lg hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors shrink-0"
-              onClick={() => setWeekAnchor(d => addDays(d, 7))}
+              onClick={() => setWeekAnchor(d => addDaysStr(d, 7))}
+              aria-label="Semana siguiente"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
-
-          {/* Week legend */}
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            {Object.entries(STATUS_META).map(([key, meta]) => (
-              <span key={key} className="flex items-center gap-1.5">
-                <span className={cn('h-2 w-2 rounded-full', meta.dot)} />
-                {meta.label}
+          <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+            {Object.values(PHASE_META).map(meta => (
+              <span key={meta.label} className="flex items-center gap-1.5">
+                <span className={cn('h-2 w-2 rounded-full', meta.dot)} /> {meta.label}
               </span>
             ))}
-            <span className="flex items-center gap-1.5">
-              <span className="h-1 w-4 rounded-full bg-muted" />
-              Sin pulso
-            </span>
+            <span className="flex items-center gap-1.5"><span className="h-1 w-4 rounded-full bg-muted" /> Sin pulso</span>
           </div>
 
-          {/* ── DETAIL: questions + participants ─────────────────── */}
-          {selectedPulse && selectedPulse !== null && (
+          {/* Detail */}
+          {selectedPulse && (
             <Tabs value={detailTab} onValueChange={setDetailTab}>
-              <TabsList className="w-full max-w-xs">
+              <TabsList className="w-full max-w-sm">
+                <TabsTrigger value="participacion" className="flex-1">
+                  <Users className="h-3.5 w-3.5 mr-1.5" /> Participación
+                </TabsTrigger>
                 <TabsTrigger value="preguntas" className="flex-1">
                   <ListChecks className="h-3.5 w-3.5 mr-1.5" /> Preguntas
                 </TabsTrigger>
-                <TabsTrigger value="participantes" className="flex-1">
-                  <Users className="h-3.5 w-3.5 mr-1.5" /> Participantes
-                  {pulseAttempts.length > 0 && (
-                    <span className="ml-1.5 bg-primary text-primary-foreground text-[10px] rounded-full h-4 w-4 flex items-center justify-center">
-                      {pulseAttempts.length}
-                    </span>
-                  )}
-                </TabsTrigger>
               </TabsList>
 
-              {/* Questions tab */}
-              <TabsContent value="preguntas" className="mt-4">
-                <Card>
-                  <CardContent className="pt-4">
-                    {loadingQ ? (
-                      <div className="space-y-3">{[...Array(7)].map((_, i) => <Skeleton key={i} className="h-14" />)}</div>
-                    ) : pulseQuestions.length === 0 ? (
-                      <div className="text-center py-6 space-y-2">
-                        {(selectedPulse?.questionIds ?? []).length === 0 ? (
-                          <>
-                            <AlertTriangle className="h-6 w-6 mx-auto text-yellow-500" />
-                            <p className="text-sm font-medium">Este pulso no tiene preguntas asignadas.</p>
-                            <p className="text-xs text-muted-foreground">Usa &quot;Auto-asignar preguntas&quot; o &quot;Editar preguntas&quot; para agregar preguntas al pool.</p>
-                          </>
-                        ) : (
-                          <>
-                            <AlertTriangle className="h-6 w-6 mx-auto text-orange-500" />
-                            <p className="text-sm font-medium">No se encontraron las preguntas en el banco activo.</p>
-                            <p className="text-xs text-muted-foreground">Las preguntas de este pulso pueden haber sido desactivadas. Verifica el banco de preguntas.</p>
-                          </>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {pulseQuestions.map((q, idx) => (
-                          <div key={q.id} className="flex items-start gap-3 p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors">
-                            <span className="text-sm font-bold text-muted-foreground min-w-[22px] pt-0.5">{idx + 1}</span>
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium leading-snug">{q.text}</p>
-                              {q.module && (
-                                <span className={cn('text-[10px] px-2 py-0.5 rounded-full mt-1.5 inline-block', moduleColor(q.module))}>
-                                  {moduleLabel(q.module)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+              <TabsContent value="participacion" className="mt-4">
+                <ParticipationPanel rows={participants} />
               </TabsContent>
 
-              {/* Participants tab */}
-              <TabsContent value="participantes" className="mt-4">
-                <Card>
-                  <CardContent className="pt-4">
-                    {loadingAttempts ? (
-                      <div className="space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12" />)}</div>
-                    ) : pulseAttempts.length === 0 ? (
-                      <div className="py-10 text-center">
-                        <Users className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                        <p className="text-sm text-muted-foreground">Aún no hay respuestas para este día.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        {/* Summary bar */}
-                        <div className="flex items-center justify-between text-xs text-muted-foreground mb-3 pb-3 border-b">
-                          <span>{pulseAttempts.length} respuesta{pulseAttempts.length !== 1 ? 's' : ''}</span>
-                          {avgCorrect !== null && (
-                            <span className={cn(
-                              'font-semibold',
-                              avgCorrect >= 70 ? 'text-green-600' : 'text-orange-500'
-                            )}>
-                              Promedio: {avgCorrect}%
-                            </span>
-                          )}
-                        </div>
-                        {pulseAttempts
-                          .sort((a, b) => b.percentage - a.percentage)
-                          .map((attempt, idx) => (
-                            <div key={attempt.id} className="flex items-center gap-3 py-2.5 border-b last:border-0">
-                              <span className="text-xs text-muted-foreground w-5 text-right shrink-0">{idx + 1}</span>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{attempt.userName}</p>
-                                {attempt.hub && <p className="text-xs text-muted-foreground">{attempt.hub}</p>}
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <span className="text-xs text-muted-foreground">{attempt.correctAnswers}/7</span>
-                                <span className={cn(
-                                  'text-xs font-bold px-2.5 py-1 rounded-full',
-                                  attempt.percentage >= 70 ? 'bg-green-500/10 text-green-700' : 'bg-orange-500/10 text-orange-600'
-                                )}>
-                                  {attempt.percentage}%
-                                </span>
-                              </div>
-                            </div>
-                          ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+              <TabsContent value="preguntas" className="mt-4">
+                <QuestionsPanel
+                  loading={loadingQ}
+                  pool={pulsePool}
+                  questions={pulseQuestions}
+                  attempts={pulseAttempts}
+                  perPulse={perPulse}
+                  sameForAll={savedConfig.sameQuestionsForAll}
+                  moduleLabel={moduleLabel}
+                  moduleColor={moduleColor}
+                />
               </TabsContent>
             </Tabs>
           )}
         </TabsContent>
 
-        {/* ─────────────────── AJUSTES DEL PULSO TAB ──────────────────── */}
+        {/* ─────────────────── AJUSTES ────────────────────────────────── */}
         <TabsContent value="ajustes" className="space-y-6 mt-5">
-          {loadingPulseConfig ? (
+          {loadingConfig ? (
             <div className="space-y-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}</div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-2">
-              {/* Preguntas por pulso */}
               <Card>
                 <CardHeader>
                   <CardTitle>Preguntas por pulso</CardTitle>
-                  <CardDescription>
-                    Número de preguntas que se incluyen en cada pulso diario.
-                  </CardDescription>
+                  <CardDescription>Cuántas preguntas responde cada vendedor al día.</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent>
                   <div className="space-y-1.5 max-w-xs">
                     <Label>Número de preguntas</Label>
                     <Input
                       type="number"
                       min={3}
                       max={20}
-                      value={pulseConfigForm.questionsPerPulse}
-                      onChange={e => setPulseConfigForm(f => ({ ...f, questionsPerPulse: Math.min(20, Math.max(3, Number(e.target.value))) }))}
+                      value={configForm.questionsPerPulse}
+                      onChange={e => setConfigForm(f => ({ ...f, questionsPerPulse: Math.min(20, Math.max(3, Number(e.target.value) || 3)) }))}
                     />
                     <p className="text-xs text-muted-foreground">Entre 3 y 20 preguntas. Por defecto: 7.</p>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Ventana de respuesta */}
               <Card>
                 <CardHeader>
                   <CardTitle>Ventana de respuesta</CardTitle>
-                  <CardDescription>
-                    Hora límite fija en la que se cierra el pulso del día para todos los usuarios.
-                  </CardDescription>
+                  <CardDescription>Hora límite para empezar el pulso del día (hora del centro de México).</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent>
                   <div className="space-y-1.5 max-w-xs">
                     <Label>Hora de cierre</Label>
-                    <Input
-                      type="time"
-                      value={pulseConfigForm.closeAt}
-                      onChange={e => setPulseConfigForm(f => ({ ...f, closeAt: e.target.value }))}
-                    />
+                    <Input type="time" value={configForm.closeAt} onChange={e => setConfigForm(f => ({ ...f, closeAt: e.target.value }))} />
                     <p className="text-xs text-muted-foreground">
-                      El pulso se marcará como <strong>cerrado</strong> a esta hora exacta.
+                      Después de esta hora ya no se puede iniciar el pulso. Quien lo empezó antes puede terminarlo ese mismo día.
                     </p>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Módulos activos */}
               <Card className="lg:col-span-2">
                 <CardHeader>
                   <CardTitle>Módulos activos</CardTitle>
-                  <CardDescription>
-                    Selecciona de qué módulos se tomarán las preguntas. Si no seleccionas ninguno, se usan todos.
-                  </CardDescription>
+                  <CardDescription>De qué módulos se toman las preguntas automáticas. Sin selección se usan todos.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {KNOWLEDGE_MODULES.map(mod => {
-                      const isChecked = pulseConfigForm.activeModules.includes(mod);
+                    {moduleKeys.map(mod => {
+                      const isChecked = configForm.activeModules.includes(mod);
+                      const count = questions.filter(q => q.module === mod).length;
                       return (
                         <label
                           key={mod}
                           className={cn(
                             'flex items-center gap-2.5 p-3 rounded-xl border-2 cursor-pointer transition-all',
-                            isChecked
-                              ? 'border-primary/50 bg-primary/5'
-                              : 'border-border hover:border-muted-foreground/40',
-                            pulseConfigForm.activeModules.length === 0 && 'border-muted-foreground/20 bg-muted/20'
+                            isChecked ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-muted-foreground/40',
                           )}
                         >
                           <input
                             type="checkbox"
                             checked={isChecked}
-                            onChange={e => {
-                              if (e.target.checked) {
-                                setPulseConfigForm(f => ({ ...f, activeModules: [...f.activeModules, mod] }));
-                              } else {
-                                setPulseConfigForm(f => ({ ...f, activeModules: f.activeModules.filter(m => m !== mod) }));
-                              }
-                            }}
+                            onChange={e => setConfigForm(f => ({
+                              ...f,
+                              activeModules: e.target.checked ? [...f.activeModules, mod] : f.activeModules.filter(m => m !== mod),
+                            }))}
                             className="h-4 w-4 accent-primary"
                           />
-                          <span className={cn(
-                            'text-xs font-medium',
-                            moduleColor(mod).split(' ').find(c => c.startsWith('text-')) ?? '',
-                          )}>
-                            {moduleLabel(mod)}
-                          </span>
+                          <span className="text-xs font-medium flex-1">{moduleLabel(mod)}</span>
+                          <span className="text-[10px] text-muted-foreground">{count}</span>
                         </label>
                       );
                     })}
                   </div>
-                  {pulseConfigForm.activeModules.length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-3">
-                      Sin selección = todos los módulos activos.
-                    </p>
+                  {configForm.activeModules.length === 0 && (
+                    <p className="text-xs text-muted-foreground mt-3">Sin selección = todos los módulos activos.</p>
                   )}
                 </CardContent>
               </Card>
 
-              {/* Opciones de selección y orden */}
               <Card className="lg:col-span-2">
                 <CardHeader>
                   <CardTitle>Opciones de preguntas</CardTitle>
-                  <CardDescription>
-                    Controla cómo se seleccionan y presentan las preguntas a los usuarios.
-                  </CardDescription>
+                  <CardDescription>Cómo se reparten y presentan las preguntas.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-5">
-                  <div className="flex items-start gap-4 justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Mismas preguntas para todos</Label>
-                      <p className="text-xs text-muted-foreground max-w-sm">
-                        Si está activo, todos los promotores reciben el mismo set de {pulseConfigForm.questionsPerPulse} preguntas.
-                        Si está inactivo, cada usuario recibe una selección aleatoria distinta.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={pulseConfigForm.sameQuestionsForAll}
-                      onCheckedChange={v => setPulseConfigForm(f => ({ ...f, sameQuestionsForAll: v }))}
-                    />
-                  </div>
-                  <div className="border-t pt-5 flex items-start gap-4 justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Orden aleatorio de respuestas</Label>
-                      <p className="text-xs text-muted-foreground max-w-sm">
-                        Si está activo, el orden de las opciones de respuesta se aleatoriza para cada usuario,
-                        reduciendo el efecto de memorizar posiciones.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={pulseConfigForm.randomizeAnswerOrder}
-                      onCheckedChange={v => setPulseConfigForm(f => ({ ...f, randomizeAnswerOrder: v }))}
-                    />
-                  </div>
-                  <div className="border-t pt-5 flex items-start gap-4 justify-between">
-                    <div className="space-y-0.5">
-                      <Label className="flex items-center gap-1.5">
-                        <Zap className="h-4 w-4 text-yellow-500" /> Pulso automático diario
-                      </Label>
-                      <p className="text-xs text-muted-foreground max-w-sm">
-                        Si está activo, el pulso del día se genera automáticamente cada mañana sin necesidad
-                        de crearlo manualmente. Llama a <code className="text-xs bg-muted px-1 rounded">/api/pulse/auto-create</code> desde
-                        un cron o al abrir la app.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={pulseConfigForm.autoDailyPulse}
-                      onCheckedChange={v => setPulseConfigForm(f => ({ ...f, autoDailyPulse: v }))}
-                    />
-                  </div>
+                  <SettingRow
+                    label="Mismas preguntas para todos"
+                    text={`Activo: todo el equipo responde las primeras ${configForm.questionsPerPulse} del pool (comparables entre sí). Inactivo: cada vendedor recibe ${configForm.questionsPerPulse} al azar del pool.`}
+                    checked={configForm.sameQuestionsForAll}
+                    onChange={v => setConfigForm(f => ({ ...f, sameQuestionsForAll: v }))}
+                  />
+                  <SettingRow
+                    label="Orden aleatorio de respuestas"
+                    text="Mezcla el orden de las opciones para cada vendedor, para que no se memoricen posiciones."
+                    checked={configForm.randomizeAnswerOrder}
+                    onChange={v => setConfigForm(f => ({ ...f, randomizeAnswerOrder: v }))}
+                  />
+                  <SettingRow
+                    label={<span className="flex items-center gap-1.5"><Zap className="h-4 w-4 text-yellow-500" /> Pulso automático diario</span>}
+                    text="Crea el pulso de cada día sin intervención (lo hace el proceso programado y, como respaldo, la app cuando el primer vendedor la abre)."
+                    checked={configForm.autoDailyPulse}
+                    onChange={v => setConfigForm(f => ({ ...f, autoDailyPulse: v }))}
+                  />
                 </CardContent>
               </Card>
 
-              <div className="lg:col-span-2 flex justify-end">
-                <Button onClick={handleSavePulseConfig} disabled={savingPulseConfig}>
-                  {savingPulseConfig ? 'Guardando...' : 'Guardar ajustes'}
+              <AutomationCard cronStatus={cronStatus} now={now} />
+
+              <div className="lg:col-span-2 flex items-center justify-end gap-3 sticky bottom-4">
+                {configDirty && <span className="text-xs text-amber-600 bg-background px-2 py-1 rounded">Cambios sin guardar</span>}
+                <Button variant="ghost" onClick={() => setConfigForm(savedConfig)} disabled={!configDirty || savingConfig}>Descartar</Button>
+                <Button onClick={handleSaveConfig} disabled={!configDirty || savingConfig}>
+                  {savingConfig ? 'Guardando...' : 'Guardar ajustes'}
                 </Button>
               </div>
             </div>
           )}
         </TabsContent>
 
-        {/* ─────────────────── SLACK CONFIG TAB ───────────────────────── */}
+        {/* ─────────────────── SLACK ──────────────────────────────────── */}
         <TabsContent value="slack" className="space-y-6 mt-5">
-          {loadingSlack ? (
+          {!savedSlack ? (
             <div className="space-y-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-2">
-              {/* Notification settings */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Notificación Slack</CardTitle>
-                  <CardDescription>
-                    El bot enviará un mensaje con el link del pulso a los canales configurados.
-                    Requiere <code className="text-xs bg-muted px-1 rounded">SLACK_BOT_TOKEN</code> en variables de entorno.
-                  </CardDescription>
+                  <CardTitle>Aviso diario</CardTitle>
+                  <CardDescription>Mensaje con el botón para responder, enviado cada día a la hora indicada.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center gap-3">
                     <Switch checked={slackForm.active} onCheckedChange={v => setSlackForm(f => ({ ...f, active: v }))} />
-                    <Label>Notificaciones activas</Label>
+                    <Label>Envío automático activo</Label>
                   </div>
                   <div className="space-y-1.5 max-w-xs">
-                    <Label>Hora de envío de notificación</Label>
+                    <Label>Hora de envío</Label>
                     <Input type="time" value={slackForm.sendAt} onChange={e => setSlackForm(f => ({ ...f, sendAt: e.target.value }))} />
-                    <p className="text-xs text-muted-foreground">Hora a la que el bot publicará el mensaje en Slack.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Debe ser antes del cierre ({formatHHMM(closeAt)}). Requiere el proceso programado (Ajustes → Automatización).
+                    </p>
+                    {slackForm.sendAt >= closeAt && (
+                      <p className="text-xs text-red-600">La hora de envío es igual o posterior al cierre: el aviso nunca saldría.</p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label className="flex items-center gap-1.5">
@@ -958,26 +947,12 @@ export default function KnowledgePulsePage() {
                         placeholder="https://app.avivacredito.com"
                         value={slackForm.appUrl}
                         onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))}
-                        className={!slackForm.appUrl ? 'border-amber-300 focus-visible:ring-amber-400' : ''}
                       />
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        title="Usar URL actual del navegador"
-                        onClick={() => {
-                          if (typeof window !== 'undefined') {
-                            setSlackForm(f => ({ ...f, appUrl: window.location.origin }));
-                          }
-                        }}
-                      >
+                      <Button type="button" variant="outline" size="icon" title="Usar URL actual del navegador"
+                        onClick={() => setSlackForm(f => ({ ...f, appUrl: window.location.origin }))}>
                         <Globe className="h-4 w-4" />
                       </Button>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      URL base para el botón <strong>📚 Responder el Pulso →</strong> del mensaje de Slack.
-                      El ícono <Globe className="inline h-3 w-3" /> auto-rellena con la URL del navegador actual.
-                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label>Plantilla del mensaje</Label>
@@ -986,131 +961,65 @@ export default function KnowledgePulsePage() {
                       value={slackForm.messageTemplate}
                       onChange={e => setSlackForm(f => ({ ...f, messageTemplate: e.target.value }))}
                     />
-                    <p className="text-xs text-muted-foreground">Variable disponible: <code>{'{date}'}</code>. El enlace a la app se envía automáticamente como botón interactivo de Slack.</p>
+                    <p className="text-xs text-muted-foreground">
+                      Variables: <code>{'{date}'}</code> fecha, <code>{'{preguntas}'}</code> número de preguntas,{' '}
+                      <code>{'{cierre}'}</code> hora de cierre. El botón para responder se agrega solo.
+                    </p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Vista previa</p>
+                    <p className="text-sm whitespace-pre-line">
+                      {applySlackTemplate(slackForm.messageTemplate, { date: formatPulseDate(today), preguntas: perPulse, cierre: formatHHMM(closeAt) })}
+                    </p>
+                    <span className="inline-block mt-1 text-xs font-semibold bg-green-700 text-white rounded px-2 py-1">📚 Responder el Pulso →</span>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Channels */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Canales y Destinatarios</CardTitle>
+                  <CardTitle>Destinatarios</CardTitle>
                   <CardDescription>
-                    Canales donde se publicará el pulso. Puedes asignar una vertical a cada canal para organizarlos.
+                    Canales, Slack IDs de usuarios y destinatarios extra se gestionan en un solo lugar.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Vertical filter chips */}
-                  {channels.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { key: 'todos', label: `Todos (${channels.length})` },
-                        ...channelVerticals.map(v => ({ key: v, label: `${v} (${channels.filter(c => c.vertical === v).length})` })),
-                        ...(channels.some(c => !c.vertical) ? [{ key: 'sin_vertical', label: `Sin vertical (${channels.filter(c => !c.vertical).length})` }] : []),
-                      ].map(({ key, label }) => (
-                        <button
-                          key={key}
-                          onClick={() => setChannelVerticalFilter(key)}
-                          className={cn(
-                            'text-xs px-2.5 py-1 rounded-full border font-medium transition-colors',
-                            channelVerticalFilter === key
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'bg-background text-muted-foreground border-border hover:border-primary/40'
-                          )}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    {channels.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">No hay canales configurados.</p>
-                    )}
-                    {channels
-                      .filter(ch => channelVerticalFilter === 'todos' ? true : channelVerticalFilter === 'sin_vertical' ? !ch.vertical : ch.vertical === channelVerticalFilter)
-                      .map(ch => (
-                        <div key={ch.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/40 gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="text-sm font-medium">{ch.channelName}</p>
-                              <span className={cn(
-                                'text-[10px] px-2 py-0.5 rounded-full border font-medium',
-                                ch.vertical ? 'bg-primary/10 text-primary border-primary/20' : 'bg-muted text-muted-foreground'
-                              )}>
-                                {ch.vertical ?? 'Todas las verticales'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-muted-foreground font-mono mt-0.5">{ch.channelId}</p>
-                          </div>
-                          <button onClick={() => setChannels(prev => prev.filter(c => c.id !== ch.id))} className="text-muted-foreground hover:text-destructive transition-colors p-1">
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ))}
+                  <div className="grid grid-cols-3 gap-3">
+                    <Stat label="Canales activos" value={String(activeChannels)} />
+                    <Stat label="Vendedores con Slack" value={`${sellersWithSlack} / ${sellers.length}`} />
+                    <Stat label="Destinatarios extra" value={String(directRecipients)} />
                   </div>
-
-                  <div className="border-t pt-4 space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Agregar canal</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input placeholder="ID (ej: C01234567)" value={newChannelId} onChange={e => setNewChannelId(e.target.value)} />
-                      <Input placeholder="Nombre (ej: #conocimiento)" value={newChannelName} onChange={e => setNewChannelName(e.target.value)} />
+                  <div className="flex items-start gap-3 justify-between border-t pt-4">
+                    <div className="space-y-0.5">
+                      <Label>Mensaje directo a vendedores</Label>
+                      <p className="text-xs text-muted-foreground max-w-sm">
+                        Envía DM a cada vendedor activo con Slack ID (no a admins ni capacitadores).
+                      </p>
                     </div>
-                    <Input placeholder="Vertical (ej: Aviva Tu Compra) — vacío = todos" value={newChannelVertical} onChange={e => setNewChannelVertical(e.target.value)} />
-                    <Button variant="outline" size="sm" className="w-full" onClick={handleAddChannel}>
-                      <Plus className="h-4 w-4 mr-1.5" /> Agregar canal
+                    <Switch checked={slackForm.dmSellers} onCheckedChange={v => setSlackForm(f => ({ ...f, dmSellers: v }))} />
+                  </div>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/admin/slack"><ExternalLink className="h-4 w-4 mr-1.5" /> Gestionar en Configuración Slack</Link>
+                  </Button>
+                  <div className="border-t pt-4 space-y-2">
+                    <Label>Probar el mensaje</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {profile?.slackId
+                        ? 'La prueba se envía solo a ti por mensaje directo, con la configuración guardada.'
+                        : 'No tienes Slack ID en tu perfil: la prueba irá a los destinatarios extra. Agrégalo en Configuración Slack → Usuarios.'}
+                    </p>
+                    <Button variant="outline" size="sm" onClick={handleSendTestSlack} disabled={sendingTest || slackDirty}>
+                      <Send className="h-4 w-4 mr-1.5" /> {sendingTest ? 'Enviando...' : 'Enviarme una prueba'}
                     </Button>
+                    {slackDirty && <p className="text-[11px] text-amber-600">Guarda los cambios antes de probar.</p>}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Direct message recipients */}
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <CardTitle>Mensajes directos (DM)</CardTitle>
-                  <CardDescription>
-                    Destinatarios adicionales de DM. Los usuarios con Slack ID configurado en
-                    <strong> Admin → Slack</strong> ya reciben DM automáticamente; agrega aquí
-                    IDs extra que no estén registrados como usuarios.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    {directRecipients.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">Sin destinatarios directos configurados.</p>
-                    )}
-                    {directRecipients.map(r => (
-                      <div key={r.id} className="flex items-center justify-between p-3 rounded-xl bg-muted/40 gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">{r.displayName}</p>
-                          <p className="text-xs text-muted-foreground font-mono mt-0.5">{r.slackUserId}</p>
-                        </div>
-                        <button onClick={() => setDirectRecipients(prev => prev.filter(d => d.id !== r.id))} className="text-muted-foreground hover:text-destructive transition-colors p-1">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="border-t pt-4 space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Agregar destinatario</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Input placeholder="Slack User ID (ej: U01234567)" value={newDMUserId} onChange={e => setNewDMUserId(e.target.value)} />
-                      <Input placeholder="Nombre (ej: Carlos López)" value={newDMUserName} onChange={e => setNewDMUserName(e.target.value)} />
-                    </div>
-                    <Button variant="outline" size="sm" className="w-full" onClick={handleAddDM}>
-                      <Plus className="h-4 w-4 mr-1.5" /> Agregar destinatario
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="lg:col-span-2 flex gap-3 justify-end">
-                <Button variant="outline" onClick={handleSendTestSlack} disabled={sendingTest}>
-                  <Send className="h-4 w-4 mr-2" />
-                  {sendingTest ? 'Enviando...' : 'Enviar prueba'}
-                </Button>
-                <Button onClick={handleSaveSlack} disabled={savingSlack}>
+              <div className="lg:col-span-2 flex items-center justify-end gap-3">
+                {slackDirty && <span className="text-xs text-amber-600">Cambios sin guardar</span>}
+                <Button variant="ghost" onClick={() => savedSlack && setSlackForm(savedSlack)} disabled={!slackDirty || savingSlack}>Descartar</Button>
+                <Button onClick={handleSaveSlack} disabled={!slackDirty || savingSlack}>
                   {savingSlack ? 'Guardando...' : 'Guardar configuración'}
                 </Button>
               </div>
@@ -1119,76 +1028,452 @@ export default function KnowledgePulsePage() {
         </TabsContent>
       </Tabs>
 
-      {/* ── Edit questions dialog ─────────────────────────────────────── */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Seleccionar pool de preguntas</DialogTitle>
-            <DialogDescription>
-              Elige las preguntas disponibles para {editingPulse ? formatDateShort(editingPulse.date) : ''}.
-              Con <strong>preguntas aleatorias</strong> activado, cada usuario recibe 7 al azar de este pool.
-              Selecciona todas las que quieras incluir.
-            </DialogDescription>
-          </DialogHeader>
-          {editingPulse && (
-            <div className="space-y-3 py-2">
-              {/* Counter */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">
-                  {editingPulse.questionIds.length} de {questions.filter(q => q.module).length} preguntas seleccionadas
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    className="text-xs text-primary hover:underline"
-                    onClick={() => setEditingPulse(prev => prev ? { ...prev, questionIds: questions.filter(q => q.module).map(q => q.id) } : prev)}
-                  >
-                    Seleccionar todas
-                  </button>
-                  <span className="text-muted-foreground">·</span>
-                  <button
-                    className="text-xs text-muted-foreground hover:underline"
-                    onClick={() => setEditingPulse(prev => prev ? { ...prev, questionIds: [] } : prev)}
-                  >
-                    Limpiar
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                {questions.filter(q => q.module).map(q => {
-                  const selected = editingPulse.questionIds.includes(q.id);
-                  return (
-                    <button
-                      key={q.id}
-                      onClick={() => setEditingPulse(prev => {
-                        if (!prev) return prev;
-                        const ids = prev.questionIds.includes(q.id)
-                          ? prev.questionIds.filter(id => id !== q.id)
-                          : [...prev.questionIds, q.id];
-                        return { ...prev, questionIds: ids };
-                      })}
-                      className={cn(
-                        'w-full text-left p-3 rounded-xl border-2 transition-all',
-                        selected ? 'border-primary bg-primary/5' : 'border-muted hover:border-primary/30'
-                      )}
-                    >
-                      <p className="text-sm font-medium line-clamp-2">{q.text}</p>
-                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full mt-1 inline-block', moduleColor(q.module!))}>
-                        {moduleLabel(q.module!)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveEditedPulse} disabled={!editingPulse || editingPulse.questionIds.length === 0}>
-              Guardar pool ({editingPulse?.questionIds.length ?? 0} preguntas)
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <QuestionPickerDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        editing={editingPulse}
+        setEditing={setEditingPulse}
+        onSave={handleSaveEditedPulse}
+        questions={questions}
+        perPulse={perPulse}
+        sameForAll={savedConfig.sameQuestionsForAll}
+        moduleKeys={moduleKeys}
+        moduleLabel={moduleLabel}
+        moduleColor={moduleColor}
+      />
     </div>
+  );
+}
+
+// ── Pieces ─────────────────────────────────────────────────────────────────
+
+function Stat({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: 'good' | 'warn' }) {
+  return (
+    <div className="bg-white/60 dark:bg-background/40 rounded-xl p-3 border border-transparent">
+      <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
+      <p className={cn('text-xl font-bold', tone === 'good' && 'text-green-600', tone === 'warn' && 'text-orange-500')}>{value}</p>
+      {hint && <p className="text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+function SettingRow({ label, text, checked, onChange }: {
+  label: React.ReactNode; text: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start gap-4 justify-between border-t first:border-t-0 pt-5 first:pt-0">
+      <div className="space-y-0.5">
+        <Label>{label}</Label>
+        <p className="text-xs text-muted-foreground max-w-md">{text}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+function AutomationCard({ cronStatus, now }: { cronStatus: PulseCronStatus | null; now: Date }) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const url = `${origin}/api/pulse/cron`;
+  const lastRun = cronStatus?.lastRunAt?.toDate?.();
+  const copy = (text: string) => {
+    navigator.clipboard?.writeText(text).then(() => toast({ title: 'Copiado' })).catch(() => {});
+  };
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Automatización</CardTitle>
+        <CardDescription>
+          Un proceso programado crea el pulso, envía el aviso de Slack a la hora de envío y cierra el pulso a la hora de cierre.
+          Configúralo una vez en Cloud Scheduler (o cron-job.org) para que llame cada 10 minutos a:
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex items-center gap-2">
+          <code className="flex-1 text-xs bg-muted px-2 py-1.5 rounded font-mono truncate">GET {url}</code>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => copy(url)} title="Copiar URL"><Copy className="h-3.5 w-3.5" /></Button>
+        </div>
+        <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-5">
+          <li>Frecuencia: <code>*/10 * * * *</code></li>
+          <li>Header: <code>Authorization: Bearer &lt;secreto&gt;</code> (o agrega <code>?key=&lt;secreto&gt;</code> a la URL).</li>
+          <li>
+            El secreto se define en <Link href="/admin/tokens" className="underline">Admin → Tokens</Link> con la clave{' '}
+            <code>pulse_cron_secret</code> (o la variable de entorno <code>PULSE_CRON_SECRET</code>).
+          </li>
+        </ul>
+        <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs">
+          {lastRun ? (
+            <>
+              <p><strong>Última ejecución:</strong> {timeAgo(lastRun, now)} ({lastRun.toLocaleString('es-MX', { timeZone: PULSE_TIMEZONE })})</p>
+              <p className="text-muted-foreground mt-0.5">
+                {cronStatus?.lastActions?.length ? cronStatus.lastActions.join(' · ') : 'Sin acciones pendientes en esa ejecución.'}
+              </p>
+              {cronStatus?.lastError && <p className="text-red-600 mt-0.5">Error: {cronStatus.lastError}</p>}
+            </>
+          ) : (
+            <p className="text-amber-700">Todavía no se ha ejecutado. Mientras tanto, el aviso de Slack solo se envía con el botón manual.</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ParticipationPanel({ rows }: { rows: ParticipantRow[] }) {
+  const [filter, setFilter] = useState<'todos' | ParticipantStatus>('todos');
+  const [search, setSearch] = useState('');
+
+  const counts = useMemo(() => {
+    const c: Record<ParticipantStatus, number> = { completado: 0, en_progreso: 0, vencido: 0, pendiente: 0 };
+    for (const r of rows) c[r.status]++;
+    return c;
+  }, [rows]);
+
+  const visible = rows
+    .filter(r => filter === 'todos' || r.status === filter)
+    .filter(r => !search || `${r.name} ${r.hub ?? ''}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      const order: ParticipantStatus[] = ['completado', 'en_progreso', 'vencido', 'pendiente'];
+      const d = order.indexOf(a.status) - order.indexOf(b.status);
+      if (d !== 0) return d;
+      if (a.status === 'completado') return (b.attempt?.percentage ?? 0) - (a.attempt?.percentage ?? 0);
+      return a.name.localeCompare(b.name);
+    });
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {(['todos', 'completado', 'en_progreso', 'vencido', 'pendiente'] as const).map(key => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={cn(
+                'text-xs px-2.5 py-1 rounded-full border transition-colors',
+                filter === key ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted',
+              )}
+            >
+              {key === 'todos' ? `Todos (${rows.length})` : `${PARTICIPANT_STATUS_META[key].label} (${counts[key]})`}
+            </button>
+          ))}
+          <div className="relative ml-auto w-full sm:w-56">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input className="h-8 pl-8 text-xs" placeholder="Buscar nombre o hub" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+        </div>
+
+        {visible.length === 0 ? (
+          <div className="py-10 text-center">
+            <Users className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+            <p className="text-sm text-muted-foreground">
+              {rows.length === 0 ? 'No hay vendedores activos registrados.' : 'Nadie en esta categoría.'}
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y">
+            {visible.map(r => {
+              const a = r.attempt;
+              const meta = PARTICIPANT_STATUS_META[r.status];
+              return (
+                <div key={r.key} className="flex items-center gap-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{r.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{[r.hub, r.vertical].filter(Boolean).join(' · ') || '—'}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {a && r.status !== 'completado' && (
+                      <span className="text-xs text-muted-foreground">{a.answers?.length ?? 0}/{a.totalQuestions}</span>
+                    )}
+                    {a && r.status === 'completado' ? (
+                      <>
+                        <span className="text-xs text-muted-foreground">{a.correctAnswers}/{a.totalQuestions}</span>
+                        <span className={cn(
+                          'text-xs font-bold px-2.5 py-1 rounded-full',
+                          a.percentage >= PULSE_PASS_PERCENTAGE ? 'bg-green-500/10 text-green-700' : 'bg-orange-500/10 text-orange-600',
+                        )}>
+                          {a.percentage}%
+                        </span>
+                      </>
+                    ) : (
+                      <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded-full', meta.className)}>{meta.label}</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function QuestionsPanel({ loading, pool, questions, attempts, perPulse, sameForAll, moduleLabel, moduleColor }: {
+  loading: boolean;
+  pool: string[];
+  questions: Question[];
+  attempts: PulseAttempt[];
+  perPulse: number;
+  sameForAll: boolean;
+  moduleLabel: (m: KnowledgeModule) => string;
+  moduleColor: (m: KnowledgeModule) => string;
+}) {
+  const [sortBy, setSortBy] = useState<'orden' | 'falladas'>('orden');
+
+  const stats = useMemo(() => {
+    const map = new Map<string, { asked: number; correct: number }>();
+    for (const a of attempts) {
+      for (const ans of a.answers ?? []) {
+        const s = map.get(ans.questionId) ?? { asked: 0, correct: 0 };
+        s.asked++;
+        if (ans.isCorrect) s.correct++;
+        map.set(ans.questionId, s);
+      }
+    }
+    return map;
+  }, [attempts]);
+
+  const rate = (id: string) => {
+    const s = stats.get(id);
+    return s && s.asked > 0 ? Math.round((s.correct / s.asked) * 100) : null;
+  };
+
+  const rows = questions.map(q => ({ q, poolIndex: pool.indexOf(q.id), rate: rate(q.id), asked: stats.get(q.id)?.asked ?? 0 }));
+  if (sortBy === 'falladas') {
+    rows.sort((a, b) => (a.rate ?? 101) - (b.rate ?? 101));
+  }
+  const mostFailed = [...rows].filter(r => r.rate !== null && r.asked >= 3).sort((a, b) => a.rate! - b.rate!)[0];
+  const hasAnswers = stats.size > 0;
+
+  if (loading) {
+    return <Card><CardContent className="pt-4 space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-14" />)}</CardContent></Card>;
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4 space-y-3">
+        {questions.length === 0 ? (
+          <div className="text-center py-6 space-y-2">
+            <AlertTriangle className="h-6 w-6 mx-auto text-yellow-500" />
+            <p className="text-sm font-medium">
+              {pool.length === 0 ? 'Este pulso no tiene preguntas asignadas.' : 'No se encontraron las preguntas en el banco activo.'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {pool.length === 0 ? 'Usa "Auto-asignar preguntas" o "Editar preguntas".' : 'Pueden haber sido desactivadas. Verifica el banco de preguntas.'}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                {sameForAll
+                  ? `Todo el equipo responde las primeras ${Math.min(perPulse, pool.length)}; el resto queda de reserva.`
+                  : `Cada vendedor recibe ${Math.min(perPulse, pool.length)} al azar de estas ${pool.length}.`}
+              </p>
+              {hasAnswers && (
+                <div className="flex gap-1 text-xs">
+                  {(['orden', 'falladas'] as const).map(k => (
+                    <button key={k} onClick={() => setSortBy(k)}
+                      className={cn('px-2.5 py-1 rounded-full border', sortBy === k ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted')}>
+                      {k === 'orden' ? 'Orden del pulso' : 'Más falladas'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {mostFailed && mostFailed.rate! < PULSE_PASS_PERCENTAGE && (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                <strong>La más fallada hoy ({mostFailed.rate}% de aciertos):</strong> {mostFailed.q.text}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              {rows.map(({ q, poolIndex, rate: r, asked }) => {
+                const inPlay = !sameForAll || poolIndex < perPulse;
+                return (
+                  <div key={q.id} className={cn('flex items-start gap-3 p-3 rounded-xl bg-muted/30', !inPlay && 'opacity-60')}>
+                    <span className="text-sm font-bold text-muted-foreground min-w-[22px] pt-0.5">{poolIndex + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium leading-snug">{q.text}</p>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {q.module && (
+                          <span className={cn('text-[10px] px-2 py-0.5 rounded-full', moduleColor(q.module))}>{moduleLabel(q.module)}</span>
+                        )}
+                        {sameForAll && !inPlay && <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">Reserva</span>}
+                      </div>
+                    </div>
+                    {r !== null && (
+                      <div className="text-right shrink-0">
+                        <p className={cn('text-sm font-bold', r >= PULSE_PASS_PERCENTAGE ? 'text-green-600' : 'text-orange-500')}>{r}%</p>
+                        <p className="text-[10px] text-muted-foreground">{asked} resp.</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function QuestionPickerDialog({
+  open, onOpenChange, editing, setEditing, onSave, questions, perPulse, sameForAll, moduleKeys, moduleLabel, moduleColor,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editing: { date: string; questionIds: string[] } | null;
+  setEditing: React.Dispatch<React.SetStateAction<{ date: string; questionIds: string[] } | null>>;
+  onSave: () => void;
+  questions: Question[];
+  perPulse: number;
+  sameForAll: boolean;
+  moduleKeys: KnowledgeModule[];
+  moduleLabel: (m: KnowledgeModule) => string;
+  moduleColor: (m: KnowledgeModule) => string;
+}) {
+  const [search, setSearch] = useState('');
+  const [moduleFilter, setModuleFilter] = useState<KnowledgeModule | 'todos'>('todos');
+  const [sortBy, setSortBy] = useState<'dificiles' | 'menos_usadas' | 'texto'>('dificiles');
+  const [lastUsed, setLastUsed] = useState<Record<string, string>>({});
+  const date = editing?.date;
+
+  useEffect(() => {
+    if (!open || !date) return;
+    getDailyPulses(addDaysStr(date, -21), addDaysStr(date, 14))
+      .then(list => setLastUsed(lastUsedByQuestion(list.filter(p => p.date !== date), perPulse)))
+      .catch(() => setLastUsed({}));
+  }, [open, date, perPulse]);
+
+  if (!editing) return null;
+
+  const selected = editing.questionIds;
+  const pulseQuestions = questions.filter(q => q.module);
+  const visible = pulseQuestions
+    .filter(q => moduleFilter === 'todos' || q.module === moduleFilter)
+    .filter(q => !search || q.text.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      if (sortBy === 'texto') return a.text.localeCompare(b.text);
+      if (sortBy === 'menos_usadas') return (lastUsed[a.id] ?? '').localeCompare(lastUsed[b.id] ?? '');
+      return (a.averageCorrectRate ?? 0) - (b.averageCorrectRate ?? 0);
+    });
+
+  const toggle = (id: string) => setEditing(prev => {
+    if (!prev) return prev;
+    const ids = prev.questionIds.includes(id) ? prev.questionIds.filter(x => x !== id) : [...prev.questionIds, id];
+    return { ...prev, questionIds: ids };
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Preguntas del {shortDate(editing.date)}</DialogTitle>
+          <DialogDescription>
+            {sameForAll
+              ? `Todo el equipo responde las primeras ${perPulse} que selecciones, en ese orden; las demás quedan de reserva.`
+              : `Cada vendedor recibe ${perPulse} al azar de las que selecciones.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 py-1">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input className="h-9 pl-8 text-sm" placeholder="Buscar pregunta" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <select
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as typeof sortBy)}
+            >
+              <option value="dificiles">Menos aciertos primero</option>
+              <option value="menos_usadas">Menos usadas recientemente</option>
+              <option value="texto">Alfabético</option>
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(['todos', ...moduleKeys] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => setModuleFilter(m)}
+                className={cn('text-[11px] px-2.5 py-1 rounded-full border', moduleFilter === m ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-muted')}
+              >
+                {m === 'todos' ? 'Todos los módulos' : moduleLabel(m)}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <span className={cn('text-muted-foreground', selected.length > 0 && selected.length < perPulse && 'text-amber-600')}>
+              {selected.length} seleccionadas
+              {selected.length > 0 && selected.length < perPulse && ` · cada vendedor recibirá solo ${selected.length}`}
+            </span>
+            <div className="flex gap-2">
+              <button className="text-xs text-primary hover:underline"
+                onClick={() => setEditing(prev => prev ? { ...prev, questionIds: Array.from(new Set([...prev.questionIds, ...visible.map(q => q.id)])) } : prev)}>
+                Seleccionar visibles
+              </button>
+              <span className="text-muted-foreground">·</span>
+              <button className="text-xs text-muted-foreground hover:underline"
+                onClick={() => setEditing(prev => prev ? { ...prev, questionIds: [] } : prev)}>
+                Limpiar
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1">
+            {visible.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">No hay preguntas con esos filtros.</p>}
+            {visible.map(q => {
+              const idx = selected.indexOf(q.id);
+              const isSelected = idx !== -1;
+              const used = lastUsed[q.id];
+              return (
+                <button
+                  key={q.id}
+                  onClick={() => toggle(q.id)}
+                  className={cn(
+                    'w-full text-left p-3 rounded-xl border-2 transition-all flex items-start gap-3',
+                    isSelected ? 'border-primary bg-primary/5' : 'border-muted hover:border-primary/30',
+                  )}
+                >
+                  <span className={cn(
+                    'h-6 w-6 shrink-0 rounded-full text-[11px] font-bold flex items-center justify-center border',
+                    isSelected
+                      ? (sameForAll && idx >= perPulse ? 'bg-muted text-muted-foreground border-muted' : 'bg-primary text-primary-foreground border-primary')
+                      : 'border-muted-foreground/30 text-transparent',
+                  )}>
+                    {isSelected ? idx + 1 : ''}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium line-clamp-2">{q.text}</p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', moduleColor(q.module!))}>{moduleLabel(q.module!)}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {q.timesUsed > 0 ? `${Math.round(q.averageCorrectRate ?? 0)}% aciertos históricos` : 'Sin historial'}
+                      </span>
+                      {used && (
+                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full', used > editing.date ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700')}>
+                          {used > editing.date ? 'Programada' : 'Usada'} el {shortDate(used)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={onSave} disabled={selected.length === 0}>
+            Guardar ({selected.length} preguntas)
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
