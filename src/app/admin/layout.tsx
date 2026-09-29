@@ -28,7 +28,6 @@ import {
   Radio,
   KeyRound,
   FolderKanban,
-  MessageSquare,
   ShieldCheck,
   Store,
   ImageIcon,
@@ -63,7 +62,6 @@ const navigation: (NavItem | NavSection)[] = [
     items: [
       { name: 'Gestión del Pulso', href: '/admin/knowledge-pulse', icon: Radio },
       { name: 'Categorías del Pulso', href: '/admin/categories', icon: FolderKanban },
-      { name: 'Configuración Slack', href: '/admin/slack', icon: MessageSquare },
     ],
   },
   {

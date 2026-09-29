@@ -27,7 +27,6 @@ const NAV_SECTIONS = [
     items: [
       { label: 'Gestión del Pulso', path: '/admin/knowledge-pulse' },
       { label: 'Categorías del Pulso', path: '/admin/categories' },
-      { label: 'Configuración Slack', path: '/admin/slack' },
     ],
   },
   {

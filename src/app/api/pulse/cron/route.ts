@@ -10,9 +10,12 @@
  *  3. Envía el aviso de Slack a partir de la hora de envío (una sola vez).
  *  4. Cierra el pulso de hoy al llegar la hora de cierre.
  *
- * Autenticación: header `Authorization: Bearer <secreto>` (o `?key=<secreto>`
- * para schedulers que no permiten headers). El secreto se toma de la variable
- * de entorno PULSE_CRON_SECRET o del token `pulse_cron_secret` en Admin → Tokens.
+ * Quién lo llama: la función programada `pulsoCadaDiezMinutos` (functions/),
+ * que Firebase ejecuta sola cada 10 minutos. No requiere configuración de admins.
+ *
+ * Autenticación: header `Authorization: Bearer <secreto>` (o `?key=<secreto>`).
+ * El secreto lo genera la función programada y lo guarda en `org_tokens`
+ * (`pulse_cron_secret`); opcionalmente puede definirse PULSE_CRON_SECRET.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -44,20 +47,20 @@ function safeEqual(a: string, b: string) {
 
 async function isAuthorized(req: NextRequest): Promise<boolean | 'unconfigured'> {
   const stored = await getOrgToken('pulse_cron_secret');
-  const secret = process.env.PULSE_CRON_SECRET || stored?.value;
-  if (!secret) return 'unconfigured';
+  const secrets = [process.env.PULSE_CRON_SECRET, stored?.value].filter((s): s is string => !!s);
+  if (secrets.length === 0) return 'unconfigured';
   const header = req.headers.get('authorization') ?? '';
   const provided = header.startsWith('Bearer ')
     ? header.slice(7).trim()
     : (req.nextUrl.searchParams.get('key') ?? '');
-  return !!provided && safeEqual(provided, secret);
+  return !!provided && secrets.some(secret => safeEqual(provided, secret));
 }
 
 async function run(req: NextRequest) {
   const auth = await isAuthorized(req);
   if (auth === 'unconfigured') {
     return NextResponse.json(
-      { error: 'Configura el secreto del cron (PULSE_CRON_SECRET o el token pulse_cron_secret en Admin → Tokens).' },
+      { error: 'Falta el secreto del cron: lo genera la función programada en su primera ejecución.' },
       { status: 503 }
     );
   }
