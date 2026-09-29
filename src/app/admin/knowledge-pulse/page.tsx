@@ -29,8 +29,10 @@ import type {
   KnowledgeModule,
   Question,
   SlackNotificationConfig,
+  SlackDirectRecipient,
   UserProfile,
 } from '@/lib/types-scalable';
+import { ChannelsEditor, ExtraRecipientsEditor, UserSlackIdsEditor } from './slack-recipients';
 import { KNOWLEDGE_MODULE_LABELS, KNOWLEDGE_MODULES, SEGMENTATION_FIELD_KEYS } from '@/lib/types-scalable';
 import {
   addDaysStr,
@@ -60,7 +62,6 @@ import { toast } from '@/hooks/use-toast';
 import {
   Radio, Settings, Zap, ChevronLeft, ChevronRight, Send, RefreshCw, Users, CheckCircle, Clock,
   BarChart2, ListChecks, Edit3, AlertTriangle, Globe, Download, Search, Lock, Unlock, Activity,
-  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -161,7 +162,10 @@ function downloadCsv(filename: string, rows: (string | number | undefined)[][]) 
 }
 
 type PulseConfigForm = Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'>;
-type SlackForm = Pick<SlackNotificationConfig, 'active' | 'sendAt' | 'appUrl' | 'messageTemplate'> & { dmSellers: boolean };
+type SlackForm = Pick<SlackNotificationConfig, 'active' | 'sendAt' | 'appUrl' | 'messageTemplate' | 'channels'> & {
+  dmSellers: boolean;
+  directRecipients: SlackDirectRecipient[];
+};
 
 const DEFAULT_CONFIG_FORM: PulseConfigForm = {
   questionsPerPulse: 7,
@@ -203,14 +207,17 @@ export default function KnowledgePulsePage() {
   const [configForm, setConfigForm] = useState<PulseConfigForm>(DEFAULT_CONFIG_FORM);
   const [savingConfig, setSavingConfig] = useState(false);
 
-  const [slackConfig, setSlackConfig] = useState<SlackNotificationConfig | null>(null);
   const [savedSlack, setSavedSlack] = useState<SlackForm | null>(null);
-  const [slackForm, setSlackForm] = useState<SlackForm>({ active: false, sendAt: '08:00', appUrl: '', messageTemplate: DEFAULT_SLACK_TEMPLATE, dmSellers: true });
+  const [slackForm, setSlackForm] = useState<SlackForm>({
+    active: false, sendAt: '08:00', appUrl: '', messageTemplate: DEFAULT_SLACK_TEMPLATE, dmSellers: true, channels: [], directRecipients: [],
+  });
   const [savingSlack, setSavingSlack] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
 
   const [cronStatus, setCronStatus] = useState<PulseCronStatus | null>(null);
-  const [sellers, setSellers] = useState<UserProfile[]>([]);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const sellers = useMemo(() => allUsers.filter(u => u.rol === 'seller' && u.active !== false), [allUsers]);
+  const mySlackId = allUsers.find(u => u.uid === profile?.uid)?.slackId ?? profile?.slackId;
 
   // Pulsos
   const [weekAnchor, setWeekAnchor] = useState(today);
@@ -240,9 +247,10 @@ export default function KnowledgePulsePage() {
   useEffect(() => {
     getPulseCategories().then(setCategories).catch(() => {});
     getPulseCronStatus().then(setCronStatus).catch(() => {});
-    getAllUsers()
-      .then(users => setSellers(users.filter(u => u.rol === 'seller' && u.active !== false)))
-      .catch(() => {});
+    getAllUsers().then(setAllUsers).catch(() => {});
+    // Permite abrir una pestaña directo, p. ej. /admin/knowledge-pulse?tab=slack
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab === 'slack' || tab === 'ajustes' || tab === 'pulsos') setMainTab(tab);
     getPulseConfig().then(cfg => {
       const form: PulseConfigForm = {
         questionsPerPulse: cfg.questionsPerPulse,
@@ -263,8 +271,9 @@ export default function KnowledgePulsePage() {
         appUrl: cfg?.appUrl || detectedUrl,
         messageTemplate: cfg?.messageTemplate || DEFAULT_SLACK_TEMPLATE,
         dmSellers: cfg?.dmSellers !== false,
+        channels: cfg?.channels ?? [],
+        directRecipients: cfg?.directRecipients ?? [],
       };
-      setSlackConfig(cfg);
       setSavedSlack(form);
       setSlackForm(form);
       // La función programada necesita saber la URL pública de la app: se
@@ -393,7 +402,6 @@ export default function KnowledgePulsePage() {
     try {
       await saveSlackConfig(slackForm, profile.uid);
       setSavedSlack(slackForm);
-      setSlackConfig(prev => prev ? { ...prev, ...slackForm } : prev);
       toast({ title: 'Configuración de Slack guardada' });
     } catch {
       toast({ variant: 'destructive', title: 'Error al guardar' });
@@ -408,7 +416,7 @@ export default function KnowledgePulsePage() {
       const res = await fetch('/api/pulse/send-slack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: today, test: true, testSlackId: profile?.slackId }),
+        body: JSON.stringify({ date: today, test: true, testSlackId: mySlackId }),
       });
       const data = await res.json() as { message?: string; error?: string; results?: { target: string; ok: boolean; error?: string }[] };
       const failed = (data.results ?? []).filter(r => !r.ok);
@@ -512,8 +520,8 @@ export default function KnowledgePulsePage() {
     return questions.filter(q => q.module && (active.size === 0 || active.has(q.module))).length;
   }, [questions, savedConfig.activeModules]);
   const sellersWithSlack = sellers.filter(u => u.slackId?.trim()).length;
-  const activeChannels = (slackConfig?.channels ?? []).filter(c => c.active).length;
-  const directRecipients = slackConfig?.directRecipients?.length ?? 0;
+  const activeChannels = (savedSlack?.channels ?? []).filter(c => c.active).length;
+  const directRecipients = savedSlack?.directRecipients.length ?? 0;
 
   const warnings: { text: string; action?: { label: string; onClick?: () => void; href?: string } }[] = [];
   const manualHint = 'Mientras tanto, manda el aviso con el botón «Enviar aviso de Slack ahora».';
@@ -529,8 +537,8 @@ export default function KnowledgePulsePage() {
   } else if (!loadingQ && !loadingConfig && modulePoolSize < perPulse) {
     warnings.push({ text: `Solo hay ${modulePoolSize} preguntas activas en los módulos seleccionados; el pulso pide ${perPulse}.` });
   }
-  if (slackConfig?.active && activeChannels === 0 && directRecipients === 0 && (!slackForm.dmSellers || sellersWithSlack === 0)) {
-    warnings.push({ text: 'Slack está activo pero no hay canales, destinatarios ni vendedores con Slack ID.', action: { label: 'Configurar Slack', href: '/admin/slack' } });
+  if (savedSlack?.active && activeChannels === 0 && directRecipients === 0 && (!savedSlack.dmSellers || sellersWithSlack === 0)) {
+    warnings.push({ text: 'El aviso de Slack está activo pero no tiene a quién llegar: agrega Slack IDs de vendedores o un canal.', action: { label: 'Configurar Slack', onClick: () => setMainTab('slack') } });
   }
   const todayPulse = getPulseForDate(today);
   if (todayPulse?.slackResult && (todayPulse.slackResult.failed > 0 || todayPulse.slackResult.error)) {
@@ -926,115 +934,147 @@ export default function KnowledgePulsePage() {
           {!savedSlack ? (
             <div className="space-y-4">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
           ) : (
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-6 max-w-4xl">
+              {/* 1. Mensaje y hora */}
               <Card>
                 <CardHeader>
-                  <CardTitle>Aviso diario</CardTitle>
-                  <CardDescription>Mensaje con el botón para responder, enviado cada día a la hora indicada.</CardDescription>
+                  <CardTitle>1. Mensaje y hora</CardTitle>
+                  <CardDescription>Cada día que haya pulso, Slack avisa al equipo con un botón para responder.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center gap-3">
                     <Switch checked={slackForm.active} onCheckedChange={v => setSlackForm(f => ({ ...f, active: v }))} />
-                    <Label>Envío automático activo</Label>
+                    <Label>Enviar el aviso automáticamente todos los días</Label>
                   </div>
                   <div className="space-y-1.5 max-w-xs">
                     <Label>Hora de envío</Label>
                     <Input type="time" value={slackForm.sendAt} onChange={e => setSlackForm(f => ({ ...f, sendAt: e.target.value }))} />
-                    <p className="text-xs text-muted-foreground">
-                      Debe ser antes del cierre ({formatHHMM(closeAt)}). El aviso sale solo a esta hora cada día que haya pulso.
-                    </p>
+                    <p className="text-xs text-muted-foreground">Debe ser antes del cierre del pulso ({formatHHMM(closeAt)}).</p>
                     {slackForm.sendAt >= closeAt && (
                       <p className="text-xs text-red-600">La hora de envío es igual o posterior al cierre: el aviso nunca saldría.</p>
                     )}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="flex items-center gap-1.5">
-                      URL de la app
-                      {!slackForm.appUrl && (
-                        <span className="inline-flex items-center gap-1 text-xs font-normal text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
-                          <AlertTriangle className="h-3 w-3" /> Requerida para el botón
-                        </span>
-                      )}
-                    </Label>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="https://app.avivacredito.com"
-                        value={slackForm.appUrl}
-                        onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>Mensaje</Label>
+                      <textarea
+                        className="w-full min-h-[120px] rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={slackForm.messageTemplate}
+                        onChange={e => setSlackForm(f => ({ ...f, messageTemplate: e.target.value }))}
                       />
-                      <Button type="button" variant="outline" size="icon" title="Usar URL actual del navegador"
-                        onClick={() => setSlackForm(f => ({ ...f, appUrl: window.location.origin }))}>
-                        <Globe className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Plantilla del mensaje</Label>
-                    <textarea
-                      className="w-full min-h-[100px] rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-                      value={slackForm.messageTemplate}
-                      onChange={e => setSlackForm(f => ({ ...f, messageTemplate: e.target.value }))}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Variables: <code>{'{date}'}</code> fecha, <code>{'{preguntas}'}</code> número de preguntas,{' '}
-                      <code>{'{cierre}'}</code> hora de cierre. El botón para responder se agrega solo.
-                    </p>
-                  </div>
-                  <div className="rounded-lg border bg-muted/30 p-3 space-y-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Vista previa</p>
-                    <p className="text-sm whitespace-pre-line">
-                      {applySlackTemplate(slackForm.messageTemplate, { date: formatPulseDate(today), preguntas: perPulse, cierre: formatHHMM(closeAt) })}
-                    </p>
-                    <span className="inline-block mt-1 text-xs font-semibold bg-green-700 text-white rounded px-2 py-1">📚 Responder el Pulso →</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Destinatarios</CardTitle>
-                  <CardDescription>
-                    Canales, Slack IDs de usuarios y destinatarios extra se gestionan en un solo lugar.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <Stat label="Canales activos" value={String(activeChannels)} />
-                    <Stat label="Vendedores con Slack" value={`${sellersWithSlack} / ${sellers.length}`} />
-                    <Stat label="Destinatarios extra" value={String(directRecipients)} />
-                  </div>
-                  <div className="flex items-start gap-3 justify-between border-t pt-4">
-                    <div className="space-y-0.5">
-                      <Label>Mensaje directo a vendedores</Label>
-                      <p className="text-xs text-muted-foreground max-w-sm">
-                        Envía DM a cada vendedor activo con Slack ID (no a admins ni capacitadores).
+                      <p className="text-xs text-muted-foreground">
+                        Puedes usar <code>{'{date}'}</code> (fecha), <code>{'{preguntas}'}</code> (número de preguntas)
+                        y <code>{'{cierre}'}</code> (hora de cierre).
                       </p>
                     </div>
-                    <Switch checked={slackForm.dmSellers} onCheckedChange={v => setSlackForm(f => ({ ...f, dmSellers: v }))} />
+                    <div className="rounded-lg border bg-muted/30 p-3 space-y-1 h-fit">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Así se verá</p>
+                      <p className="text-sm whitespace-pre-line">
+                        {applySlackTemplate(slackForm.messageTemplate, { date: formatPulseDate(today), preguntas: perPulse, cierre: formatHHMM(closeAt) })}
+                      </p>
+                      <span className="inline-block mt-1 text-xs font-semibold bg-green-700 text-white rounded px-2 py-1">📚 Responder el Pulso →</span>
+                    </div>
                   </div>
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href="/admin/slack"><ExternalLink className="h-4 w-4 mr-1.5" /> Gestionar en Configuración Slack</Link>
-                  </Button>
-                  <div className="border-t pt-4 space-y-2">
-                    <Label>Probar el mensaje</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {profile?.slackId
-                        ? 'La prueba se envía solo a ti por mensaje directo, con la configuración guardada.'
-                        : 'No tienes Slack ID en tu perfil: la prueba irá a los destinatarios extra. Agrégalo en Configuración Slack → Usuarios.'}
-                    </p>
-                    <Button variant="outline" size="sm" onClick={handleSendTestSlack} disabled={sendingTest || slackDirty}>
-                      <Send className="h-4 w-4 mr-1.5" /> {sendingTest ? 'Enviando...' : 'Enviarme una prueba'}
-                    </Button>
-                    {slackDirty && <p className="text-[11px] text-amber-600">Guarda los cambios antes de probar.</p>}
-                  </div>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground">Opciones avanzadas</summary>
+                    <div className="mt-3 space-y-1.5 max-w-lg">
+                      <Label className="text-xs">Dirección de la app (para el botón del mensaje)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="https://app.avivacredito.com"
+                          value={slackForm.appUrl}
+                          onChange={e => setSlackForm(f => ({ ...f, appUrl: e.target.value }))}
+                        />
+                        <Button type="button" variant="outline" size="icon" title="Usar la dirección actual"
+                          onClick={() => setSlackForm(f => ({ ...f, appUrl: window.location.origin }))}>
+                          <Globe className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <p className="text-muted-foreground">Se llena sola; solo cámbiala si la app se mudó de dirección.</p>
+                    </div>
+                  </details>
                 </CardContent>
               </Card>
 
-              <div className="lg:col-span-2 flex items-center justify-end gap-3">
-                {slackDirty && <span className="text-xs text-amber-600">Cambios sin guardar</span>}
+              {/* 2. Quién lo recibe */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>2. Quién lo recibe</CardTitle>
+                  <CardDescription>
+                    {[
+                      slackForm.dmSellers ? `${sellersWithSlack} de ${sellers.length} vendedores por mensaje directo` : 'Vendedores: desactivado',
+                      `${slackForm.channels.filter(c => c.active).length} canal(es)`,
+                      `${slackForm.directRecipients.length} persona(s) extra`,
+                    ].join(' · ')}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <section className="space-y-3">
+                    <div className="flex items-start gap-3 justify-between">
+                      <div className="space-y-0.5">
+                        <Label>Vendedores (mensaje directo)</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Cada vendedor activo con Slack ID recibe el aviso en privado.
+                          {sellers.length - sellersWithSlack > 0 && (
+                            <span className="text-amber-700"> Faltan {sellers.length - sellersWithSlack} por registrar.</span>
+                          )}
+                        </p>
+                      </div>
+                      <Switch checked={slackForm.dmSellers} onCheckedChange={v => setSlackForm(f => ({ ...f, dmSellers: v }))} />
+                    </div>
+                    <UserSlackIdsEditor
+                      users={allUsers}
+                      currentUid={profile?.uid}
+                      onUpdated={(uid, slackId) => setAllUsers(prev => prev.map(u => u.uid === uid ? { ...u, slackId } : u))}
+                    />
+                  </section>
+
+                  <section className="space-y-3 border-t pt-5">
+                    <div className="space-y-0.5">
+                      <Label>Canales</Label>
+                      <p className="text-xs text-muted-foreground">Opcional: también se publica en estos canales.</p>
+                    </div>
+                    <ChannelsEditor channels={slackForm.channels} onChange={channels => setSlackForm(f => ({ ...f, channels }))} />
+                  </section>
+
+                  <section className="space-y-3 border-t pt-5">
+                    <div className="space-y-0.5">
+                      <Label>Personas extra</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Opcional: líderes o capacitadores que también quieran recibir el aviso por mensaje directo.
+                      </p>
+                    </div>
+                    <ExtraRecipientsEditor
+                      recipients={slackForm.directRecipients}
+                      onChange={directRecipients => setSlackForm(f => ({ ...f, directRecipients }))}
+                    />
+                  </section>
+                </CardContent>
+              </Card>
+
+              {/* 3. Probar */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>3. Probar</CardTitle>
+                  <CardDescription>
+                    {mySlackId
+                      ? 'Te llega a ti por mensaje directo, tal como lo verá el equipo. No se envía a nadie más.'
+                      : 'Agrega tu Slack ID en la lista de arriba (aparece primero) para recibir la prueba.'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Button variant="outline" size="sm" onClick={handleSendTestSlack} disabled={sendingTest || slackDirty || (!mySlackId && slackForm.directRecipients.length === 0)}>
+                    <Send className="h-4 w-4 mr-1.5" /> {sendingTest ? 'Enviando...' : 'Enviarme una prueba'}
+                  </Button>
+                  {slackDirty && <p className="text-[11px] text-amber-600">Guarda los cambios antes de probar.</p>}
+                </CardContent>
+              </Card>
+
+              <div className="flex items-center justify-end gap-3 sticky bottom-4">
+                {slackDirty && <span className="text-xs text-amber-600 bg-background px-2 py-1 rounded">Cambios sin guardar</span>}
                 <Button variant="ghost" onClick={() => savedSlack && setSlackForm(savedSlack)} disabled={!slackDirty || savingSlack}>Descartar</Button>
                 <Button onClick={handleSaveSlack} disabled={!slackDirty || savingSlack}>
-                  {savingSlack ? 'Guardando...' : 'Guardar configuración'}
+                  {savingSlack ? 'Guardando...' : 'Guardar'}
                 </Button>
               </div>
             </div>

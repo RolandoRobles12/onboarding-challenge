@@ -65,8 +65,7 @@ funcione, el aviso se puede mandar con el botón "Enviar aviso de Slack ahora".
 | Qué | Dónde |
 | --- | --- |
 | Preguntas por pulso, hora de cierre, módulos, aleatoriedad, pulso automático | Gestión del Pulso → Ajustes |
-| Mensaje, hora de envío, DM a vendedores, prueba | Gestión del Pulso → Slack |
-| Slack IDs de usuarios, canales, destinatarios extra | Configuración Slack |
+| Todo lo de Slack: mensaje, hora de envío, Slack ID de cada usuario, canales, personas extra y prueba | Gestión del Pulso → Slack |
 | Token del bot de Slack | Admin → Tokens |
 
 La plantilla del mensaje admite `{date}`, `{preguntas}` y `{cierre}`.
