@@ -2762,6 +2762,20 @@ export async function saveSlackConfig(
   }), { merge: true });
 }
 
+/**
+ * Guarda la URL pública de la app en la configuración de Slack si aún no hay
+ * una. La usan el botón del mensaje y la función programada del Pulso. Ignora
+ * URLs locales (desarrollo). Devuelve true si la guardó.
+ */
+export async function rememberAppUrl(url: string, orgId = DEFAULT_ORG_ID): Promise<boolean> {
+  const clean = url.trim().replace(/\/$/, '');
+  if (!/^https?:\/\//.test(clean) || /\/\/(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(clean)) return false;
+  const current = await getSlackConfig(orgId);
+  if (current?.appUrl?.trim()) return false;
+  await setDoc(getDocRef(COLLECTIONS.SLACK_CONFIG, orgId), { organizationId: orgId, appUrl: clean }, { merge: true });
+  return true;
+}
+
 // ----------- Pulse Config -----------
 
 const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'> = {

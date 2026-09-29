@@ -18,6 +18,7 @@ import {
   getPulseCategories,
   getPulseCronStatus,
   getAllUsers,
+  rememberAppUrl,
 } from '@/lib/firestore-service';
 import type {
   DailyPulse,
@@ -59,7 +60,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Radio, Settings, Zap, ChevronLeft, ChevronRight, Send, RefreshCw, Users, CheckCircle, Clock,
   BarChart2, ListChecks, Edit3, AlertTriangle, Globe, Download, Search, Lock, Unlock, Activity,
-  ExternalLink, Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -266,6 +267,9 @@ export default function KnowledgePulsePage() {
       setSlackConfig(cfg);
       setSavedSlack(form);
       setSlackForm(form);
+      // La función programada necesita saber la URL pública de la app: se
+      // registra sola la primera vez que un admin abre esta página.
+      if (!cfg?.appUrl && detectedUrl) rememberAppUrl(detectedUrl).catch(() => {});
     });
   }, []);
 
@@ -496,7 +500,13 @@ export default function KnowledgePulsePage() {
   // Salud de la automatización
   const cronLastRun = cronStatus?.lastRunAt?.toDate?.();
   const cronMinutesAgo = cronLastRun ? (now.getTime() - cronLastRun.getTime()) / 60_000 : null;
-  const cronHealthy = cronMinutesAgo !== null && cronMinutesAgo <= CRON_STALE_MINUTES;
+  const cronErrorAt = cronStatus?.lastErrorAt?.toDate?.();
+  const autoState: 'ok' | 'inactivo' | 'detenido' | 'error' =
+    cronStatus?.lastError && (!cronLastRun || (cronErrorAt && cronErrorAt >= cronLastRun)) ? 'error'
+    : cronMinutesAgo === null ? 'inactivo'
+    : cronMinutesAgo <= CRON_STALE_MINUTES ? 'ok'
+    : 'detenido';
+  const cronHealthy = autoState === 'ok';
   const modulePoolSize = useMemo(() => {
     const active = new Set(savedConfig.activeModules ?? []);
     return questions.filter(q => q.module && (active.size === 0 || active.has(q.module))).length;
@@ -506,15 +516,14 @@ export default function KnowledgePulsePage() {
   const directRecipients = slackConfig?.directRecipients?.length ?? 0;
 
   const warnings: { text: string; action?: { label: string; onClick?: () => void; href?: string } }[] = [];
-  if (!cronHealthy) {
-    warnings.push({
-      text: cronLastRun
-        ? `El proceso programado no corre desde ${timeAgo(cronLastRun, now)}. Sin él, el aviso de Slack no sale solo ni se crea el pulso automático al inicio del día.`
-        : 'El proceso programado nunca se ha ejecutado. Sin él, el aviso de Slack no sale solo ni se crea el pulso automático al inicio del día.',
-      action: { label: 'Cómo configurarlo', onClick: () => setMainTab('ajustes') },
-    });
+  const manualHint = 'Mientras tanto, manda el aviso con el botón «Enviar aviso de Slack ahora».';
+  if (autoState === 'inactivo') {
+    warnings.push({ text: `El envío automático todavía no está encendido en el servidor (es un paso único del equipo de tecnología). ${manualHint}` });
+  } else if (autoState === 'detenido') {
+    warnings.push({ text: `El envío automático dejó de funcionar ${cronLastRun ? timeAgo(cronLastRun, now) : ''}. Avísale al equipo de tecnología. ${manualHint}` });
+  } else if (autoState === 'error') {
+    warnings.push({ text: `El envío automático tiene un problema. Avísale al equipo de tecnología. ${manualHint} (Detalle técnico: ${cronStatus?.lastError})` });
   }
-  if (cronStatus?.lastError) warnings.push({ text: `La última ejecución del proceso programado falló: ${cronStatus.lastError}` });
   if (!loadingQ && !loadingConfig && modulePoolSize === 0) {
     warnings.push({ text: 'No hay preguntas activas en los módulos seleccionados: no se puede crear el pulso.', action: { label: 'Banco de preguntas', href: '/admin/questions' } });
   } else if (!loadingQ && !loadingConfig && modulePoolSize < perPulse) {
@@ -546,10 +555,16 @@ export default function KnowledgePulsePage() {
       <div className="rounded-xl border bg-card px-4 py-3 space-y-2">
         <div className="flex items-center gap-2 text-sm flex-wrap">
           <Activity className={cn('h-4 w-4', cronHealthy ? 'text-green-600' : 'text-amber-500')} />
-          <span className="font-medium">Automatización:</span>
-          <span className="text-muted-foreground">
-            {cronLastRun ? `última ejecución ${timeAgo(cronLastRun, now)}` : 'sin ejecuciones registradas'}
+          <span className="font-medium">Envío automático:</span>
+          <span className={cn(cronHealthy ? 'text-green-700' : 'text-amber-700')}>
+            {autoState === 'ok' ? 'funcionando'
+              : autoState === 'inactivo' ? 'no está encendido'
+              : autoState === 'detenido' ? 'detenido'
+              : 'con problemas'}
           </span>
+          {autoState === 'ok' && cronLastRun && (
+            <span className="text-muted-foreground">· revisado {timeAgo(cronLastRun, now)}</span>
+          )}
         </div>
         {warnings.map((w, i) => (
           <div key={i} className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
@@ -887,14 +902,13 @@ export default function KnowledgePulsePage() {
                   />
                   <SettingRow
                     label={<span className="flex items-center gap-1.5"><Zap className="h-4 w-4 text-yellow-500" /> Pulso automático diario</span>}
-                    text="Crea el pulso de cada día sin intervención (lo hace el proceso programado y, como respaldo, la app cuando el primer vendedor la abre)."
+                    text="Crea el pulso de cada día solo, sin que tengas que hacer nada."
                     checked={configForm.autoDailyPulse}
                     onChange={v => setConfigForm(f => ({ ...f, autoDailyPulse: v }))}
                   />
                 </CardContent>
               </Card>
 
-              <AutomationCard cronStatus={cronStatus} now={now} />
 
               <div className="lg:col-span-2 flex items-center justify-end gap-3 sticky bottom-4">
                 {configDirty && <span className="text-xs text-amber-600 bg-background px-2 py-1 rounded">Cambios sin guardar</span>}
@@ -927,7 +941,7 @@ export default function KnowledgePulsePage() {
                     <Label>Hora de envío</Label>
                     <Input type="time" value={slackForm.sendAt} onChange={e => setSlackForm(f => ({ ...f, sendAt: e.target.value }))} />
                     <p className="text-xs text-muted-foreground">
-                      Debe ser antes del cierre ({formatHHMM(closeAt)}). Requiere el proceso programado (Ajustes → Automatización).
+                      Debe ser antes del cierre ({formatHHMM(closeAt)}). El aviso sale solo a esta hora cada día que haya pulso.
                     </p>
                     {slackForm.sendAt >= closeAt && (
                       <p className="text-xs text-red-600">La hora de envío es igual o posterior al cierre: el aviso nunca saldría.</p>
@@ -1068,53 +1082,6 @@ function SettingRow({ label, text, checked, onChange }: {
       </div>
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
-  );
-}
-
-function AutomationCard({ cronStatus, now }: { cronStatus: PulseCronStatus | null; now: Date }) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const url = `${origin}/api/pulse/cron`;
-  const lastRun = cronStatus?.lastRunAt?.toDate?.();
-  const copy = (text: string) => {
-    navigator.clipboard?.writeText(text).then(() => toast({ title: 'Copiado' })).catch(() => {});
-  };
-  return (
-    <Card className="lg:col-span-2">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" /> Automatización</CardTitle>
-        <CardDescription>
-          Un proceso programado crea el pulso, envía el aviso de Slack a la hora de envío y cierra el pulso a la hora de cierre.
-          Configúralo una vez en Cloud Scheduler (o cron-job.org) para que llame cada 10 minutos a:
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
-        <div className="flex items-center gap-2">
-          <code className="flex-1 text-xs bg-muted px-2 py-1.5 rounded font-mono truncate">GET {url}</code>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => copy(url)} title="Copiar URL"><Copy className="h-3.5 w-3.5" /></Button>
-        </div>
-        <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-5">
-          <li>Frecuencia: <code>*/10 * * * *</code></li>
-          <li>Header: <code>Authorization: Bearer &lt;secreto&gt;</code> (o agrega <code>?key=&lt;secreto&gt;</code> a la URL).</li>
-          <li>
-            El secreto se define en <Link href="/admin/tokens" className="underline">Admin → Tokens</Link> con la clave{' '}
-            <code>pulse_cron_secret</code> (o la variable de entorno <code>PULSE_CRON_SECRET</code>).
-          </li>
-        </ul>
-        <div className="rounded-lg border bg-muted/30 px-3 py-2 text-xs">
-          {lastRun ? (
-            <>
-              <p><strong>Última ejecución:</strong> {timeAgo(lastRun, now)} ({lastRun.toLocaleString('es-MX', { timeZone: PULSE_TIMEZONE })})</p>
-              <p className="text-muted-foreground mt-0.5">
-                {cronStatus?.lastActions?.length ? cronStatus.lastActions.join(' · ') : 'Sin acciones pendientes en esa ejecución.'}
-              </p>
-              {cronStatus?.lastError && <p className="text-red-600 mt-0.5">Error: {cronStatus.lastError}</p>}
-            </>
-          ) : (
-            <p className="text-amber-700">Todavía no se ha ejecutado. Mientras tanto, el aviso de Slack solo se envía con el botón manual.</p>
-          )}
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 

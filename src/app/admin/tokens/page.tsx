@@ -41,11 +41,6 @@ const KNOWN_TOKENS: { key: string; label: string; description: string }[] = [
     label: 'Slack Bot Token',
     description: 'Token del bot de Slack (xoxb-...). Se usa para enviar notificaciones del Pulso de Conocimiento.',
   },
-  {
-    key: 'pulse_cron_secret',
-    label: 'Secreto del proceso programado del Pulso',
-    description: 'Clave que debe enviar el scheduler al llamar /api/pulse/cron (header Authorization: Bearer <secreto>). Usa un valor largo y aleatorio.',
-  },
 ];
 
 function maskToken(value: string): string {

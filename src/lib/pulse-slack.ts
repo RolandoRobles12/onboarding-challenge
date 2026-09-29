@@ -20,6 +20,26 @@ export class PulseSlackError extends Error {
   }
 }
 
+/** Traduce los códigos de error de Slack a algo que un admin entienda. */
+const SLACK_ERROR_TEXT: Record<string, string> = {
+  invalid_auth: 'el token del bot de Slack no es válido',
+  not_authed: 'falta el token del bot de Slack',
+  account_inactive: 'el bot de Slack está desactivado',
+  token_revoked: 'el token del bot de Slack fue revocado',
+  channel_not_found: 'no se encontró el canal o usuario (revisa su ID)',
+  not_in_channel: 'el bot no está agregado a ese canal',
+  is_archived: 'el canal está archivado',
+  user_not_found: 'no se encontró al usuario en Slack (revisa su Slack ID)',
+  cannot_dm_bot: 'no se puede mandar mensaje a un bot',
+  ratelimited: 'Slack pidió esperar (demasiados mensajes seguidos)',
+  missing_scope: 'al bot de Slack le falta el permiso para enviar mensajes',
+};
+
+export function slackErrorText(code: string | undefined): string {
+  if (!code) return 'error desconocido';
+  return SLACK_ERROR_TEXT[code] ?? code;
+}
+
 async function postMessage(token: string, channel: string, text: string, blocks: unknown[]) {
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
@@ -47,12 +67,12 @@ export async function sendPulseSlack(opts: {
   const storedToken = await getOrgToken('slack_bot_token');
   const token = storedToken?.value || process.env.SLACK_BOT_TOKEN;
   if (!token) {
-    throw new PulseSlackError('SLACK_BOT_TOKEN no configurado. Agrégalo en Admin → Sistema → Tokens o como variable de entorno.', 500);
+    throw new PulseSlackError('Falta conectar el bot de Slack: pega su token en Admin → Tokens (el equipo de tecnología te lo puede dar).', 500);
   }
 
   const [cfg, pulseCfg] = await Promise.all([getSlackConfig(), getPulseConfig()]);
   if (!cfg) {
-    throw new PulseSlackError('Configuración de Slack no encontrada. Guárdala en Admin → Pulso → Slack.', 404);
+    throw new PulseSlackError('Todavía no se ha guardado la configuración de Slack. Guárdala en Gestión del Pulso → Slack.', 404);
   }
   // `cfg.active` controla solo el envío automático (lo revisa /api/pulse/cron);
   // el envío manual desde el panel es una acción explícita del admin.
@@ -119,9 +139,9 @@ export async function sendPulseSlack(opts: {
   for (const t of targets) {
     try {
       const data = await postMessage(token, t.id, fallbackText, blocks);
-      results.push({ target: t.name, type: t.type, ok: data.ok, error: data.error });
+      results.push({ target: t.name, type: t.type, ok: data.ok, error: data.ok ? undefined : slackErrorText(data.error) });
     } catch (err) {
-      results.push({ target: t.name, type: t.type, ok: false, error: err instanceof Error ? err.message : String(err) });
+      results.push({ target: t.name, type: t.type, ok: false, error: `no se pudo conectar con Slack (${err instanceof Error ? err.message : String(err)})` });
     }
   }
   return results;

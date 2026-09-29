@@ -32,26 +32,33 @@ dispositivo ni en la del servidor.
    Solo salen de ahí cuando se responden bien; tras un error, el siguiente
    intento queda para el día siguiente.
 
-## Proceso programado (obligatorio para el envío y cierre automáticos)
+## Envío automático (paso único del equipo de tecnología)
 
-`GET /api/pulse/cron` hace, de forma idempotente, todo lo que toque según la
-hora: crear, enviar, cerrar y vencer. Hay que llamarlo cada 5–15 minutos, por
-ejemplo con Cloud Scheduler:
+Los admins no configuran nada técnico. El reloj del Pulso es la función
+programada `pulsoCadaDiezMinutos` (carpeta `functions/`), que Firebase ejecuta
+sola cada 10 minutos. Cada vez que corre, llama a `/api/pulse/cron`, que hace
+de forma idempotente lo que toque según la hora: crear el pulso, enviar el
+aviso de Slack, cerrarlo y vencer intentos a medias.
+
+Solo hay que desplegarla **una vez** (y de nuevo si cambia `functions/`):
 
 ```
-gcloud scheduler jobs create http pulso-cron \
-  --schedule="*/10 * * * *" \
-  --uri="https://<tu-dominio>/api/pulse/cron" \
-  --http-method=GET \
-  --headers="Authorization=Bearer <secreto>"
+cd functions && npm install && cd ..
+firebase deploy --only functions:pulso
 ```
 
-El secreto se define en **Admin → Tokens** con la clave `pulse_cron_secret`,
-o en la variable de entorno `PULSE_CRON_SECRET`. Sin secreto configurado el
-endpoint responde 503.
+No requiere otra configuración:
 
-La última ejecución y sus acciones se ven en **Gestión del Pulso → Ajustes →
-Automatización**. Si deja de correr, el panel muestra una alerta.
+- El secreto que protege `/api/pulse/cron` lo genera la función en su primera
+  ejecución y lo guarda en `org_tokens` (`pulse_cron_secret`).
+- La URL de la app se registra sola la primera vez que un admin abre
+  **Gestión del Pulso**. Como respaldo se puede poner `APP_URL=https://…`
+  en `functions/.env`.
+- Requiere el plan Blaze de Firebase, el mismo que ya exige App Hosting.
+
+El panel muestra en lenguaje simple si el envío automático está
+"funcionando", "no está encendido", "detenido" o "con problemas". Mientras no
+funcione, el aviso se puede mandar con el botón "Enviar aviso de Slack ahora".
 
 ## Dónde se configura cada cosa
 
@@ -60,6 +67,6 @@ Automatización**. Si deja de correr, el panel muestra una alerta.
 | Preguntas por pulso, hora de cierre, módulos, aleatoriedad, pulso automático | Gestión del Pulso → Ajustes |
 | Mensaje, hora de envío, DM a vendedores, prueba | Gestión del Pulso → Slack |
 | Slack IDs de usuarios, canales, destinatarios extra | Configuración Slack |
-| Token del bot de Slack y secreto del cron | Admin → Tokens |
+| Token del bot de Slack | Admin → Tokens |
 
 La plantilla del mensaje admite `{date}`, `{preguntas}` y `{cierre}`.

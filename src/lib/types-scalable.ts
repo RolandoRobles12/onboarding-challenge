@@ -1430,5 +1430,7 @@ export interface PulseCronStatus {
   lastRunAt: Timestamp;
   /** Acciones que tomó la última ejecución (ej. "Pulso creado", "Slack enviado"). */
   lastActions: string[];
-  lastError?: string;
+  lastError?: string | null;
+  /** Cuándo falló la función programada al intentar llamar a la app. */
+  lastErrorAt?: Timestamp;
 }
