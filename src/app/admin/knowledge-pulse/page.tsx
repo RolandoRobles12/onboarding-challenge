@@ -344,7 +344,8 @@ export default function KnowledgePulsePage() {
   const handleSetClosed = async (date: string, closed: boolean) => {
     setActioning(true);
     try {
-      await updatePulseStatus(date, closed ? 'closed' : (selectedPulse?.sentAt ? 'active' : 'scheduled'));
+      if (closed) await updatePulseStatus(date, 'closed');
+      else await updatePulseStatus(date, selectedPulse?.sentAt ? 'active' : 'scheduled', undefined, false);
       toast({ title: closed ? 'Pulso cerrado' : 'Pulso reabierto' });
       await refreshDay(date);
     } catch {

@@ -310,6 +310,13 @@ export default function PulsePage() {
     setSavingAnswer(true);
     try {
       const saved = await savePulseAnswer(profile.uid, attempt.date, answer);
+      if (!saved.some(a => a.questionId === answer.questionId)) {
+        // El intento ya no acepta respuestas (p. ej. el proceso programado lo venció).
+        toast({ variant: 'destructive', title: 'Este pulso ya no acepta respuestas', description: 'La ventana de ese día terminó.' });
+        setQuizActive(false);
+        await loadData();
+        return;
+      }
       setAnswers(saved);
       setRevealed(true);
     } catch {
@@ -333,6 +340,12 @@ export default function PulsePage() {
     setSubmitting(true);
     try {
       const finished = await submitPulseAttempt(profile.uid, attempt.date);
+      if (finished.status !== 'completed') {
+        toast({ variant: 'destructive', title: 'Este pulso ya no acepta respuestas', description: 'La ventana de ese día terminó.' });
+        setQuizActive(false);
+        await loadData();
+        return;
+      }
       const incorrect = (finished.answers ?? [])
         .filter(a => !a.isCorrect)
         .map(a => questions.find(q => q.id === a.questionId))
@@ -367,9 +380,11 @@ export default function PulsePage() {
 
   // ── Derived: streak & history ──────────────────────────────────────────
 
+  // Hoy no rompe la racha mientras aún se pueda responder (ventana abierta o pulso a medias).
+  const todayStillAnswerable = phase === 'disponible' || (attempt?.status === 'in_progress' && attempt.date === today);
   const streak = useMemo(
-    () => computePulseStreak(recentPulseDates, history, today, phase === 'disponible'),
-    [recentPulseDates, history, today, phase],
+    () => computePulseStreak(recentPulseDates, history, today, todayStillAnswerable),
+    [recentPulseDates, history, today, todayStillAnswerable],
   );
 
   const historyDays = useMemo(() => {

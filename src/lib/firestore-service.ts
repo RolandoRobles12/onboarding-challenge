@@ -2411,16 +2411,20 @@ export async function createDailyPulseIfMissing(
   });
 }
 
-/** Actualiza el estado del pulso (active → closed, etc.) */
+/**
+ * Actualiza el estado del pulso (active → closed, etc.).
+ * Con `touchTimestamps=false` (p. ej. al reabrir) no reescribe sentAt/closedAt.
+ */
 export async function updatePulseStatus(
   date: string,
   status: DailyPulse['status'],
-  orgId = DEFAULT_ORG_ID
+  orgId = DEFAULT_ORG_ID,
+  touchTimestamps = true
 ): Promise<void> {
   const id = `${orgId}_${date}`;
   const extra: Record<string, unknown> = { status, updatedAt: serverTimestamp() };
-  if (status === 'active') extra.sentAt = serverTimestamp();
-  if (status === 'closed') extra.closedAt = serverTimestamp();
+  if (touchTimestamps && status === 'active') extra.sentAt = serverTimestamp();
+  if (touchTimestamps && status === 'closed') extra.closedAt = serverTimestamp();
   await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, id), extra);
 }
 
@@ -2552,7 +2556,8 @@ export async function submitPulseAttempt(
     const snap = await tx.get(attemptRef);
     if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
     const data = { id: snap.id, ...snap.data() } as PulseAttempt;
-    if (data.status === 'completed') return data;
+    // Ya completado (idempotente) o vencido por el proceso programado: no se toca.
+    if (data.status !== 'in_progress') return data;
     const answers = data.answers ?? [];
     const total = data.questionIds?.length || data.totalQuestions || answers.length;
     const correctAnswers = answers.filter(a => a.isCorrect).length;

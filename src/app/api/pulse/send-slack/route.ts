@@ -5,14 +5,15 @@
  * Body: { date: "YYYY-MM-DD", test?: boolean, testSlackId?: string }
  *  - test=true: solo al admin que la pide (testSlackId) o a los destinatarios
  *    directos. No cambia el estado del pulso.
- *  - test=false: envío real a canales, vendedores y destinatarios directos.
- *    Marca el pulso como "aviso enviado" y guarda el resultado.
+ *  - test=false: envío real a canales, vendedores y destinatarios directos,
+ *    aunque el envío automático esté apagado. Marca el pulso como "aviso
+ *    enviado" y guarda el resultado (también si falla).
  *
  * El envío automático a la hora configurada lo hace /api/pulse/cron.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDailyPulse, recordPulseSlackResult, updatePulseStatus } from '@/lib/firestore-service';
+import { claimPulseSlackSend, getDailyPulse, recordPulseSlackResult } from '@/lib/firestore-service';
 import { sendPulseSlack, summarizeSlackResults, PulseSlackError } from '@/lib/pulse-slack';
 
 export async function POST(req: NextRequest) {
@@ -29,17 +30,31 @@ export async function POST(req: NextRequest) {
       if (!pulse || (pulse.questionIds ?? []).length === 0) {
         return NextResponse.json({ error: 'El pulso de ese día no existe o no tiene preguntas.' }, { status: 400 });
       }
+      // Primer envío: se reserva antes de mandar para no coincidir con el proceso
+      // programado. Un reenvío (ya estaba 'active') es una decisión explícita del admin.
+      if (pulse.status === 'scheduled' && !(await claimPulseSlackSend(date))) {
+        return NextResponse.json({ error: 'El aviso de este pulso ya se está enviando o ya se envió.' }, { status: 409 });
+      }
     }
 
-    const results = await sendPulseSlack({
-      date,
-      test,
-      testSlackId,
-      fallbackBaseUrl: host ? `${proto}://${host}` : undefined,
-    });
+    let results;
+    try {
+      results = await sendPulseSlack({
+        date,
+        test,
+        testSlackId,
+        fallbackBaseUrl: host ? `${proto}://${host}` : undefined,
+      });
+    } catch (err) {
+      // Deja constancia del fallo en el pulso para que el panel lo muestre.
+      if (!test && pulse) {
+        const message = err instanceof Error ? err.message : String(err);
+        await recordPulseSlackResult(date, { ok: 0, failed: 0, error: message, trigger: 'manual' }).catch(() => {});
+      }
+      throw err;
+    }
 
     if (!test && pulse) {
-      if (pulse.status === 'scheduled') await updatePulseStatus(date, 'active');
       await recordPulseSlackResult(date, { ...summarizeSlackResults(results), trigger: 'manual' });
     }
 

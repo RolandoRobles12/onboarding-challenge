@@ -54,9 +54,8 @@ export async function sendPulseSlack(opts: {
   if (!cfg) {
     throw new PulseSlackError('Configuración de Slack no encontrada. Guárdala en Admin → Pulso → Slack.', 404);
   }
-  if (!cfg.active && !opts.test) {
-    throw new PulseSlackError('Notificaciones de Slack desactivadas', 400);
-  }
+  // `cfg.active` controla solo el envío automático (lo revisa /api/pulse/cron);
+  // el envío manual desde el panel es una acción explícita del admin.
 
   const baseUrl = cfg.appUrl?.trim() ? cfg.appUrl.trim().replace(/\/$/, '') : (opts.fallbackBaseUrl ?? '');
   const pulseLink = baseUrl ? `${baseUrl}/pulse` : '';
