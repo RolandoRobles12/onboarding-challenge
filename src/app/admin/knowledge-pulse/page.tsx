@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { useQuestions } from '@/hooks/use-firestore';
@@ -19,6 +19,7 @@ import {
   getPulseCronStatus,
   getAllUsers,
   rememberAppUrl,
+  requestPulseScheduleSync,
 } from '@/lib/firestore-service';
 import type {
   DailyPulse,
@@ -161,6 +162,15 @@ function downloadCsv(filename: string, rows: (string | number | undefined)[][]) 
   URL.revokeObjectURL(url);
 }
 
+type SlackSendResponse = {
+  ok?: boolean;
+  partial?: boolean;
+  message?: string;
+  error?: string;
+  results?: { target: string; ok: boolean; error?: string }[];
+  connection?: { team: string; bot: string };
+};
+
 type PulseConfigForm = Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'>;
 type SlackForm = Pick<SlackNotificationConfig, 'active' | 'sendAt' | 'appUrl' | 'messageTemplate' | 'channels'> & {
   dmSellers: boolean;
@@ -176,8 +186,8 @@ const DEFAULT_CONFIG_FORM: PulseConfigForm = {
   autoDailyPulse: false,
 };
 
-/** Si el proceso programado no corre en este tiempo, se muestra una alerta. */
-const CRON_STALE_MINUTES = 45;
+/** Si la ejecución diaria no da señales en este tiempo, se muestra una alerta. */
+const DAILY_STALE_HOURS = 26;
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -213,8 +223,11 @@ export default function KnowledgePulsePage() {
   });
   const [savingSlack, setSavingSlack] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; lines: string[] } | null>(null);
 
   const [cronStatus, setCronStatus] = useState<PulseCronStatus | null>(null);
+  const [cronLoaded, setCronLoaded] = useState(false);
+  const syncRequested = useRef(false);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const sellers = useMemo(() => allUsers.filter(u => u.rol === 'seller' && u.active !== false), [allUsers]);
   const mySlackId = allUsers.find(u => u.uid === profile?.uid)?.slackId ?? profile?.slackId;
@@ -240,13 +253,16 @@ export default function KnowledgePulsePage() {
   // ── Carga inicial ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000);
+    const t = setInterval(() => {
+      setNow(new Date());
+      getPulseCronStatus().then(setCronStatus).catch(() => {});
+    }, 60_000);
     return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
     getPulseCategories().then(setCategories).catch(() => {});
-    getPulseCronStatus().then(setCronStatus).catch(() => {});
+    getPulseCronStatus().then(setCronStatus).catch(() => {}).finally(() => setCronLoaded(true));
     getAllUsers().then(setAllUsers).catch(() => {});
     // Permite abrir una pestaña directo, p. ej. /admin/knowledge-pulse?tab=slack
     const tab = new URLSearchParams(window.location.search).get('tab');
@@ -281,6 +297,15 @@ export default function KnowledgePulsePage() {
       if (!cfg?.appUrl && detectedUrl) rememberAppUrl(detectedUrl).catch(() => {});
     });
   }, []);
+
+  // Si la hora programada no coincide con la configurada (p. ej. tras un
+  // deploy), se le pide a la función que la ajuste. Una vez por visita.
+  useEffect(() => {
+    if (!savedSlack || !cronLoaded || syncRequested.current) return;
+    if (cronStatus?.scheduledSendAt === savedSlack.sendAt) return;
+    syncRequested.current = true;
+    requestPulseScheduleSync().catch(() => {});
+  }, [savedSlack, cronLoaded, cronStatus?.scheduledSendAt]);
 
   // Aviso al salir de la página con cambios sin guardar
   useEffect(() => {
@@ -340,11 +365,18 @@ export default function KnowledgePulsePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date }),
       });
-      const data = await res.json() as { message?: string; error?: string };
-      if (!res.ok && res.status !== 207) {
-        toast({ variant: 'destructive', title: 'No se envió el aviso', description: data.error ?? data.message ?? `HTTP ${res.status}` });
+      const data = await res.json() as SlackSendResponse;
+      const failed = (data.results ?? []).filter(r => !r.ok);
+      if (data.error) {
+        toast({ variant: 'destructive', title: 'No se envió el aviso', description: data.error });
+      } else if (failed.length > 0) {
+        toast({
+          variant: 'destructive',
+          title: data.partial ? 'Aviso enviado con errores' : 'Slack rechazó el aviso',
+          description: failed.slice(0, 3).map(r => `${r.target}: ${r.error ?? 'error'}`).join(' · '),
+        });
       } else {
-        toast({ title: res.status === 207 ? '⚠️ Aviso enviado con errores' : 'Aviso enviado', description: data.message });
+        toast({ title: 'Aviso enviado', description: data.message });
       }
       await refreshDay(date);
     } catch (err) {
@@ -418,17 +450,18 @@ export default function KnowledgePulsePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: today, test: true, testSlackId: mySlackId }),
       });
-      const data = await res.json() as { message?: string; error?: string; results?: { target: string; ok: boolean; error?: string }[] };
+      const data = await res.json() as SlackSendResponse;
       const failed = (data.results ?? []).filter(r => !r.ok);
-      if (!res.ok && !data.results) {
-        toast({ variant: 'destructive', title: 'Error al enviar', description: data.error ?? `HTTP ${res.status}` });
+      const via = data.connection ? ` (bot «${data.connection.bot}» en ${data.connection.team})` : '';
+      if (data.error) {
+        setTestResult({ ok: false, lines: [data.error] });
       } else if (failed.length > 0) {
-        toast({ variant: 'destructive', title: 'La prueba falló', description: failed.map(r => `${r.target}: ${r.error ?? 'error'}`).join(' · ') });
+        setTestResult({ ok: false, lines: [`Conectado a Slack${via}, pero el mensaje no se entregó:`, ...failed.map(r => `${r.target}: ${r.error ?? 'error'}`)] });
       } else {
-        toast({ title: '✅ Prueba enviada', description: 'Revisa tus mensajes directos de Slack. Se usó la configuración guardada.' });
+        setTestResult({ ok: true, lines: [`Mensaje enviado${via}. Revisa tus mensajes directos de Slack (en la conversación con el bot).`] });
       }
     } catch (err) {
-      toast({ variant: 'destructive', title: 'Error al enviar', description: err instanceof Error ? err.message : String(err) });
+      setTestResult({ ok: false, lines: [`No se pudo contactar a la app: ${err instanceof Error ? err.message : String(err)}`] });
     } finally {
       setSendingTest(false);
     }
@@ -506,14 +539,21 @@ export default function KnowledgePulsePage() {
   };
 
   // Salud de la automatización
+  // La ejecución diaria corre a la hora de envío; la función la reprograma
+  // cuando el admin cambia esa hora (scheduledSendAt = hora ya programada).
   const cronLastRun = cronStatus?.lastRunAt?.toDate?.();
-  const cronMinutesAgo = cronLastRun ? (now.getTime() - cronLastRun.getTime()) / 60_000 : null;
   const cronErrorAt = cronStatus?.lastErrorAt?.toDate?.();
-  const autoState: 'ok' | 'inactivo' | 'detenido' | 'error' =
-    cronStatus?.lastError && (!cronLastRun || (cronErrorAt && cronErrorAt >= cronLastRun)) ? 'error'
-    : cronMinutesAgo === null ? 'inactivo'
-    : cronMinutesAgo <= CRON_STALE_MINUTES ? 'ok'
-    : 'detenido';
+  const cronTickAt = cronStatus?.lastTickAt?.toDate?.();
+  const scheduleSyncedAt = cronStatus?.scheduleSyncedAt?.toDate?.();
+  const scheduledSendAt = cronStatus?.scheduledSendAt;
+  const lastSignal = [cronTickAt, scheduleSyncedAt].filter((d): d is Date => !!d).sort((a, b) => b.getTime() - a.getTime())[0];
+  const appError = !!cronStatus?.lastError && (!cronLastRun || (!!cronErrorAt && cronErrorAt >= cronLastRun));
+  const autoState: 'ok' | 'inactivo' | 'ajustando' | 'detenido' | 'error' =
+    cronStatus?.scheduleError || appError ? 'error'
+    : !scheduledSendAt && !cronTickAt ? 'inactivo'
+    : savedSlack && scheduledSendAt !== savedSlack.sendAt ? 'ajustando'
+    : lastSignal && (now.getTime() - lastSignal.getTime()) / 3_600_000 > DAILY_STALE_HOURS ? 'detenido'
+    : 'ok';
   const cronHealthy = autoState === 'ok';
   const modulePoolSize = useMemo(() => {
     const active = new Set(savedConfig.activeModules ?? []);
@@ -528,9 +568,9 @@ export default function KnowledgePulsePage() {
   if (autoState === 'inactivo') {
     warnings.push({ text: `El envío automático todavía no está encendido en el servidor (es un paso único del equipo de tecnología). ${manualHint}` });
   } else if (autoState === 'detenido') {
-    warnings.push({ text: `El envío automático dejó de funcionar ${cronLastRun ? timeAgo(cronLastRun, now) : ''}. Avísale al equipo de tecnología. ${manualHint}` });
+    warnings.push({ text: `El envío automático no corrió ayer. Avísale al equipo de tecnología. ${manualHint}` });
   } else if (autoState === 'error') {
-    warnings.push({ text: `El envío automático tiene un problema. Avísale al equipo de tecnología. ${manualHint} (Detalle técnico: ${cronStatus?.lastError})` });
+    warnings.push({ text: `El envío automático tiene un problema. Avísale al equipo de tecnología. ${manualHint} (Detalle técnico: ${cronStatus?.scheduleError ?? cronStatus?.lastError})` });
   }
   if (!loadingQ && !loadingConfig && modulePoolSize === 0) {
     warnings.push({ text: 'No hay preguntas activas en los módulos seleccionados: no se puede crear el pulso.', action: { label: 'Banco de preguntas', href: '/admin/questions' } });
@@ -565,13 +605,17 @@ export default function KnowledgePulsePage() {
           <Activity className={cn('h-4 w-4', cronHealthy ? 'text-green-600' : 'text-amber-500')} />
           <span className="font-medium">Envío automático:</span>
           <span className={cn(cronHealthy ? 'text-green-700' : 'text-amber-700')}>
-            {autoState === 'ok' ? 'funcionando'
+            {autoState === 'ok' ? `todos los días a las ${formatHHMM(scheduledSendAt)}`
+              : autoState === 'ajustando' ? `cambiando la hora a las ${formatHHMM(savedSlack?.sendAt)}…`
               : autoState === 'inactivo' ? 'no está encendido'
               : autoState === 'detenido' ? 'detenido'
               : 'con problemas'}
           </span>
-          {autoState === 'ok' && cronLastRun && (
-            <span className="text-muted-foreground">· revisado {timeAgo(cronLastRun, now)}</span>
+          {autoState === 'ok' && (
+            <span className="text-muted-foreground">
+              · {cronLastRun ? `última vez ${timeAgo(cronLastRun, now)}` : 'aún no ha corrido'}
+              {savedSlack && !savedSlack.active && ' · el aviso de Slack está apagado'}
+            </span>
           )}
         </div>
         {warnings.map((w, i) => (
@@ -949,7 +993,7 @@ export default function KnowledgePulsePage() {
                   <div className="space-y-1.5 max-w-xs">
                     <Label>Hora de envío</Label>
                     <Input type="time" value={slackForm.sendAt} onChange={e => setSlackForm(f => ({ ...f, sendAt: e.target.value }))} />
-                    <p className="text-xs text-muted-foreground">Debe ser antes del cierre del pulso ({formatHHMM(closeAt)}).</p>
+                    <p className="text-xs text-muted-foreground">El aviso sale a esta hora exacta cada día. Debe ser antes del cierre del pulso ({formatHHMM(closeAt)}).</p>
                     {slackForm.sendAt >= closeAt && (
                       <p className="text-xs text-red-600">La hora de envío es igual o posterior al cierre: el aviso nunca saldría.</p>
                     )}
@@ -1067,6 +1111,14 @@ export default function KnowledgePulsePage() {
                     <Send className="h-4 w-4 mr-1.5" /> {sendingTest ? 'Enviando...' : 'Enviarme una prueba'}
                   </Button>
                   {slackDirty && <p className="text-[11px] text-amber-600">Guarda los cambios antes de probar.</p>}
+                  {testResult && (
+                    <div className={cn(
+                      'rounded-lg border px-3 py-2 text-sm space-y-1',
+                      testResult.ok ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800',
+                    )}>
+                      {testResult.lines.map((line, i) => <p key={i}>{line}</p>)}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

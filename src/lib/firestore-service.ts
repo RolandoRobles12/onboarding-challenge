@@ -2826,7 +2826,7 @@ export async function getPulseCronStatus(orgId = DEFAULT_ORG_ID): Promise<PulseC
 }
 
 export async function savePulseCronStatus(
-  status: { lastActions: string[]; lastError?: string },
+  status: { lastActions: string[]; lastError?: string; maintenanceDate?: string },
   orgId = DEFAULT_ORG_ID
 ): Promise<void> {
   await setDoc(getDocRef(COLLECTIONS.PULSE_CRON_STATUS, orgId), stripUndefined({
@@ -2834,7 +2834,17 @@ export async function savePulseCronStatus(
     lastRunAt: serverTimestamp(),
     lastActions: status.lastActions,
     lastError: status.lastError ?? null,
-  }));
+    maintenanceDate: status.maintenanceDate,
+  }), { merge: true });
+}
+
+/**
+ * Pide a la función programada que revise a qué hora está su ejecución diaria
+ * (la función escucha cambios en slack_config). Lo usa el panel si detecta que
+ * la hora programada no coincide con la configurada.
+ */
+export async function requestPulseScheduleSync(orgId = DEFAULT_ORG_ID): Promise<void> {
+  await setDoc(getDocRef(COLLECTIONS.SLACK_CONFIG, orgId), { syncRequestedAt: serverTimestamp() }, { merge: true });
 }
 
 // ----------- Questions for the pulse -----------

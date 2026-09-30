@@ -1,17 +1,17 @@
 /**
  * GET|POST /api/pulse/cron
- * Proceso programado del Pulso de Conocimiento. Debe llamarse cada 5–15 min
- * (Cloud Scheduler, cron-job.org, GitHub Actions…). Es idempotente: cada
- * ejecución revisa la hora en la zona del equipo y solo hace lo que falta.
+ * Trabajo diario del Pulso de Conocimiento. Lo llama la función programada
+ * `pulsoAvisoDiario` una vez al día, a la hora de envío configurada. Es
+ * idempotente: revisa la hora en la zona del equipo y solo hace lo que falta.
  *
- *  1. Cierra pulsos de días anteriores que quedaron abiertos y marca como
- *     'expired' los intentos que quedaron a medias.
+ *  1. Una vez al día: cierra pulsos de días anteriores que quedaron abiertos
+ *     y marca como 'expired' los intentos que quedaron a medias.
  *  2. Crea el pulso de hoy si "Pulso automático diario" está activo.
  *  3. Envía el aviso de Slack a partir de la hora de envío (una sola vez).
  *  4. Cierra el pulso de hoy al llegar la hora de cierre.
  *
- * Quién lo llama: la función programada `pulsoCadaDiezMinutos` (functions/),
- * que Firebase ejecuta sola cada 10 minutos. No requiere configuración de admins.
+ * Quién lo llama: la función programada `pulsoAvisoDiario` (functions/). No
+ * requiere configuración de admins.
  *
  * Autenticación: header `Authorization: Bearer <secreto>` (o `?key=<secreto>`).
  * El secreto lo genera la función programada y lo guarda en `org_tokens`
@@ -28,6 +28,7 @@ import {
   getDailyPulses,
   getOrgToken,
   getPulseConfig,
+  getPulseCronStatus,
   getSlackConfig,
   recordPulseSlackResult,
   savePulseCronStatus,
@@ -70,21 +71,27 @@ async function run(req: NextRequest) {
   const today = pulseDateStr(now);
   const minutes = pulseMinutesNow(now);
   const actions: string[] = [];
+  let maintenanceDate: string | undefined;
 
   try {
-    const [cfg, slackCfg] = await Promise.all([getPulseConfig(), getSlackConfig()]);
+    const [cfg, slackCfg, cronStatus] = await Promise.all([getPulseConfig(), getSlackConfig(), getPulseCronStatus()]);
     const closeMinutes = hhmmToMinutes(cfg.closeAt);
+    maintenanceDate = cronStatus?.maintenanceDate;
 
-    // 1. Días anteriores
-    const past = await getDailyPulses(addDaysStr(today, -LOOKBACK_DAYS), addDaysStr(today, -1));
-    for (const p of past) {
-      if (p.status !== 'closed') {
-        await updatePulseStatus(p.date, 'closed');
-        actions.push(`Pulso del ${p.date} cerrado`);
+    // 1. Días anteriores: basta una vez al día (lee todos los intentos de la
+    //    semana, así que no conviene repetirlo en cada vuelta).
+    if (maintenanceDate !== today) {
+      const past = await getDailyPulses(addDaysStr(today, -LOOKBACK_DAYS), addDaysStr(today, -1));
+      for (const p of past) {
+        if (p.status !== 'closed') {
+          await updatePulseStatus(p.date, 'closed');
+          actions.push(`Pulso del ${p.date} cerrado`);
+        }
       }
+      const expired = await expireStalePulseAttempts(today, addDaysStr(today, -LOOKBACK_DAYS));
+      if (expired > 0) actions.push(`${expired} intento(s) a medias marcados como vencidos`);
+      maintenanceDate = today;
     }
-    const expired = await expireStalePulseAttempts(today, addDaysStr(today, -LOOKBACK_DAYS));
-    if (expired > 0) actions.push(`${expired} intento(s) a medias marcados como vencidos`);
 
     // 2. Crear el pulso de hoy
     let pulse = await getDailyPulse(today);
@@ -126,12 +133,12 @@ async function run(req: NextRequest) {
       actions.push('Pulso de hoy cerrado');
     }
 
-    await savePulseCronStatus({ lastActions: actions });
+    await savePulseCronStatus({ lastActions: actions, maintenanceDate });
     return NextResponse.json({ ok: true, date: today, actions });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[pulse-cron] Error:', err);
-    await savePulseCronStatus({ lastActions: actions, lastError: message }).catch(() => {});
+    await savePulseCronStatus({ lastActions: actions, lastError: message, maintenanceDate }).catch(() => {});
     return NextResponse.json({ ok: false, error: message, actions }, { status: 500 });
   }
 }

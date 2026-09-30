@@ -34,11 +34,20 @@ dispositivo ni en la del servidor.
 
 ## Envío automático (paso único del equipo de tecnología)
 
-Los admins no configuran nada técnico. El reloj del Pulso es la función
-programada `pulsoCadaDiezMinutos` (carpeta `functions/`), que Firebase ejecuta
-sola cada 10 minutos. Cada vez que corre, llama a `/api/pulse/cron`, que hace
-de forma idempotente lo que toque según la hora: crear el pulso, enviar el
-aviso de Slack, cerrarlo y vencer intentos a medias.
+Los admins no configuran nada técnico. El Pulso tiene una ejecución diaria,
+`pulsoAvisoDiario` (carpeta `functions/`), que Firebase corre **una vez al día,
+exactamente a la "Hora de envío"** configurada en Gestión del Pulso → Slack. En
+esa ejecución la app (`/api/pulse/cron`) crea el pulso si falta, manda el aviso
+de Slack y hace la limpieza de días anteriores (cierra pulsos pasados y vence
+intentos a medias).
+
+Cuando un admin cambia la hora de envío, la función `pulsoSincronizarHorario`
+mueve esa ejecución diaria a la hora nueva. Si un deploy la regresa a su hora
+inicial (8:00), se corrige sola en la siguiente ejecución o cuando un admin
+abre Gestión del Pulso.
+
+La hora de cierre no necesita ejecución propia: la pantalla del vendedor ya
+no deja empezar después de esa hora.
 
 Solo hay que desplegarla **una vez** (y de nuevo si cambia `functions/`):
 
@@ -47,9 +56,8 @@ firebase deploy --only functions:pulso
 ```
 
 El deploy instala solo las dependencias de `functions/` (paso `predeploy` en
-`firebase.json`), así que no hace falta correr `npm install` antes. Usa
-`--only functions:pulso` para no publicar al mismo tiempo el hosting ni las
-reglas de Firestore/Storage del repositorio.
+`firebase.json`). Usa `--only functions:pulso` para no publicar al mismo
+tiempo el hosting ni las reglas de Firestore/Storage del repositorio.
 
 No requiere otra configuración:
 
@@ -58,11 +66,15 @@ No requiere otra configuración:
 - La URL de la app se registra sola la primera vez que un admin abre
   **Gestión del Pulso**. Como respaldo se puede poner `APP_URL=https://…`
   en `functions/.env`.
-- Requiere el plan Blaze de Firebase, el mismo que ya exige App Hosting.
+- Mover la hora requiere que la cuenta de servicio de las funciones pueda
+  editar Cloud Scheduler. Por defecto la tiene (rol Editor); si el panel dice
+  que falta permiso, dale el rol «Cloud Scheduler Admin».
+- Requiere el plan Blaze de Firebase.
 
-El panel muestra en lenguaje simple si el envío automático está
-"funcionando", "no está encendido", "detenido" o "con problemas". Mientras no
-funcione, el aviso se puede mandar con el botón "Enviar aviso de Slack ahora".
+El panel muestra en lenguaje simple el estado: "todos los días a las 8:00 AM",
+"cambiando la hora…", "no está encendido", "detenido" o "con problemas".
+Mientras no funcione, el aviso se puede mandar con el botón "Enviar aviso de
+Slack ahora".
 
 ## Dónde se configura cada cosa
 
