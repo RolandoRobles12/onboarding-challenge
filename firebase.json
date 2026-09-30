@@ -14,12 +14,15 @@
     {
       "source": "functions",
       "codebase": "pulso",
-      "runtime": "nodejs20",
+      "runtime": "nodejs22",
       "ignore": [
         "node_modules",
         ".git",
         "*.local",
         ".env*"
+      ],
+      "predeploy": [
+        "npm --prefix functions install --no-audit --no-fund"
       ]
     }
   ],
