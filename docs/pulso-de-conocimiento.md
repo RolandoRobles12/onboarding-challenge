@@ -43,9 +43,13 @@ aviso de Slack, cerrarlo y vencer intentos a medias.
 Solo hay que desplegarla **una vez** (y de nuevo si cambia `functions/`):
 
 ```
-cd functions && npm install && cd ..
 firebase deploy --only functions:pulso
 ```
+
+El deploy instala solo las dependencias de `functions/` (paso `predeploy` en
+`firebase.json`), así que no hace falta correr `npm install` antes. Usa
+`--only functions:pulso` para no publicar al mismo tiempo el hosting ni las
+reglas de Firestore/Storage del repositorio.
 
 No requiere otra configuración:
 
