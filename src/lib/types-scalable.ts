@@ -1435,4 +1435,6 @@ export interface PulseCronStatus {
   lastErrorAt?: Timestamp;
   /** Latido: cuándo corrió por última vez la función programada (aunque fallara). */
   lastTickAt?: Timestamp;
+  /** Último día (YYYY-MM-DD) en que se hizo la limpieza diaria de días anteriores. */
+  maintenanceDate?: string;
 }

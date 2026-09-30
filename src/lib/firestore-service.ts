@@ -2826,7 +2826,7 @@ export async function getPulseCronStatus(orgId = DEFAULT_ORG_ID): Promise<PulseC
 }
 
 export async function savePulseCronStatus(
-  status: { lastActions: string[]; lastError?: string },
+  status: { lastActions: string[]; lastError?: string; maintenanceDate?: string },
   orgId = DEFAULT_ORG_ID
 ): Promise<void> {
   await setDoc(getDocRef(COLLECTIONS.PULSE_CRON_STATUS, orgId), stripUndefined({
@@ -2834,6 +2834,7 @@ export async function savePulseCronStatus(
     lastRunAt: serverTimestamp(),
     lastActions: status.lastActions,
     lastError: status.lastError ?? null,
+    maintenanceDate: status.maintenanceDate,
   }));
 }
 
