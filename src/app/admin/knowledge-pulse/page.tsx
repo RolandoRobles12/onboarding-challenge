@@ -161,6 +161,15 @@ function downloadCsv(filename: string, rows: (string | number | undefined)[][]) 
   URL.revokeObjectURL(url);
 }
 
+type SlackSendResponse = {
+  ok?: boolean;
+  partial?: boolean;
+  message?: string;
+  error?: string;
+  results?: { target: string; ok: boolean; error?: string }[];
+  connection?: { team: string; bot: string };
+};
+
 type PulseConfigForm = Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'>;
 type SlackForm = Pick<SlackNotificationConfig, 'active' | 'sendAt' | 'appUrl' | 'messageTemplate' | 'channels'> & {
   dmSellers: boolean;
@@ -213,6 +222,7 @@ export default function KnowledgePulsePage() {
   });
   const [savingSlack, setSavingSlack] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; lines: string[] } | null>(null);
 
   const [cronStatus, setCronStatus] = useState<PulseCronStatus | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
@@ -240,7 +250,10 @@ export default function KnowledgePulsePage() {
   // ── Carga inicial ──────────────────────────────────────────────────────
 
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60_000);
+    const t = setInterval(() => {
+      setNow(new Date());
+      getPulseCronStatus().then(setCronStatus).catch(() => {});
+    }, 60_000);
     return () => clearInterval(t);
   }, []);
 
@@ -340,11 +353,18 @@ export default function KnowledgePulsePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date }),
       });
-      const data = await res.json() as { message?: string; error?: string };
-      if (!res.ok && res.status !== 207) {
-        toast({ variant: 'destructive', title: 'No se envió el aviso', description: data.error ?? data.message ?? `HTTP ${res.status}` });
+      const data = await res.json() as SlackSendResponse;
+      const failed = (data.results ?? []).filter(r => !r.ok);
+      if (data.error) {
+        toast({ variant: 'destructive', title: 'No se envió el aviso', description: data.error });
+      } else if (failed.length > 0) {
+        toast({
+          variant: 'destructive',
+          title: data.partial ? 'Aviso enviado con errores' : 'Slack rechazó el aviso',
+          description: failed.slice(0, 3).map(r => `${r.target}: ${r.error ?? 'error'}`).join(' · '),
+        });
       } else {
-        toast({ title: res.status === 207 ? '⚠️ Aviso enviado con errores' : 'Aviso enviado', description: data.message });
+        toast({ title: 'Aviso enviado', description: data.message });
       }
       await refreshDay(date);
     } catch (err) {
@@ -418,17 +438,18 @@ export default function KnowledgePulsePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date: today, test: true, testSlackId: mySlackId }),
       });
-      const data = await res.json() as { message?: string; error?: string; results?: { target: string; ok: boolean; error?: string }[] };
+      const data = await res.json() as SlackSendResponse;
       const failed = (data.results ?? []).filter(r => !r.ok);
-      if (!res.ok && !data.results) {
-        toast({ variant: 'destructive', title: 'Error al enviar', description: data.error ?? `HTTP ${res.status}` });
+      const via = data.connection ? ` (bot «${data.connection.bot}» en ${data.connection.team})` : '';
+      if (data.error) {
+        setTestResult({ ok: false, lines: [data.error] });
       } else if (failed.length > 0) {
-        toast({ variant: 'destructive', title: 'La prueba falló', description: failed.map(r => `${r.target}: ${r.error ?? 'error'}`).join(' · ') });
+        setTestResult({ ok: false, lines: [`Conectado a Slack${via}, pero el mensaje no se entregó:`, ...failed.map(r => `${r.target}: ${r.error ?? 'error'}`)] });
       } else {
-        toast({ title: '✅ Prueba enviada', description: 'Revisa tus mensajes directos de Slack. Se usó la configuración guardada.' });
+        setTestResult({ ok: true, lines: [`Mensaje enviado${via}. Revisa tus mensajes directos de Slack (en la conversación con el bot).`] });
       }
     } catch (err) {
-      toast({ variant: 'destructive', title: 'Error al enviar', description: err instanceof Error ? err.message : String(err) });
+      setTestResult({ ok: false, lines: [`No se pudo contactar a la app: ${err instanceof Error ? err.message : String(err)}`] });
     } finally {
       setSendingTest(false);
     }
@@ -509,9 +530,10 @@ export default function KnowledgePulsePage() {
   const cronLastRun = cronStatus?.lastRunAt?.toDate?.();
   const cronMinutesAgo = cronLastRun ? (now.getTime() - cronLastRun.getTime()) / 60_000 : null;
   const cronErrorAt = cronStatus?.lastErrorAt?.toDate?.();
+  const cronTickAt = cronStatus?.lastTickAt?.toDate?.();
   const autoState: 'ok' | 'inactivo' | 'detenido' | 'error' =
     cronStatus?.lastError && (!cronLastRun || (cronErrorAt && cronErrorAt >= cronLastRun)) ? 'error'
-    : cronMinutesAgo === null ? 'inactivo'
+    : cronMinutesAgo === null ? (cronTickAt ? 'error' : 'inactivo')
     : cronMinutesAgo <= CRON_STALE_MINUTES ? 'ok'
     : 'detenido';
   const cronHealthy = autoState === 'ok';
@@ -530,7 +552,7 @@ export default function KnowledgePulsePage() {
   } else if (autoState === 'detenido') {
     warnings.push({ text: `El envío automático dejó de funcionar ${cronLastRun ? timeAgo(cronLastRun, now) : ''}. Avísale al equipo de tecnología. ${manualHint}` });
   } else if (autoState === 'error') {
-    warnings.push({ text: `El envío automático tiene un problema. Avísale al equipo de tecnología. ${manualHint} (Detalle técnico: ${cronStatus?.lastError})` });
+    warnings.push({ text: `El envío automático tiene un problema. Avísale al equipo de tecnología. ${manualHint} (Detalle técnico: ${cronStatus?.lastError ?? 'la función corre pero la app no confirmó la ejecución'})` });
   }
   if (!loadingQ && !loadingConfig && modulePoolSize === 0) {
     warnings.push({ text: 'No hay preguntas activas en los módulos seleccionados: no se puede crear el pulso.', action: { label: 'Banco de preguntas', href: '/admin/questions' } });
@@ -1067,6 +1089,14 @@ export default function KnowledgePulsePage() {
                     <Send className="h-4 w-4 mr-1.5" /> {sendingTest ? 'Enviando...' : 'Enviarme una prueba'}
                   </Button>
                   {slackDirty && <p className="text-[11px] text-amber-600">Guarda los cambios antes de probar.</p>}
+                  {testResult && (
+                    <div className={cn(
+                      'rounded-lg border px-3 py-2 text-sm space-y-1',
+                      testResult.ok ? 'border-green-200 bg-green-50 text-green-800' : 'border-red-200 bg-red-50 text-red-800',
+                    )}>
+                      {testResult.lines.map((line, i) => <p key={i}>{line}</p>)}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

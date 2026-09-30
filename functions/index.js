@@ -53,8 +53,24 @@ async function recordFailure(firestore, message) {
 }
 
 /** Una "vuelta" del reloj: llama a /api/pulse/cron de la app. */
-async function runPulseTick({ fetchImpl = fetch } = {}) {
+async function runPulseTick(options = {}) {
   const firestore = db();
+  try {
+    // Latido: deja constancia de que la función corrió, pase lo que pase después.
+    await firestore.collection('pulse_cron_status').doc(ORG_ID).set({
+      organizationId: ORG_ID,
+      lastTickAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+    return await tick(firestore, options);
+  } catch (err) {
+    const message = `Error inesperado en la función programada: ${err instanceof Error ? err.message : String(err)}`;
+    logger.error(message);
+    await recordFailure(firestore, message).catch(() => {});
+    return { ok: false, error: message };
+  }
+}
+
+async function tick(firestore, { fetchImpl = fetch } = {}) {
   const slackSnap = await firestore.collection('slack_config').doc(ORG_ID).get();
   const appUrl = String((slackSnap.exists && slackSnap.data().appUrl) || process.env.APP_URL || '')
     .trim()

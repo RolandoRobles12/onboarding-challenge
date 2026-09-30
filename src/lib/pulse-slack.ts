@@ -21,23 +21,48 @@ export class PulseSlackError extends Error {
 }
 
 /** Traduce los códigos de error de Slack a algo que un admin entienda. */
+const TOKEN_FIX = 'Pide al equipo técnico el «Bot User OAuth Token» de la app de Slack (empieza con xoxb-) y pégalo en Admin → Tokens.';
 const SLACK_ERROR_TEXT: Record<string, string> = {
-  invalid_auth: 'el token del bot de Slack no es válido',
-  not_authed: 'falta el token del bot de Slack',
-  account_inactive: 'el bot de Slack está desactivado',
-  token_revoked: 'el token del bot de Slack fue revocado',
-  channel_not_found: 'no se encontró el canal o usuario (revisa su ID)',
-  not_in_channel: 'el bot no está agregado a ese canal',
+  invalid_auth: `el token del bot de Slack no es válido. ${TOKEN_FIX}`,
+  not_authed: `falta el token del bot de Slack. ${TOKEN_FIX}`,
+  not_allowed_token_type: `el token guardado no es de bot. ${TOKEN_FIX}`,
+  account_inactive: 'la app de Slack está desactivada o fue desinstalada del espacio de trabajo',
+  token_revoked: `el token del bot fue revocado (la app se reinstaló o desinstaló). ${TOKEN_FIX}`,
+  token_expired: `el token del bot expiró. ${TOKEN_FIX}`,
+  team_access_not_granted: 'la app de Slack no está instalada en este espacio de trabajo',
+  missing_scope: 'a la app de Slack le falta el permiso «chat:write»: agrégalo en la configuración de la app y reinstálala',
+  channel_not_found: 'Slack no encontró ese canal o persona: revisa que el ID esté bien copiado (canales empiezan con C, personas con U)',
+  user_not_found: 'Slack no encontró a esa persona: revisa su Slack ID (empieza con U)',
+  not_in_channel: 'el bot no está en ese canal: en Slack, abre el canal y escribe /invite @nombre-del-bot',
   is_archived: 'el canal está archivado',
-  user_not_found: 'no se encontró al usuario en Slack (revisa su Slack ID)',
-  cannot_dm_bot: 'no se puede mandar mensaje a un bot',
-  ratelimited: 'Slack pidió esperar (demasiados mensajes seguidos)',
-  missing_scope: 'al bot de Slack le falta el permiso para enviar mensajes',
+  cannot_dm_bot: 'ese Slack ID es de un bot, no de una persona',
+  restricted_action: 'el espacio de trabajo no permite que la app publique ahí',
+  ratelimited: 'Slack pidió esperar (demasiados mensajes seguidos); se intentará en el siguiente envío',
+  msg_too_long: 'el mensaje es demasiado largo',
 };
 
 export function slackErrorText(code: string | undefined): string {
   if (!code) return 'error desconocido';
   return SLACK_ERROR_TEXT[code] ?? code;
+}
+
+/** Verifica que el token sirva y devuelve a nombre de quién publica. */
+export async function checkSlackConnection(): Promise<{ ok: true; team: string; bot: string } | { ok: false; error: string }> {
+  const storedToken = await getOrgToken('slack_bot_token');
+  const token = (storedToken?.value || process.env.SLACK_BOT_TOKEN || '').trim();
+  if (!token) return { ok: false, error: `Falta el token del bot de Slack. ${TOKEN_FIX}` };
+  if (!token.startsWith('xoxb-')) return { ok: false, error: `El token guardado no es de bot (debe empezar con xoxb-). ${TOKEN_FIX}` };
+  try {
+    const res = await fetch('https://slack.com/api/auth.test', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json() as { ok: boolean; error?: string; team?: string; user?: string };
+    if (!data.ok) return { ok: false, error: `Slack rechazó la conexión: ${slackErrorText(data.error)}` };
+    return { ok: true, team: data.team ?? '', bot: data.user ?? '' };
+  } catch (err) {
+    return { ok: false, error: `No se pudo conectar con Slack (${err instanceof Error ? err.message : String(err)})` };
+  }
 }
 
 async function postMessage(token: string, channel: string, text: string, blocks: unknown[]) {
@@ -65,7 +90,7 @@ export async function sendPulseSlack(opts: {
   fallbackBaseUrl?: string;
 }): Promise<SlackSendResult[]> {
   const storedToken = await getOrgToken('slack_bot_token');
-  const token = storedToken?.value || process.env.SLACK_BOT_TOKEN;
+  const token = (storedToken?.value || process.env.SLACK_BOT_TOKEN || '').trim();
   if (!token) {
     throw new PulseSlackError('Falta conectar el bot de Slack: pega su token en Admin → Tokens (el equipo de tecnología te lo puede dar).', 500);
   }

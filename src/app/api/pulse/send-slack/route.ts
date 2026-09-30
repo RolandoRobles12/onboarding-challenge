@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { claimPulseSlackSend, getDailyPulse, recordPulseSlackResult } from '@/lib/firestore-service';
-import { sendPulseSlack, summarizeSlackResults, PulseSlackError } from '@/lib/pulse-slack';
+import { checkSlackConnection, sendPulseSlack, summarizeSlackResults, PulseSlackError } from '@/lib/pulse-slack';
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,6 +23,14 @@ export async function POST(req: NextRequest) {
 
     const proto = req.headers.get('x-forwarded-proto') || 'https';
     const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
+
+    // En la prueba, primero se verifica el token para dar un motivo claro.
+    let connection: { team: string; bot: string } | undefined;
+    if (test) {
+      const check = await checkSlackConnection();
+      if (!check.ok) return NextResponse.json({ ok: false, error: check.error });
+      connection = { team: check.team, bot: check.bot };
+    }
 
     let pulse = null;
     if (!test) {
@@ -58,17 +66,18 @@ export async function POST(req: NextRequest) {
       await recordPulseSlackResult(date, { ...summarizeSlackResults(results), trigger: 'manual' });
     }
 
+    // Slack respondió: 200 con el detalle por destinatario (un rechazo de Slack
+    // no es una falla del servidor de la app).
     const failed = results.filter(r => !r.ok);
     const succeeded = results.length - failed.length;
-    if (failed.length === results.length) {
-      return NextResponse.json({ message: 'Todos los envíos fallaron', results }, { status: 502 });
-    }
-    if (failed.length > 0) {
-      return NextResponse.json({ message: `${succeeded} enviados, ${failed.length} fallaron`, results, partialSuccess: true }, { status: 207 });
-    }
     return NextResponse.json({
-      message: `${results.length} mensaje${results.length !== 1 ? 's' : ''} enviado${results.length !== 1 ? 's' : ''}`,
+      ok: failed.length === 0,
+      partial: failed.length > 0 && succeeded > 0,
+      message: failed.length === 0
+        ? `${succeeded} mensaje${succeeded !== 1 ? 's' : ''} enviado${succeeded !== 1 ? 's' : ''}`
+        : `${succeeded} enviados, ${failed.length} fallaron`,
       results,
+      connection,
     });
   } catch (err: unknown) {
     if (err instanceof PulseSlackError) {

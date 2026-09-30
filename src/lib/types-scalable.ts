@@ -1433,4 +1433,6 @@ export interface PulseCronStatus {
   lastError?: string | null;
   /** Cuándo falló la función programada al intentar llamar a la app. */
   lastErrorAt?: Timestamp;
+  /** Latido: cuándo corrió por última vez la función programada (aunque fallara). */
+  lastTickAt?: Timestamp;
 }
