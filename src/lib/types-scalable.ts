@@ -1304,6 +1304,8 @@ export interface SlackNotificationConfig {
   directRecipients?: SlackDirectRecipient[];
   /** Si es true (default), también se manda DM a los vendedores con Slack ID en su perfil. */
   dmSellers?: boolean;
+  /** El panel lo actualiza para pedir que se revise la hora de la ejecución diaria. */
+  syncRequestedAt?: Timestamp;
   updatedAt: Timestamp;
   updatedBy: string;
 }
@@ -1437,4 +1439,10 @@ export interface PulseCronStatus {
   lastTickAt?: Timestamp;
   /** Último día (YYYY-MM-DD) en que se hizo la limpieza diaria de días anteriores. */
   maintenanceDate?: string;
+  /** Hora (HH:MM) a la que quedó programada la ejecución diaria en Cloud Scheduler. */
+  scheduledSendAt?: string;
+  scheduleSyncedAt?: Timestamp;
+  /** Error al mover la ejecución diaria a la hora configurada. */
+  scheduleError?: string | null;
+  scheduleErrorAt?: Timestamp;
 }

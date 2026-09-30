@@ -1,8 +1,8 @@
 /**
  * GET|POST /api/pulse/cron
- * Proceso programado del Pulso de Conocimiento. Debe llamarse cada 5–15 min
- * (Cloud Scheduler, cron-job.org, GitHub Actions…). Es idempotente: cada
- * ejecución revisa la hora en la zona del equipo y solo hace lo que falta.
+ * Trabajo diario del Pulso de Conocimiento. Lo llama la función programada
+ * `pulsoAvisoDiario` una vez al día, a la hora de envío configurada. Es
+ * idempotente: revisa la hora en la zona del equipo y solo hace lo que falta.
  *
  *  1. Una vez al día: cierra pulsos de días anteriores que quedaron abiertos
  *     y marca como 'expired' los intentos que quedaron a medias.
@@ -10,8 +10,8 @@
  *  3. Envía el aviso de Slack a partir de la hora de envío (una sola vez).
  *  4. Cierra el pulso de hoy al llegar la hora de cierre.
  *
- * Quién lo llama: la función programada `pulsoCadaDiezMinutos` (functions/),
- * que Firebase ejecuta sola cada 10 minutos. No requiere configuración de admins.
+ * Quién lo llama: la función programada `pulsoAvisoDiario` (functions/). No
+ * requiere configuración de admins.
  *
  * Autenticación: header `Authorization: Bearer <secreto>` (o `?key=<secreto>`).
  * El secreto lo genera la función programada y lo guarda en `org_tokens`
