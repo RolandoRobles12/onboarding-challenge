@@ -6,9 +6,9 @@ import { auth } from '@/lib/firebase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { isUserAllowed } from '@/lib/auth-utils';
-import { getUserProfile, createUserProfile, checkWhitelist, markWhitelistAsUsed } from '@/lib/firestore-service';
+import { getUserProfile } from '@/lib/firestore-service';
+import { authFetch } from '@/lib/api-client';
 import type { UserProfile, UserRole } from '@/lib/types-scalable';
-import { Timestamp } from 'firebase/firestore';
 
 interface AuthContextType {
   user: User | null;
@@ -33,8 +33,6 @@ const AuthContext = React.createContext<AuthContextType>({
   isTrainer: false,
   isSeller: false,
 });
-
-const DEFAULT_ORG_ID = 'aviva-credito';
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = React.useState<User | null>(null);
@@ -66,87 +64,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const loadOrCreateUserProfile = React.useCallback(async (currentUser: User) => {
     try {
-      // Intentar cargar el perfil existente
       let userProfile = await getUserProfile(currentUser.uid);
 
-      // Si no existe, crear uno nuevo
+      // Primer inicio de sesión: el servidor crea el perfil y decide el rol
+      // (whitelist o vendedor). El navegador no puede escribir su propio rol.
       if (!userProfile) {
-        console.log('Creating new user profile for:', currentUser.email);
-
-        // Verificar whitelist para determinar el rol
-        let role: UserRole = 'seller'; // Rol por defecto
-        let whitelistEntry = null;
-
-        if (currentUser.email) {
-          try {
-            whitelistEntry = await checkWhitelist(currentUser.email, DEFAULT_ORG_ID);
-            if (whitelistEntry) {
-              role = whitelistEntry.role;
-              console.log('Found whitelist entry, role:', role);
-            } else {
-              // Si no está en whitelist pero es email autorizado, dar super_admin
-              const allowedEmails = ['rolando.9834@gmail.com', 'admin@avivacredito.com'];
-              if (allowedEmails.includes(currentUser.email.toLowerCase())) {
-                role = 'super_admin';
-                console.log('Email autorizado sin whitelist, asignando super_admin');
-              }
-            }
-          } catch (error) {
-            console.error('Error checking whitelist:', error);
-            // Si hay error (ej: colección no existe), usar emails autorizados
-            const allowedEmails = ['rolando.9834@gmail.com', 'admin@avivacredito.com'];
-            if (currentUser.email && allowedEmails.includes(currentUser.email.toLowerCase())) {
-              role = 'super_admin';
-              console.log('Whitelist no disponible, usando email autorizado para super_admin');
-            }
-          }
+        const res = await authFetch('/api/auth/profile', { method: 'POST' });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(data.error || `Error ${res.status} al crear el perfil`);
         }
-
-        // Crear el perfil con estructura simplificada
-        const profileData: {
-          email: string;
-          nombre: string;
-          rol: UserRole;
-          onboardingCompleted: boolean;
-          producto?: string;
-        } = {
-          email: currentUser.email || '',
-          nombre: currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
-          rol: role,
-          onboardingCompleted: false,
-        };
-
-        // Solo agregar producto si existe
-        if (whitelistEntry?.assignedKiosko) {
-          profileData.producto = whitelistEntry.assignedKiosko;
-        }
-
-        console.log('Creating user profile with data:', profileData);
-        await createUserProfile(currentUser.uid, profileData);
-        console.log('User profile created successfully');
-
-        // Marcar whitelist como usada si corresponde
-        if (whitelistEntry) {
-          try {
-            await markWhitelistAsUsed(whitelistEntry.id);
-          } catch (error) {
-            console.error('Error marking whitelist as used:', error);
-          }
-        }
-
-        // Usar los datos recién creados directamente en vez de re-fetchear
-        // (evita race condition de consistencia eventual en Firestore)
-        userProfile = {
-          uid: currentUser.uid,
-          ...profileData,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-        } as UserProfile;
+        userProfile = await getUserProfile(currentUser.uid);
+        if (!userProfile) throw new Error('El perfil no se creó');
       }
 
       // Bloquear acceso si el usuario está desactivado
       if (userProfile?.active === false) {
-        await signOut(auth);
+        if (auth) await signOut(auth);
         toast({
           variant: 'destructive',
           title: 'Cuenta desactivada',
@@ -168,7 +102,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   React.useEffect(() => {
-    if (!isFirebaseConfigured) {
+    if (!auth) {
       setLoading(false);
       return;
     }
@@ -189,7 +123,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             title: 'Acceso Denegado',
             description: 'El acceso está restringido. Por favor, utiliza una cuenta autorizada.',
           });
-          signOut(auth);
+          if (auth) signOut(auth);
         }
         setUser(null);
         setProfile(null);
@@ -199,6 +133,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => unsubscribe();
   }, [isFirebaseConfigured, loadOrCreateUserProfile]);
+
+  // Helper functions for role checking
+  const hasRole = React.useCallback((roles: UserRole | UserRole[]): boolean => {
+    if (!profile) return false;
+    const roleArray = Array.isArray(roles) ? roles : [roles];
+    return roleArray.includes(profile.rol);
+  }, [profile]);
 
   if (!isFirebaseConfigured) {
     return (
@@ -230,13 +171,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       </div>
     );
   }
-
-  // Helper functions for role checking
-  const hasRole = React.useCallback((roles: UserRole | UserRole[]): boolean => {
-    if (!profile) return false;
-    const roleArray = Array.isArray(roles) ? roles : [roles];
-    return roleArray.includes(profile.rol);
-  }, [profile]);
 
   const isAdmin = profile?.rol === 'admin' || profile?.rol === 'super_admin';
   const isTrainer = profile?.rol === 'trainer' || isAdmin;

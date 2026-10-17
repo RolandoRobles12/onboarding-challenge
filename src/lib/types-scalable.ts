@@ -230,8 +230,9 @@ export interface Question {
 
   // Metadata
   active: boolean;
-  timesUsed: number; // contador de usos
-  averageCorrectRate: number; // % de aciertos
+  timesUsed: number; // veces respondida (pulso y desafíos)
+  timesCorrect?: number; // veces respondida correctamente
+  averageCorrectRate: number; // % de aciertos (timesCorrect / timesUsed)
 
   // Configuración especial
   isTricky: boolean;
@@ -322,6 +323,15 @@ export interface UserStats {
 // INTENTOS Y RESULTADOS
 // ============================================================================
 
+export interface QuizQuestionResult {
+  questionId?: string;
+  text: string;
+  isCorrect: boolean;
+  userAnswer: string;
+  correctAnswer: string;
+  isTricky: boolean;
+}
+
 export interface QuizAttempt {
   id: string;
   organizationId: string;
@@ -344,6 +354,12 @@ export interface QuizAttempt {
   // Respuestas detalladas
   missionResults: MissionResult[];
   answers: QuestionAnswer[];
+  /** Resultado por pregunta, para el detalle de la pantalla de resultados. */
+  questionResults?: QuizQuestionResult[];
+  /** `assessmentConfig.showFeedback` del quiz al momento del intento. */
+  showFeedback?: string;
+  /** El tiempo límite se agotó antes de terminar. */
+  timeExpired?: boolean;
 
   // Feedback
   aiFeedback?: string;
@@ -899,6 +915,8 @@ export interface UserJourneyProgress {
   journeyId: string;
   productId: string;
   completedStepIds: string[];
+  /** Fecha de emisión de cada certificado de la ruta (stepId → fecha). */
+  certificateIssuedAt?: Record<string, Timestamp>;
   startedAt: Timestamp;
   updatedAt: Timestamp;
 }

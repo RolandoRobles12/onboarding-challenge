@@ -19,9 +19,11 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
+  arrayUnion,
   onSnapshot,
   runTransaction,
   documentId,
+  type Transaction,
   QueryConstraint,
   DocumentData,
   WithFieldValue,
@@ -31,6 +33,7 @@ import type {
   Product,
   Quiz,
   Question,
+  QuestionOption,
   UserProfile,
   Kiosko,
   QuizAttempt,
@@ -57,7 +60,6 @@ import type {
   PulseAttempt,
   PulseAnswer,
   PulseBacklogItem,
-  PulseSlackResult,
   PulseCronStatus,
   SlackNotificationConfig,
   PulseConfig,
@@ -67,7 +69,8 @@ import type {
   PulseCategory,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-scalable';
-import { addDaysStr, buildAutoPool, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
+import { withOptionIds } from './question-options';
+import { addDaysStr, buildAutoPool, DEFAULT_PULSE_CONFIG, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
 import type {
   Course,
   CourseEnrollment,
@@ -182,6 +185,22 @@ function stripUndefined<T>(data: T): T {
     ) as T;
   }
   return data;
+}
+
+/** Firestore limita cada batch a 500 escrituras. */
+const BATCH_LIMIT = 450;
+
+/** Opción tal como la arma el panel: el id se asigna al guardar si falta. */
+type QuestionOptionInput = Omit<QuestionOption, 'id'> & { id?: string };
+
+/** Datos para crear una pregunta (las estadísticas y el autor los pone el servicio). */
+export type NewQuestion = Omit<Question, 'id' | 'createdAt' | 'updatedAt' | 'timesUsed' | 'timesCorrect' | 'averageCorrectRate' | 'createdBy' | 'options'> & {
+  options: QuestionOptionInput[];
+};
+
+/** Pregunta leída de Firestore, con ids en todas sus opciones (ver withOptionIds). */
+function toQuestion(id: string, data: DocumentData): Question {
+  return { id, ...data, options: withOptionIds(data.options) } as Question;
 }
 
 // ============================================================================
@@ -423,7 +442,7 @@ export async function getQuestions(
 
     const q = query(getCollectionRef(COLLECTIONS.QUESTIONS), ...constraints);
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
+    return snapshot.docs.map(doc => toQuestion(doc.id, doc.data()));
   } catch (error) {
     console.error('Error getting questions:', error);
     throw error;
@@ -434,7 +453,7 @@ export async function getQuestion(questionId: string): Promise<Question | null> 
   try {
     const docRef = getDocRef(COLLECTIONS.QUESTIONS, questionId);
     const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Question : null;
+    return docSnap.exists() ? toQuestion(docSnap.id, docSnap.data()) : null;
   } catch (error) {
     console.error('Error getting question:', error);
     throw error;
@@ -455,7 +474,7 @@ export async function getQuestionsByIds(questionIds: string[]): Promise<Question
         where('__name__', 'in', chunk)
       );
       const snapshot = await getDocs(q);
-      questions.push(...snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question)));
+      questions.push(...snapshot.docs.map(doc => toQuestion(doc.id, doc.data())));
     }
 
     return questions;
@@ -466,14 +485,16 @@ export async function getQuestionsByIds(questionIds: string[]): Promise<Question
 }
 
 export async function createQuestion(
-  question: Omit<Question, 'id' | 'createdAt' | 'updatedAt' | 'timesUsed' | 'averageCorrectRate'>,
+  question: NewQuestion,
   userId: string
 ): Promise<string> {
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
     await setDoc(docRef, {
       ...stripUndefined(question),
+      options: withOptionIds(stripUndefined(question.options)),
       timesUsed: 0,
+      timesCorrect: 0,
       averageCorrectRate: 0,
       createdBy: userId,
       createdAt: serverTimestamp(),
@@ -486,11 +507,15 @@ export async function createQuestion(
   }
 }
 
-export async function updateQuestion(questionId: string, updates: Partial<Question>): Promise<void> {
+export async function updateQuestion(
+  questionId: string,
+  updates: Partial<Omit<Question, 'options'>> & { options?: QuestionOptionInput[] }
+): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.QUESTIONS, questionId);
     await updateDoc(docRef, {
       ...stripUndefined(updates),
+      ...(updates.options ? { options: withOptionIds(stripUndefined(updates.options)) } : {}),
       updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
@@ -523,36 +548,6 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   }
 }
 
-export async function createUserProfile(
-  userId: string,
-  profile: Omit<UserProfile, 'uid' | 'createdAt' | 'updatedAt'>
-): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.USERS, userId);
-
-    // Filtrar campos undefined
-    const data: any = {
-      uid: userId,
-      email: profile.email,
-      nombre: profile.nombre,
-      rol: profile.rol,
-      onboardingCompleted: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-
-    // Solo agregar producto si tiene valor
-    if (profile.producto) {
-      data.producto = profile.producto;
-    }
-
-    await setDoc(docRef, data);
-  } catch (error) {
-    console.error('Error creating user profile:', error);
-    throw error;
-  }
-}
-
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
@@ -575,7 +570,7 @@ export async function getUsersByKiosko(kiosko: string, orgId: string = DEFAULT_O
       where('active', '==', true)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile));
+    return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
   } catch (error) {
     console.error('Error getting users by kiosko:', error);
     throw error;
@@ -591,7 +586,7 @@ export async function createQuizAttempt(
 ): Promise<string> {
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.ATTEMPTS));
-    await setDoc(docRef, attempt);
+    await setDoc(docRef, stripUndefined(attempt));
     return docRef.id;
   } catch (error) {
     console.error('Error creating quiz attempt:', error);
@@ -620,21 +615,19 @@ export async function getQuizAttempt(attemptId: string): Promise<QuizAttempt | n
   }
 }
 
+/**
+ * Intentos completados de un usuario (más recientes primero). Filtra por un
+ * solo campo y ordena en memoria para no depender de un índice compuesto: el
+ * límite de intentos de un quiz se calcula con esta consulta.
+ */
 export async function getUserAttempts(userId: string, quizId?: string): Promise<QuizAttempt[]> {
   try {
-    const constraints: QueryConstraint[] = [
-      where('userId', '==', userId),
-      where('status', '==', 'completed'),
-      orderBy('completedAt', 'desc')
-    ];
-
-    if (quizId) {
-      constraints.push(where('quizId', '==', quizId));
-    }
-
-    const q = query(getCollectionRef(COLLECTIONS.ATTEMPTS), ...constraints);
+    const q = query(getCollectionRef(COLLECTIONS.ATTEMPTS), where('userId', '==', userId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as QuizAttempt));
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as QuizAttempt))
+      .filter(a => a.status === 'completed' && (!quizId || a.quizId === quizId))
+      .sort((a, b) => (b.completedAt?.toMillis?.() ?? 0) - (a.completedAt?.toMillis?.() ?? 0));
   } catch (error) {
     console.error('Error getting user attempts:', error);
     throw error;
@@ -816,41 +809,6 @@ export async function addToWhitelist(
   }
 }
 
-export async function checkWhitelist(email: string, orgId: string = DEFAULT_ORG_ID): Promise<WhitelistEntry | null> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.WHITELIST),
-      where('organizationId', '==', orgId),
-      where('email', '==', email),
-      limit(1)
-    );
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      console.log('No whitelist entry found for:', email);
-      return null;
-    }
-
-    const entry = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as WhitelistEntry;
-    console.log('Whitelist entry found:', entry);
-    return entry;
-  } catch (error: any) {
-    // Si la colección no existe o hay error de permisos, no es crítico
-    console.warn('Could not check whitelist (collection may not exist):', error?.message);
-    return null; // Retornar null en lugar de lanzar error
-  }
-}
-
-export async function markWhitelistAsUsed(entryId: string): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.WHITELIST, entryId);
-    await updateDoc(docRef, { used: true });
-  } catch (error) {
-    console.error('Error marking whitelist as used:', error);
-    throw error;
-  }
-}
-
 // ============================================================================
 // USERS - ADMIN QUERIES
 // ============================================================================
@@ -925,7 +883,7 @@ export function subscribeToUserProfile(
   const docRef = getDocRef(COLLECTIONS.USERS, userId);
 
   return onSnapshot(docRef, (doc) => {
-    const profile = doc.exists() ? { id: doc.id, ...doc.data() } as UserProfile : null;
+    const profile = doc.exists() ? { uid: doc.id, ...doc.data() } as UserProfile : null;
     callback(profile);
   });
 }
@@ -935,28 +893,31 @@ export function subscribeToUserProfile(
 // ============================================================================
 
 export async function batchCreateQuestions(
-  questions: Omit<Question, 'id' | 'createdAt' | 'updatedAt' | 'timesUsed' | 'averageCorrectRate'>[],
+  questions: NewQuestion[],
   userId: string
 ): Promise<string[]> {
   try {
     const firestore = ensureFirestore();
-    const batch = writeBatch(firestore);
     const ids: string[] = [];
 
-    for (const question of questions) {
-      const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
-      batch.set(docRef, {
-        ...stripUndefined(question),
-        timesUsed: 0,
-        averageCorrectRate: 0,
-        createdBy: userId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      ids.push(docRef.id);
+    for (let i = 0; i < questions.length; i += BATCH_LIMIT) {
+      const batch = writeBatch(firestore);
+      for (const question of questions.slice(i, i + BATCH_LIMIT)) {
+        const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
+        batch.set(docRef, {
+          ...stripUndefined(question),
+          options: withOptionIds(stripUndefined(question.options)),
+          timesUsed: 0,
+          timesCorrect: 0,
+          averageCorrectRate: 0,
+          createdBy: userId,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        ids.push(docRef.id);
+      }
+      await batch.commit();
     }
-
-    await batch.commit();
     return ids;
   } catch (error) {
     console.error('Error batch creating questions:', error);
@@ -1072,10 +1033,7 @@ export async function getUserJourneyProgress(
   journeyId: string
 ): Promise<UserJourneyProgress | null> {
   try {
-    const docRef = doc(
-      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
-      `${userId}_${journeyId}`
-    );
+    const docRef = getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`);
     const snap = await getDoc(docRef);
     if (!snap.exists()) return null;
     return { id: snap.id, ...snap.data() } as UserJourneyProgress;
@@ -1088,7 +1046,7 @@ export async function getUserJourneyProgress(
 export async function getUserAllJourneyProgress(userId: string): Promise<UserJourneyProgress[]> {
   try {
     const q = query(
-      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      getCollectionRef(COLLECTIONS.JOURNEY_PROGRESS),
       where('userId', '==', userId)
     );
     const snap = await getDocs(q);
@@ -1101,9 +1059,7 @@ export async function getUserAllJourneyProgress(userId: string): Promise<UserJou
 
 export async function resetUserJourneyProgress(userId: string, journeyId: string): Promise<void> {
   try {
-    const docId = `${userId}_${journeyId}`;
-    const docRef = doc(collection(db, COLLECTIONS.JOURNEY_PROGRESS), docId);
-    await deleteDoc(docRef);
+    await deleteDoc(getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`));
   } catch (error) {
     console.error('Error resetting journey progress:', error);
     throw error;
@@ -1113,7 +1069,7 @@ export async function resetUserJourneyProgress(userId: string, journeyId: string
 export async function getJourneyProgressByJourney(journeyId: string): Promise<UserJourneyProgress[]> {
   try {
     const q = query(
-      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      getCollectionRef(COLLECTIONS.JOURNEY_PROGRESS),
       where('journeyId', '==', journeyId)
     );
     const snap = await getDocs(q);
@@ -1124,6 +1080,11 @@ export async function getJourneyProgressByJourney(journeyId: string): Promise<Us
   }
 }
 
+/**
+ * Marca un paso de la ruta como completado. Es una transacción con
+ * `arrayUnion`: varias marcas en paralelo (p. ej. el paso del quiz y el de
+ * resultados al terminar un desafío) no se pisan entre sí.
+ */
 export async function markJourneyStepComplete(
   userId: string,
   journeyId: string,
@@ -1132,36 +1093,84 @@ export async function markJourneyStepComplete(
   userMeta?: { userName?: string; userEmail?: string }
 ): Promise<void> {
   try {
-    const docId = `${userId}_${journeyId}`;
-    const docRef = doc(collection(db, COLLECTIONS.JOURNEY_PROGRESS), docId);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      await setDoc(docRef, {
-        userId,
-        ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
-        ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
-        journeyId,
-        productId,
-        completedStepIds: [stepId],
-        startedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      const existing = snap.data().completedStepIds as string[] ?? [];
-      if (!existing.includes(stepId)) {
-        await updateDoc(docRef, {
-          completedStepIds: [...existing, stepId],
-          ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
-          ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
+    const docRef = getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`);
+    const meta = {
+      ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
+      ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
+    };
+    await runTransaction(ensureFirestore(), async tx => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists()) {
+        tx.set(docRef, {
+          userId,
+          ...meta,
+          journeyId,
+          productId,
+          completedStepIds: [stepId],
+          startedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else if (!((snap.data().completedStepIds as string[] | undefined) ?? []).includes(stepId)) {
+        tx.update(docRef, {
+          userId,
+          ...meta,
+          completedStepIds: arrayUnion(stepId),
           updatedAt: serverTimestamp(),
         });
       }
-    }
+    });
   } catch (error) {
     console.error('Error marking step complete:', error);
     throw error;
   }
+}
+
+/**
+ * Emite el certificado de un paso de la ruta: lo marca como completado y
+ * guarda la fecha de emisión la primera vez. Devuelve esa fecha, para que el
+ * certificado muestre siempre el mismo día aunque se abra después.
+ */
+export async function issueJourneyCertificate(
+  userId: string,
+  journeyId: string,
+  productId: string,
+  stepId: string,
+  userMeta?: { userName?: string; userEmail?: string }
+): Promise<Date> {
+  const docRef = getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`);
+  const meta = {
+    ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
+    ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
+  };
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(docRef);
+    const issued = snap.exists()
+      ? (snap.data().certificateIssuedAt as Record<string, Timestamp> | undefined)?.[stepId]
+      : undefined;
+    if (issued) return issued.toDate();
+    const now = Timestamp.now();
+    if (!snap.exists()) {
+      tx.set(docRef, {
+        userId,
+        ...meta,
+        journeyId,
+        productId,
+        completedStepIds: [stepId],
+        certificateIssuedAt: { [stepId]: now },
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      tx.update(docRef, {
+        userId,
+        ...meta,
+        completedStepIds: arrayUnion(stepId),
+        [`certificateIssuedAt.${stepId}`]: now,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    return now.toDate();
+  });
 }
 
 // ============================================================================
@@ -2392,26 +2401,6 @@ function newDailyPulse(date: string, questionIds: string[], createdBy: string, o
 }
 
 /**
- * Crea el pulso del día solo si no existe (transacción: si varios vendedores
- * abren la app al mismo tiempo, se crea una sola vez).
- * Devuelve true si lo creó.
- */
-export async function createDailyPulseIfMissing(
-  date: string,
-  questionIds: string[],
-  createdBy = 'auto',
-  orgId = DEFAULT_ORG_ID
-): Promise<boolean> {
-  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (snap.exists()) return false;
-    tx.set(docRef, stripUndefined(newDailyPulse(date, questionIds, createdBy, orgId)));
-    return true;
-  });
-}
-
-/**
  * Actualiza el estado del pulso (active → closed, etc.).
  * Con `touchTimestamps=false` (p. ej. al reabrir) no reescribe sentAt/closedAt.
  */
@@ -2426,35 +2415,6 @@ export async function updatePulseStatus(
   if (touchTimestamps && status === 'active') extra.sentAt = serverTimestamp();
   if (touchTimestamps && status === 'closed') extra.closedAt = serverTimestamp();
   await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, id), extra);
-}
-
-/**
- * Reserva el envío de Slack del pulso: pasa de 'scheduled' a 'active' en una
- * transacción para que dos ejecuciones simultáneas no manden el aviso dos veces.
- * Devuelve true si esta llamada obtuvo la reserva.
- */
-export async function claimPulseSlackSend(date: string, orgId = DEFAULT_ORG_ID): Promise<boolean> {
-  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (!snap.exists()) return false;
-    const data = snap.data() as DailyPulse;
-    if (data.status !== 'scheduled' || data.sentAt) return false;
-    tx.update(docRef, { status: 'active', sentAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    return true;
-  });
-}
-
-/** Guarda el resultado del envío de Slack en el pulso del día. */
-export async function recordPulseSlackResult(
-  date: string,
-  result: Omit<PulseSlackResult, 'at'>,
-  orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`), stripUndefined({
-    slackResult: { ...result, at: serverTimestamp() },
-    updatedAt: serverTimestamp(),
-  }));
 }
 
 // ----------- Pulse Attempts -----------
@@ -2541,6 +2501,52 @@ export async function savePulseAnswer(
   });
 }
 
+// ----------- Estadísticas de preguntas -----------
+
+type QuestionResult = { questionId: string; isCorrect: boolean };
+type QuestionStatsUpdate = { ref: ReturnType<typeof getDocRef>; timesUsed: number; timesCorrect: number };
+
+/** Lee las estadísticas actuales de las preguntas respondidas (una vez por pregunta). */
+async function readQuestionStats(tx: Transaction, results: QuestionResult[]): Promise<QuestionStatsUpdate[]> {
+  const byId = new Map<string, boolean>();
+  for (const r of results) if (r.questionId) byId.set(r.questionId, r.isCorrect);
+  const updates: QuestionStatsUpdate[] = [];
+  for (const [questionId, isCorrect] of byId) {
+    const ref = getDocRef(COLLECTIONS.QUESTIONS, questionId);
+    const snap = await tx.get(ref);
+    if (!snap.exists()) continue;
+    const data = snap.data();
+    const used = Number(data.timesUsed ?? 0);
+    const correct = typeof data.timesCorrect === 'number'
+      ? data.timesCorrect
+      : Math.round((Number(data.averageCorrectRate ?? 0) / 100) * used);
+    updates.push({ ref, timesUsed: used + 1, timesCorrect: correct + (isCorrect ? 1 : 0) });
+  }
+  return updates;
+}
+
+function writeQuestionStats(tx: Transaction, updates: QuestionStatsUpdate[]) {
+  for (const u of updates) {
+    tx.update(u.ref, {
+      timesUsed: u.timesUsed,
+      timesCorrect: u.timesCorrect,
+      averageCorrectRate: Math.round((u.timesCorrect / u.timesUsed) * 100),
+    });
+  }
+}
+
+/**
+ * Suma una respuesta (correcta o no) a las estadísticas de cada pregunta:
+ * `timesUsed`, `timesCorrect` y `averageCorrectRate`. El armado automático del
+ * pulso usa la tasa de aciertos para reforzar lo que más se falla.
+ */
+export async function recordQuestionResults(results: QuestionResult[]): Promise<void> {
+  if (results.length === 0) return;
+  await runTransaction(ensureFirestore(), async tx => {
+    writeQuestionStats(tx, await readQuestionStats(tx, results));
+  });
+}
+
 /**
  * Cierra el intento con las respuestas guardadas. Es idempotente: si ya estaba
  * completado no vuelve a sumar la respuesta al contador del pulso.
@@ -2559,6 +2565,8 @@ export async function submitPulseAttempt(
     // Ya completado (idempotente) o vencido por el proceso programado: no se toca.
     if (data.status !== 'in_progress') return data;
     const answers = data.answers ?? [];
+    // Lecturas antes de escribir (regla de las transacciones).
+    const stats = await readQuestionStats(tx, answers.map(a => ({ questionId: a.questionId, isCorrect: a.isCorrect })));
     const total = data.questionIds?.length || data.totalQuestions || answers.length;
     const correctAnswers = answers.filter(a => a.isCorrect).length;
     const percentage = total > 0 ? Math.round((correctAnswers / total) * 100) : 0;
@@ -2571,6 +2579,7 @@ export async function submitPulseAttempt(
     };
     tx.update(attemptRef, patch);
     tx.update(pulseRef, { totalResponses: increment(1), updatedAt: serverTimestamp() });
+    writeQuestionStats(tx, stats);
     return { ...data, ...patch, completedAt: Timestamp.now() };
   });
 }
@@ -2632,32 +2641,6 @@ export async function getPulseAttemptsByDateRange(
     console.error('Error getting pulse attempts by date range:', error);
     return [];
   }
-}
-
-/**
- * Marca como 'expired' los intentos que quedaron a medias en días anteriores.
- * Devuelve cuántos actualizó.
- */
-export async function expireStalePulseAttempts(
-  today: string,
-  lookbackStart: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<number> {
-  const q = query(
-    getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
-    where('date', '>=', lookbackStart),
-    where('date', '<', today),
-  );
-  const snap = await getDocs(q);
-  const stale = snap.docs.filter(d => {
-    const a = d.data() as PulseAttempt;
-    return a.organizationId === orgId && a.status === 'in_progress';
-  });
-  if (stale.length === 0) return 0;
-  const batch = writeBatch(ensureFirestore());
-  for (const d of stale) batch.update(d.ref, { status: 'expired' });
-  await batch.commit();
-  return stale.length;
 }
 
 // ----------- Pulse Backlog (MVP2) -----------
@@ -2778,15 +2761,6 @@ export async function rememberAppUrl(url: string, orgId = DEFAULT_ORG_ID): Promi
 
 // ----------- Pulse Config -----------
 
-const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'> = {
-  questionsPerPulse: 7,
-  activeModules: [],          // empty = all modules
-  closeAt: '12:00',
-  sameQuestionsForAll: true,
-  randomizeAnswerOrder: false,
-  autoDailyPulse: false,
-};
-
 /** Obtiene la configuración global del pulso de conocimiento. */
 export async function getPulseConfig(orgId = DEFAULT_ORG_ID): Promise<PulseConfig> {
   try {
@@ -2825,19 +2799,6 @@ export async function getPulseCronStatus(orgId = DEFAULT_ORG_ID): Promise<PulseC
   }
 }
 
-export async function savePulseCronStatus(
-  status: { lastActions: string[]; lastError?: string; maintenanceDate?: string },
-  orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  await setDoc(getDocRef(COLLECTIONS.PULSE_CRON_STATUS, orgId), stripUndefined({
-    organizationId: orgId,
-    lastRunAt: serverTimestamp(),
-    lastActions: status.lastActions,
-    lastError: status.lastError ?? null,
-    maintenanceDate: status.maintenanceDate,
-  }), { merge: true });
-}
-
 /**
  * Pide a la función programada que revise a qué hora está su ejecución diaria
  * (la función escucha cambios en slack_config). Lo usa el panel si detecta que
@@ -2859,7 +2820,7 @@ export async function getPulseQuestions(ids: string[]): Promise<Question[]> {
   ));
   const byId = new Map<string, Question>();
   for (const snap of snaps) {
-    for (const d of snap.docs) byId.set(d.id, { id: d.id, ...d.data() } as Question);
+    for (const d of snap.docs) byId.set(d.id, toQuestion(d.id, d.data()));
   }
   return ids.map(id => byId.get(id)).filter((q): q is Question => !!q);
 }
@@ -2895,20 +2856,6 @@ export async function scheduleAutoPulse(
 }
 
 // ----------- Org Tokens -----------
-
-/** Obtiene un token específico de la organización por su clave. */
-export async function getOrgToken(
-  key: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<OrgTokenConfig | null> {
-  try {
-    const snap = await getDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
-    return snap.exists() ? (snap.data() as OrgTokenConfig) : null;
-  } catch (error) {
-    console.error('Error getting org token:', error);
-    return null;
-  }
-}
 
 /** Lista todos los tokens configurados para la organización. */
 export async function getOrgTokens(orgId = DEFAULT_ORG_ID): Promise<OrgTokenConfig[]> {

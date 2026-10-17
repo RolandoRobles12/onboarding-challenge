@@ -26,7 +26,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getQuizzes, getQuiz, getQuestionsByIds, getUserAttempts } from '@/lib/firestore-service';
-import type { AssessmentConfig } from '@/lib/types-scalable';
+import type { AssessmentConfig, GamificationConfig, QuizQuestionResult } from '@/lib/types-scalable';
+import { saveQuizCompletion } from '@/lib/quiz-completion';
+import { toast } from '@/hooks/use-toast';
 import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
 import { useAuth } from '@/context/AuthContext';
 
@@ -42,6 +44,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 // Estructura de runtime que el motor del quiz espera
 interface RuntimeQuestion {
+  id: string;
   text: string;
   imageUrl?: string;         // imagen opcional de la pregunta
   options: Option[];
@@ -84,8 +87,12 @@ function QuizComponent() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Per-question result tracking (stored in ref to avoid re-renders)
-  const questionResultsRef = useRef<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[]>([]);
+  // Resultado por pregunta (en un ref para no re-renderizar). `missionIndex`
+  // permite descartar los de una misión que se reinicia.
+  const questionResultsRef = useRef<(QuizQuestionResult & { missionIndex: number })[]>([]);
+  const finishingRef = useRef(false);
+  const [finishing, setFinishing] = useState(false);
+  const [quizGamification, setQuizGamification] = useState<GamificationConfig | null>(null);
 
   // Quiz cargado desde Firestore
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
@@ -161,6 +168,7 @@ function QuizComponent() {
           q = firestoreQuizzes[0];
         }
         setQuizId(q.id);
+        setQuizGamification(q.gamificationConfig ?? null);
 
         // Read assessment config (defaults if not set on the quiz doc)
         const cfg: AssessmentConfig = { ...DEFAULT_ASSESSMENT_CONFIG, ...(q as any).assessmentConfig };
@@ -196,6 +204,7 @@ function QuizComponent() {
               .map((id) => qMap[id])
               .filter(Boolean)
               .map((q) => ({
+                id: q.id,
                 text: q.text,
                 imageUrl: q.imageUrl,
                 options: q.type === 'open_text' ? [] : buildOptions(q.options),
@@ -339,6 +348,8 @@ function QuizComponent() {
       ?? currentQuestion?.validAnswers?.[0] ?? '';
     const userAnswerText = selected.map(o => o.text).join(', ');
     questionResultsRef.current.push({
+      questionId: currentQuestion?.id,
+      missionIndex: gameState.currentMissionIndex,
       text: currentQuestion?.text ?? '',
       isCorrect: !!isCorrect,
       userAnswer: userAnswerText,
@@ -401,6 +412,63 @@ function QuizComponent() {
     }
   };
 
+  /**
+   * Guarda el intento una sola vez y abre los resultados con su id. Si no se
+   * pudo guardar (sin conexión), los resultados se muestran sin registrarse.
+   */
+  const finishQuiz = async ({ bonusLives, timeExpired: expired }: { bonusLives: number; timeExpired: boolean }) => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    setFinishing(true);
+
+    const results = questionResultsRef.current.map(({ missionIndex: _m, ...r }) => r);
+    const params = new URLSearchParams();
+    for (const key of ['avatar', 'returnTo']) {
+      const value = searchParams.get(key);
+      if (value) params.set(key, value);
+    }
+    params.set('quizTitle', quiz?.title || '');
+    if (quizId) params.set('quizId', quizId);
+
+    let attemptId: string | null = null;
+    if (user && profile && quizId) {
+      try {
+        attemptId = await saveQuizCompletion({
+          userId: user.uid,
+          displayName: user.displayName,
+          profile,
+          quizId,
+          productId: quizType,
+          gamification: quizGamification,
+          showFeedback: assessmentCfg.showFeedback,
+          score: gameState.score,
+          totalQuestions,
+          bonusLives,
+          startedAt: startTime,
+          timeExpired: expired,
+          questionResults: results,
+        });
+      } catch (err) {
+        console.error('No se pudo guardar el intento:', err);
+        toast({ variant: 'destructive', title: 'No se guardó tu intento', description: 'Revisa tu conexión. Tus resultados se muestran, pero no quedaron registrados.' });
+      }
+    }
+
+    if (attemptId) {
+      params.set('attemptId', attemptId);
+    } else {
+      // Solo para mostrar: la pantalla de resultados no guarda nada desde la URL.
+      params.set('score', gameState.score.toString());
+      params.set('totalQuestions', totalQuestions.toString());
+      if (startTime) params.set('startTime', startTime.toString());
+      params.set('showFeedback', assessmentCfg.showFeedback);
+      try {
+        sessionStorage.setItem(`quiz_results_${quizType}`, JSON.stringify(results));
+      } catch { /* sin espacio */ }
+    }
+    router.replace(`/${quizType}/results?${params.toString()}`);
+  };
+
   const handleNext = () => {
     let missionFailed = gameState.missionFailed;
     let bonusLivesLeft = gameState.bonusLives;
@@ -449,26 +517,7 @@ function QuizComponent() {
           ...commonReset,
         }));
       } else {
-        const params = new URLSearchParams(searchParams.toString());
-        params.set('score', gameState.score.toString());
-        params.set('totalQuestions', totalQuestions.toString());
-        params.set('bonusLives', bonusLivesLeft.toString());
-        params.set('quizTitle', quiz?.title || '');
-        if (startTime) {
-          params.set('startTime', startTime.toString());
-        }
-        if (quizId) {
-          params.set('quizId', quizId);
-        }
-        params.set('showFeedback', assessmentCfg.showFeedback);
-        // Persist per-question results for the results page
-        try {
-          sessionStorage.setItem(
-            `quiz_results_${quizType}`,
-            JSON.stringify(questionResultsRef.current)
-          );
-        } catch { /* ignore quota errors */ }
-        router.push(`/${quizType}/results?${params.toString()}`);
+        finishQuiz({ bonusLives: bonusLivesLeft, timeExpired: false });
       }
     }
   };
@@ -482,6 +531,8 @@ function QuizComponent() {
 
     // Record open-text result
     questionResultsRef.current.push({
+      questionId: currentQuestion?.id,
+      missionIndex: gameState.currentMissionIndex,
       text: currentQuestion?.text ?? '',
       isCorrect,
       userAnswer: openTextAnswer,
@@ -519,6 +570,8 @@ function QuizComponent() {
   };
 
   const restartMission = () => {
+    // Las respuestas de la misión fallida no cuentan: se vuelve a jugar.
+    questionResultsRef.current = questionResultsRef.current.filter(r => r.missionIndex !== gameState.currentMissionIndex);
     setGameState(prev => ({
       ...prev,
       score: prev.score - prev.missionScore,
@@ -535,18 +588,10 @@ function QuizComponent() {
     }));
   };
 
-  // Time expired → auto-navigate to results
+  // Tiempo agotado → se cierra el quiz con lo respondido hasta ahora.
   useEffect(() => {
     if (!timeExpired || !quiz) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set('score', gameState.score.toString());
-    params.set('totalQuestions', totalQuestions.toString());
-    params.set('bonusLives', gameState.bonusLives.toString());
-    params.set('quizTitle', quiz.title);
-    params.set('timeExpired', '1');
-    if (startTime) params.set('startTime', startTime.toString());
-    if (quizId) params.set('quizId', quizId);
-    router.push(`/${quizType}/results?${params.toString()}`);
+    finishQuiz({ bonusLives: gameState.bonusLives, timeExpired: true });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeExpired]);
 
@@ -986,7 +1031,7 @@ function QuizComponent() {
                         : 'Cuidado, este es tu primer error. ¡Aún te queda una oportunidad en esta misión!')}
                   </AlertDescription>
                 </Alert>
-                <Button onClick={handleNext} className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
+                <Button onClick={handleNext} disabled={finishing} className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
                   Siguiente <ArrowRight className="ml-2" />
                 </Button>
               </CardFooter>

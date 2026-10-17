@@ -4,8 +4,8 @@
  * /api/pulse/cron (envío automático a la hora configurada).
  */
 
-import { getSlackConfig, getOrgToken, getAllUsers, getPulseConfig } from './firestore-service';
-import { applySlackTemplate, formatHHMM, formatPulseDate } from './pulse-utils';
+import { getSlackConfig, getOrgTokenValue, getAllUsers, getPulseConfig } from './pulse-store';
+import { applySlackTemplate, formatHHMM, formatPulseDate } from '@/lib/pulse-utils';
 
 export interface SlackSendResult {
   target: string;
@@ -46,10 +46,13 @@ export function slackErrorText(code: string | undefined): string {
   return SLACK_ERROR_TEXT[code] ?? code;
 }
 
+async function getSlackToken(): Promise<string> {
+  return ((await getOrgTokenValue('slack_bot_token')) || process.env.SLACK_BOT_TOKEN || '').trim();
+}
+
 /** Verifica que el token sirva y devuelve a nombre de quién publica. */
 export async function checkSlackConnection(): Promise<{ ok: true; team: string; bot: string } | { ok: false; error: string }> {
-  const storedToken = await getOrgToken('slack_bot_token');
-  const token = (storedToken?.value || process.env.SLACK_BOT_TOKEN || '').trim();
+  const token = await getSlackToken();
   if (!token) return { ok: false, error: `Falta el token del bot de Slack. ${TOKEN_FIX}` };
   if (!token.startsWith('xoxb-')) return { ok: false, error: `El token guardado no es de bot (debe empezar con xoxb-). ${TOKEN_FIX}` };
   try {
@@ -89,8 +92,7 @@ export async function sendPulseSlack(opts: {
   /** URL base a usar si no hay `appUrl` guardada (ej. el host de la petición). */
   fallbackBaseUrl?: string;
 }): Promise<SlackSendResult[]> {
-  const storedToken = await getOrgToken('slack_bot_token');
-  const token = (storedToken?.value || process.env.SLACK_BOT_TOKEN || '').trim();
+  const token = await getSlackToken();
   if (!token) {
     throw new PulseSlackError('Falta conectar el bot de Slack: pega su token en Admin → Tokens (el equipo de tecnología te lo puede dar).', 500);
   }

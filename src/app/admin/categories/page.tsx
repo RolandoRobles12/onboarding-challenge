@@ -40,6 +40,7 @@ import {
   deletePulseCategory,
   seedDefaultCategoriesIfEmpty,
 } from '@/lib/firestore-service';
+import { authFetch } from '@/lib/api-client';
 
 // ── Color presets ──────────────────────────────────────────────────────────
 
@@ -220,7 +221,7 @@ export default function CategoriesPage() {
     setSeeding(true);
     setSeedResult(null);
     try {
-      const res = await fetch('/api/pulse/seed-questions', { method: 'POST' });
+      const res = await authFetch('/api/pulse/seed-questions', { method: 'POST' });
       const data = await res.json() as { message?: string; error?: string };
       setSeedResult(data.message ?? data.error ?? 'Listo');
     } catch {

@@ -215,6 +215,8 @@ function SimulationRunner() {
 
   const rootRef = useRef<HTMLDivElement>(null);
   const attemptIdRef = useRef<string | null>(null);
+  // Alta del intento en vuelo: al terminar se espera para no crear un duplicado.
+  const attemptCreateRef = useRef<Promise<string | null>>(Promise.resolve(null));
   const finalizedRef = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const runRef = useRef(run);
@@ -335,8 +337,9 @@ function SimulationRunner() {
     };
 
     try {
-      if (attemptIdRef.current) {
-        await updateSimAttempt(attemptIdRef.current, payload);
+      const attemptId = attemptIdRef.current ?? await attemptCreateRef.current;
+      if (attemptId) {
+        await updateSimAttempt(attemptId, payload);
       } else {
         // El alta inicial pudo fallar (o seguir en vuelo): no perdemos el intento.
         await createSimAttempt({
@@ -369,30 +372,33 @@ function SimulationRunner() {
     finalizedRef.current = false;
     attemptIdRef.current = null;
 
-    try {
-      const id = await createSimAttempt({
-        moduleId: module.id,
-        moduleTitle: module.title,
-        userId: user?.uid,
-        userEmail: profile?.email,
-        userName: profile?.nombre,
-        startedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        state: 'in_progress',
-        passed: false,
-        wrongTaps: 0,
-        hintsUsed: 0,
-        stepsTaken: 0,
-        optimalSteps: expected?.screens,
-        path: [startNodeId],
-        lastNodeId: startNodeId,
-        taps: [],
-      });
-      attemptIdRef.current = id;
-    } catch (error) {
+    const creation: Promise<string | null> = createSimAttempt({
+      moduleId: module.id,
+      moduleTitle: module.title,
+      userId: user?.uid,
+      userEmail: profile?.email,
+      userName: profile?.nombre,
+      startedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      state: 'in_progress',
+      passed: false,
+      wrongTaps: 0,
+      hintsUsed: 0,
+      stepsTaken: 0,
+      optimalSteps: expected?.screens,
+      path: [startNodeId],
+      lastNodeId: startNodeId,
+      taps: [],
+    }).then(id => {
+      // Si ya empezó otro intento, este id no le corresponde.
+      if (attemptCreateRef.current === creation) attemptIdRef.current = id;
+      return id;
+    }).catch(error => {
       // Sin registro el ejercicio sigue siendo útil: no bloqueamos al vendedor.
       console.error('No se pudo registrar el inicio del intento:', error);
-    }
+      return null;
+    });
+    attemptCreateRef.current = creation;
   }, [module, startNodeId, expected, user, profile, enterFullscreen]);
 
   // Guarda el avance en cada cambio de pantalla: si abandona, sabemos dónde quedó.

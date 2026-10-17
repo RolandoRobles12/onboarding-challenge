@@ -67,6 +67,10 @@ type CsvRow = {
 
 export default function UsersPage() {
   const { profile: currentUser } = useAuth();
+  // Solo un super_admin crea o administra super_admins (las reglas lo exigen).
+  const isSuperAdmin = currentUser?.rol === 'super_admin';
+  const assignableRoles = (Object.keys(ROLE_LABELS) as UserRole[]).filter(r => r !== 'super_admin' || isSuperAdmin);
+  const canManage = (u: UserProfile) => isSuperAdmin || u.rol !== 'super_admin';
   const { products } = useProducts();
   const [kioscos, setKioscos] = useState<Kiosko[]>([]);
 
@@ -233,7 +237,7 @@ export default function UsersPage() {
   }, [bulkEmailsInput, activeUsers]);
 
   const handleBulkDeactivate = async () => {
-    const toDeactivate = bulkMatchedUsers.filter(m => m.user);
+    const toDeactivate = bulkMatchedUsers.filter(m => m.user && canManage(m.user));
     if (toDeactivate.length === 0) return;
     setDeactivating(true);
     try {
@@ -382,12 +386,12 @@ export default function UsersPage() {
         try {
           if (row._status === 'update') {
             const user = users.find(u => u.email.toLowerCase() === row.email);
-            if (!user) { errors++; continue; }
+            if (!user || !canManage(user)) { errors++; continue; }
             const trainer = row.capacitador_email ? users.find(u => u.email.toLowerCase() === row.capacitador_email!.toLowerCase()) : null;
             const prod = row.producto ? products.find(p => p.name.toLowerCase() === row.producto!.toLowerCase() || p.id === row.producto) : null;
             await updateUserProfile(user.uid, {
               ...(row.nombre ? { nombre: row.nombre } : {}),
-              ...(row.rol && ['seller','trainer','admin','super_admin'].includes(row.rol) ? { rol: row.rol as UserRole } : {}),
+              ...(row.rol && assignableRoles.includes(row.rol as UserRole) ? { rol: row.rol as UserRole } : {}),
               ...(row.kiosko ? { assignedKiosko: row.kiosko } : {}),
               ...(prod ? { producto: prod.id } : {}),
               ...(row.fecha_ingreso ? { fechaIngreso: row.fecha_ingreso } : {}),
@@ -399,7 +403,7 @@ export default function UsersPage() {
             await addToWhitelist({
               organizationId: 'aviva-credito',
               email: row.email,
-              role: (row.rol && ['seller','trainer','admin','super_admin'].includes(row.rol) ? row.rol : 'seller') as UserRole,
+              role: (row.rol && assignableRoles.includes(row.rol as UserRole) ? row.rol : 'seller') as UserRole,
               assignedKiosko: row.kiosko || undefined,
               assignedProductId: prod?.id || undefined,
               addedBy: currentUser?.uid || '',
@@ -452,7 +456,7 @@ export default function UsersPage() {
             <Button
               variant="outline" size="sm"
               onClick={() => openEdit(user)}
-              disabled={user.uid === currentUser?.uid}
+              disabled={user.uid === currentUser?.uid || !canManage(user)}
               className="gap-1 shrink-0"
             >
               <UserCog className="h-3.5 w-3.5" /> Editar
@@ -700,7 +704,7 @@ export default function UsersPage() {
                 <Select value={editForm.rol} onValueChange={v => setEditForm(f => ({ ...f, rol: v as UserRole }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                    {assignableRoles.map(r => (
                       <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
                     ))}
                   </SelectContent>
@@ -910,7 +914,7 @@ export default function UsersPage() {
               <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                  {assignableRoles.map(r => (
                     <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
                   ))}
                 </SelectContent>

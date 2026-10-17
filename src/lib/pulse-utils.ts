@@ -9,11 +9,21 @@
  * Este módulo no depende de Firestore: se usa igual en cliente y servidor.
  */
 
-import type { DailyPulse, KnowledgeModule, PulseAttempt, Question } from './types-scalable';
+import type { DailyPulse, KnowledgeModule, PulseAttempt, PulseConfig, Question } from './types-scalable';
 
 export const PULSE_TIMEZONE = 'America/Mexico_City';
 export const DEFAULT_QUESTIONS_PER_PULSE = 7;
 export const DEFAULT_CLOSE_AT = '12:00';
+
+/** Configuración del pulso cuando el admin aún no ha guardado ninguna. */
+export const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'> = {
+  questionsPerPulse: DEFAULT_QUESTIONS_PER_PULSE,
+  activeModules: [],          // vacío = todos los módulos
+  closeAt: DEFAULT_CLOSE_AT,
+  sameQuestionsForAll: true,
+  randomizeAnswerOrder: false,
+  autoDailyPulse: false,
+};
 /** Porcentaje a partir del cual un pulso se considera aprobado. */
 export const PULSE_PASS_PERCENTAGE = 70;
 /** Días hacia atrás en los que una pregunta se considera "usada recientemente". */

@@ -17,6 +17,7 @@ import {
   getPulseCategories,
   getPulseQuestions,
 } from '@/lib/firestore-service';
+import { authFetch } from '@/lib/api-client';
 import type {
   DailyPulse,
   PulseAttempt,
@@ -195,7 +196,7 @@ export default function PulsePage() {
       let resolvedPulse = pulseData;
       if (!pulseData && cfg.autoDailyPulse) {
         try {
-          await fetch('/api/pulse/auto-create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ date }) });
+          await authFetch('/api/pulse/auto-create', { method: 'POST' });
           resolvedPulse = await getDailyPulse(date);
         } catch {
           // Si falla, el pulso se muestra como no disponible

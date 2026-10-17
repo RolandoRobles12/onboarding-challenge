@@ -1,9 +1,290 @@
 rules_version = '2';
+
+// Reglas de Firestore de la plataforma.
+//
+// Roles (campo `rol` de users/{uid}):
+//   - super_admin, admin, trainer → "staff": administran contenido.
+//   - seller → vendedor: solo lee contenido y escribe su propio progreso.
+//
+// Las rutas de /api y la función programada usan el Admin SDK, que no pasa por
+// estas reglas (crear perfiles, tokens, envío de Slack, estado del cron).
 service cloud.firestore {
   match /databases/{database}/documents {
-    // DESARROLLO: permite todo. Para producción, usar reglas del FIREBASE_SETUP.md
-    match /{document=**} {
-      allow read, write: if true;
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    function signedIn() {
+      return request.auth != null;
     }
+
+    // Mismo criterio que src/lib/auth-utils.ts (isUserAllowed).
+    function allowedAccount() {
+      return signedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email.lower().matches('.*@avivacredito[.]com')
+            || request.auth.token.email.lower() in ['rolando.9834@gmail.com']);
+    }
+
+    function profilePath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function profile() {
+      return get(profilePath()).data;
+    }
+
+    // Usuario con perfil y no desactivado.
+    function isMember() {
+      return allowedAccount()
+        && exists(profilePath())
+        && profile().get('active', true) != false;
+    }
+
+    function hasRole(roles) {
+      return isMember() && profile().get('rol', '') in roles;
+    }
+
+    function isStaff() {
+      return hasRole(['super_admin', 'admin', 'trainer']);
+    }
+
+    function isAdmin() {
+      return hasRole(['super_admin', 'admin']);
+    }
+
+    function isSuperAdmin() {
+      return hasRole(['super_admin']);
+    }
+
+    // Documentos con id "<uid>_<algo>" (intentos del pulso, progreso, etc.).
+    function ownsId(docId) {
+      return signedIn() && docId.matches(request.auth.uid + '_.+');
+    }
+
+    function createsForSelf() {
+      return request.resource.data.userId == request.auth.uid;
+    }
+
+    function ownsExisting() {
+      return resource.data.userId == request.auth.uid;
+    }
+
+    // El documento sigue perteneciendo al mismo usuario después del cambio.
+    function keepsOwner() {
+      return ownsExisting() && request.resource.data.userId == request.auth.uid;
+    }
+
+    function onlyChanges(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // ── Usuarios ───────────────────────────────────────────────────────────
+
+    match /users/{userId} {
+      // El propio perfil se puede leer aunque aún no exista (primer login).
+      allow get: if (allowedAccount() && request.auth.uid == userId) || isMember();
+      allow list: if isMember();
+      // Los perfiles los crea el servidor (/api/auth/profile), que decide el rol.
+      allow create: if false;
+      allow update: if
+        // El vendedor solo completa su formulario de ingreso.
+        (request.auth.uid == userId && isMember()
+          && onlyChanges(['onboardingData', 'onboardingCompleted', 'nombre', 'updatedAt']))
+        // Capacitadores: solo el Slack ID (Gestión del Pulso → Slack).
+        || (isStaff() && onlyChanges(['slackId', 'updatedAt']))
+        // Admins: todo, pero solo un super_admin crea o modifica super_admins.
+        || (isAdmin() && (isSuperAdmin()
+              || (resource.data.get('rol', '') != 'super_admin'
+                  && request.resource.data.get('rol', '') != 'super_admin')));
+      allow delete: if isSuperAdmin();
+    }
+
+    // Invitaciones: el rol que traen se aplica al crear el perfil, así que
+    // solo un super_admin puede invitar super_admins.
+    match /whitelist/{entryId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && (isSuperAdmin() || request.resource.data.get('role', '') != 'super_admin');
+    }
+
+    // Tokens de integraciones (Slack, secreto del cron): nunca a vendedores.
+    match /org_tokens/{tokenId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /role_permissions/{role} {
+      allow read: if isStaff();
+      allow write: if isSuperAdmin();
+    }
+
+    // Marca y niveles: la marca se lee en la pantalla de login, sin sesión.
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if isStaff();
+    }
+
+    // ── Pulso de conocimiento ──────────────────────────────────────────────
+
+    match /pulse_config/{orgId} {
+      allow read: if isMember();
+      allow write: if isStaff();
+    }
+
+    match /slack_config/{orgId} {
+      allow read, write: if isStaff();
+    }
+
+    // Lo escribe la función programada y /api/pulse/cron (Admin SDK).
+    match /pulse_cron_status/{orgId} {
+      allow read: if isStaff();
+      allow write: if false;
+    }
+
+    match /daily_pulses/{pulseId} {
+      allow read: if isMember();
+      allow write: if isStaff();
+      // Al terminar su pulso, el vendedor suma 1 al contador de respuestas.
+      allow update: if isMember()
+        && onlyChanges(['totalResponses', 'updatedAt'])
+        && request.resource.data.totalResponses == resource.data.get('totalResponses', 0) + 1;
+    }
+
+    // id = "<uid>_<YYYY-MM-DD>"
+    match /pulse_attempts/{attemptId} {
+      allow get: if isStaff() || (isMember() && ownsId(attemptId));
+      allow list: if isStaff() || (isMember() && ownsExisting());
+      allow create: if isMember()
+        && createsForSelf()
+        && attemptId == request.auth.uid + '_' + request.resource.data.date
+        && request.resource.data.status == 'in_progress'
+        && request.resource.data.answers.size() == 0;
+      // Solo mientras está en curso: un intento completado o vencido ya no cambia.
+      allow update: if isStaff() || (isMember()
+        && keepsOwner()
+        && resource.data.status == 'in_progress'
+        && request.resource.data.status in ['in_progress', 'completed']
+        && onlyChanges(['answers', 'correctAnswers', 'lastAnswerAt', 'totalQuestions', 'percentage', 'completedAt', 'status']));
+      allow delete: if isStaff();
+    }
+
+    match /pulse_backlogs/{itemId} {
+      allow read: if isStaff() || (isMember() && ownsExisting());
+      allow create: if isMember() && createsForSelf();
+      allow update: if isStaff() || (isMember()
+        && keepsOwner()
+        && onlyChanges(['reviewAttempts', 'lastReviewedAt', 'status', 'resolvedAt']));
+      allow delete: if isStaff();
+    }
+
+    match /pulseCategories/{categoryId} {
+      allow read: if isMember();
+      allow write: if isStaff();
+    }
+
+    // ── Preguntas ──────────────────────────────────────────────────────────
+
+    match /questions/{questionId} {
+      allow read: if isMember();
+      allow write: if isStaff();
+      // Al responder, cualquier usuario actualiza las estadísticas de la pregunta.
+      allow update: if isMember()
+        && onlyChanges(['timesUsed', 'timesCorrect', 'averageCorrectRate'])
+        && request.resource.data.timesUsed == resource.data.get('timesUsed', 0) + 1;
+    }
+
+    // ── Progreso del vendedor ──────────────────────────────────────────────
+
+    // Intentos de desafíos: los rankings leen los de todos.
+    match /attempts/{attemptId} {
+      allow read: if isMember();
+      allow create: if isMember() && createsForSelf();
+      allow update, delete: if isStaff();
+    }
+
+    // id = "<uid>_<journeyId>"
+    match /journey_progress/{progressId} {
+      allow get: if isStaff() || (isMember() && ownsId(progressId));
+      allow list: if isStaff() || (isMember() && ownsExisting());
+      allow create, update: if isStaff() || (isMember() && ownsId(progressId) && createsForSelf());
+      allow delete: if isStaff();
+    }
+
+    match /enrollments/{enrollmentId} {
+      allow read: if isStaff() || (isMember() && ownsExisting());
+      allow create: if isStaff() || (isMember() && createsForSelf());
+      allow update: if isStaff() || (isMember()
+        && keepsOwner()
+        && request.resource.data.courseId == resource.data.courseId);
+      allow delete: if isStaff();
+    }
+
+    // id = "<uid>_<lessonId>"
+    match /lesson_progress/{progressId} {
+      allow get: if isStaff() || (isMember() && ownsId(progressId));
+      allow list: if isStaff() || (isMember() && ownsExisting());
+      allow create, update: if isStaff() || (isMember() && ownsId(progressId) && createsForSelf());
+      allow delete: if isStaff();
+    }
+
+    match /user_badges/{userBadgeId} {
+      allow read: if isMember();
+      allow write: if isStaff();
+    }
+
+    match /form_responses/{responseId} {
+      allow read: if isStaff() || (isMember() && resource.data.respondentId == request.auth.uid);
+      allow create: if isMember() && request.resource.data.respondentId == request.auth.uid;
+      allow update, delete: if isStaff();
+    }
+
+    match /sim_attempts/{attemptId} {
+      allow read: if isStaff() || (isMember() && ownsExisting());
+      allow create: if isMember() && createsForSelf();
+      allow update: if isStaff() || (isMember() && keepsOwner());
+      allow delete: if isStaff();
+    }
+
+    // ── Videos ─────────────────────────────────────────────────────────────
+
+    // id = "<uid>_<videoId>"
+    match /video_views/{viewId} {
+      allow get: if isStaff() || (isMember() && ownsId(viewId));
+      allow list: if isStaff() || (isMember() && ownsExisting());
+      allow create, update: if isMember() && ownsId(viewId) && createsForSelf();
+      allow delete: if isStaff();
+    }
+
+    // id = "<uid>_<videoId>"
+    match /video_reactions/{reactionId} {
+      allow read: if isMember();
+      allow create, update: if isMember() && ownsId(reactionId) && createsForSelf();
+      allow delete: if isStaff() || (isMember() && ownsId(reactionId));
+    }
+
+    match /video_comments/{commentId} {
+      allow read: if isMember();
+      allow create: if isMember() && createsForSelf();
+      allow update: if isStaff();
+      allow delete: if isStaff() || (isMember() && ownsExisting());
+    }
+
+    // ── Contenido (lo administra el staff, lo leen todos) ──────────────────
+
+    function isContent(collectionName) {
+      return collectionName in [
+        'organizations', 'products', 'quizzes', 'journeys', 'onboarding_fields',
+        'certificate_signers', 'certificate_config', 'badges', 'courses',
+        'journey_forms', 'videos', 'video_folders', 'kioscos', 'sim_modules',
+        'achievements', 'leaderboards', 'analytics', 'learning_paths'
+      ];
+    }
+
+    match /{collectionName}/{docId} {
+      allow read: if isContent(collectionName) && isMember();
+      allow write: if isContent(collectionName) && isStaff();
+    }
+
+    // Todo lo demás queda cerrado.
   }
 }

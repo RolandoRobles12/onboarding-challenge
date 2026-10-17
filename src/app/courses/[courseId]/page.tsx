@@ -16,6 +16,7 @@ import {
   getUserEnrollments,
   enrollUserInCourse,
   updateEnrollmentProgress,
+  getUserAttempts,
 } from '@/lib/firestore-service';
 import type { Course, Lesson, CourseEnrollment } from '@/lib/types-lms';
 import {
@@ -44,6 +45,23 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+
+/** Quizzes de evaluación del curso (por lección y por módulo). */
+function assessmentQuizIds(course: Course): string[] {
+  const ids = course.modules.flatMap(m => [m.assessmentQuizId, ...m.lessons.map(l => l.assessmentQuizId)]);
+  return Array.from(new Set(ids.filter((id): id is string => !!id)));
+}
+
+/**
+ * El curso se completa al terminar todas sus lecciones y, si tiene
+ * evaluaciones con puntaje mínimo, al alcanzarlo en alguna de ellas.
+ */
+function isCourseComplete(course: Course, lessonIds: Set<string>, overallScore: number | undefined): boolean {
+  const allLessons = course.modules.flatMap(m => m.lessons);
+  if (allLessons.length === 0 || !allLessons.every(l => lessonIds.has(l.id))) return false;
+  const needsScore = assessmentQuizIds(course).length > 0 && !!course.passingScore && course.passingScore > 0;
+  return !needsScore || (overallScore ?? 0) >= course.passingScore!;
+}
 
 // ─── Lesson type icon ────────────────────────────────────────────────────────
 
@@ -594,18 +612,25 @@ export default function CourseDetailPage() {
           updatedAt: enrolledAt,
         };
       }
-      // Si venimos de una evaluación de lección/módulo, registrar el mejor
-      // puntaje obtenido — es lo que Course.passingScore evalúa.
-      const assessmentScoreParam = searchParams?.get('assessmentScore');
-      if (assessmentScoreParam) {
-        const newScore = parseInt(assessmentScoreParam, 10);
-        if (!Number.isNaN(newScore)) {
-          const bestScore = Math.max(enr.overallScore ?? 0, newScore);
-          if (bestScore !== enr.overallScore) {
-            await updateEnrollmentProgress(enr.id, { overallScore: bestScore }).catch(console.error);
-            enr = { ...enr, overallScore: bestScore };
-          }
+      // Mejor puntaje en las evaluaciones del curso: es lo que Course.passingScore
+      // evalúa. Se toma de los intentos guardados, no de la URL.
+      const quizIds = assessmentQuizIds(data);
+      if (quizIds.length > 0) {
+        const attempts = await getUserAttempts(profile.uid).catch(() => []);
+        const scores = attempts.filter(a => quizIds.includes(a.quizId)).map(a => Math.round(a.percentage));
+        const bestScore = scores.length > 0 ? Math.max(...scores) : undefined;
+        if (bestScore !== undefined && bestScore !== enr.overallScore) {
+          await updateEnrollmentProgress(enr.id, { overallScore: bestScore }).catch(console.error);
+          enr = { ...enr, overallScore: bestScore };
         }
+      }
+      // Lecciones ya terminadas que esperaban la calificación mínima.
+      if (enr.status !== 'completed' && isCourseComplete(data, new Set(enr.completedLessonIds), enr.overallScore)) {
+        await updateEnrollmentProgress(enr.id, {
+          status: 'completed',
+          completedAt: new Date() as unknown as import('firebase/firestore').Timestamp,
+        }).catch(console.error);
+        enr = { ...enr, status: 'completed' };
       }
 
       setEnrollment(enr);
@@ -669,7 +694,8 @@ export default function CourseDetailPage() {
     if (mod && mod.lessons.every(l => newLessonIds.includes(l.id))) {
       newModuleIds.push(mod.id);
     }
-    const allComplete = newLessonIds.length === allLessons.length;
+    // Por ids y no por cantidad: una lección borrada del curso no debe contar.
+    const allComplete = isCourseComplete(course, new Set(newLessonIds), enrollment.overallScore);
 
     // Update state immediately for snappy UI
     setCompletedLessonIds(new Set(newLessonIds));
