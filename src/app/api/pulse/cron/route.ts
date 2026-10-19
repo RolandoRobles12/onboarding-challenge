@@ -6,6 +6,8 @@
  *
  *  1. Una vez al día: cierra pulsos de días anteriores que quedaron abiertos
  *     y marca como 'expired' los intentos que quedaron a medias.
+ *  1b. Una vez al día: avisos a embajadores de plazos por vencer,
+ *     re-certificación e inactividad (Admin → Notificaciones).
  *  2. Crea el pulso de hoy si "Pulso automático diario" está activo.
  *  3. Envía el aviso de Slack a partir de la hora de envío (una sola vez).
  *  4. Cierra el pulso de hoy si ya pasó la hora de cierre (solo ocurre si la
@@ -39,6 +41,7 @@ import {
 } from '@/lib/server/pulse-store';
 import { addDaysStr, hhmmToMinutes, pulseDateStr, pulseMinutesNow } from '@/lib/pulse-utils';
 import { sendPulseSlack, summarizeSlackResults } from '@/lib/server/pulse-slack';
+import { runDailyNotifications } from '@/lib/server/daily-jobs';
 
 const LOOKBACK_DAYS = 7;
 
@@ -73,11 +76,13 @@ async function run(req: NextRequest) {
   const minutes = pulseMinutesNow(now);
   const actions: string[] = [];
   let maintenanceDate: string | undefined;
+  let notificationsDate: string | undefined;
 
   try {
     const [cfg, slackCfg, cronStatus] = await Promise.all([getPulseConfig(), getSlackConfig(), getPulseCronStatus()]);
     const closeMinutes = hhmmToMinutes(cfg.closeAt);
     maintenanceDate = cronStatus?.maintenanceDate;
+    notificationsDate = cronStatus?.notificationsDate;
 
     // 1. Días anteriores: basta una vez al día (lee todos los intentos de la
     //    semana, así que no conviene repetirlo en cada vuelta).
@@ -92,6 +97,18 @@ async function run(req: NextRequest) {
       const expired = await expireStalePulseAttempts(today, addDaysStr(today, -LOOKBACK_DAYS));
       if (expired > 0) actions.push(`${expired} intento(s) a medias marcados como vencidos`);
       maintenanceDate = today;
+    }
+
+    // 1b. Avisos diarios a embajadores (plazos, re-certificación, inactividad).
+    //     Un error aquí no debe impedir el pulso del día.
+    if (notificationsDate !== today) {
+      try {
+        actions.push(...await runDailyNotifications(today));
+        notificationsDate = today;
+      } catch (err) {
+        console.error('[pulse-cron] avisos diarios:', err);
+        actions.push(`Error en los avisos diarios: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
 
     // 2. Crear el pulso de hoy
@@ -134,12 +151,12 @@ async function run(req: NextRequest) {
       actions.push('Pulso de hoy cerrado');
     }
 
-    await savePulseCronStatus({ lastActions: actions, maintenanceDate });
+    await savePulseCronStatus({ lastActions: actions, maintenanceDate, notificationsDate });
     return NextResponse.json({ ok: true, date: today, actions });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[pulse-cron] Error:', err);
-    await savePulseCronStatus({ lastActions: actions, lastError: message, maintenanceDate }).catch(() => {});
+    await savePulseCronStatus({ lastActions: actions, lastError: message, maintenanceDate, notificationsDate }).catch(() => {});
     return NextResponse.json({ ok: false, error: message, actions }, { status: 500 });
   }
 }

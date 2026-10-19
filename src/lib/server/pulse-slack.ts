@@ -46,7 +46,7 @@ export function slackErrorText(code: string | undefined): string {
   return SLACK_ERROR_TEXT[code] ?? code;
 }
 
-async function getSlackToken(): Promise<string> {
+export async function getSlackToken(): Promise<string> {
   return ((await getOrgTokenValue('slack_bot_token')) || process.env.SLACK_BOT_TOKEN || '').trim();
 }
 
@@ -68,7 +68,7 @@ export async function checkSlackConnection(): Promise<{ ok: true; team: string; 
   }
 }
 
-async function postMessage(token: string, channel: string, text: string, blocks: unknown[]) {
+export async function postSlackMessage(token: string, channel: string, text: string, blocks: unknown[]) {
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -165,7 +165,7 @@ export async function sendPulseSlack(opts: {
   const results: SlackSendResult[] = [];
   for (const t of targets) {
     try {
-      const data = await postMessage(token, t.id, fallbackText, blocks);
+      const data = await postSlackMessage(token, t.id, fallbackText, blocks);
       results.push({ target: t.name, type: t.type, ok: data.ok, error: data.ok ? undefined : slackErrorText(data.error) });
     } catch (err) {
       results.push({ target: t.name, type: t.type, ok: false, error: `no se pudo conectar con Slack (${err instanceof Error ? err.message : String(err)})` });

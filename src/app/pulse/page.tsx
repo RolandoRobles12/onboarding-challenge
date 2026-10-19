@@ -5,17 +5,10 @@ import { useAuth } from '@/context/AuthContext';
 import {
   getDailyPulse,
   getDailyPulses,
-  getPulseAttempt,
   getPulseConfig,
   getUserPulseAttempts,
-  startPulseAttempt,
-  savePulseAnswer,
-  submitPulseAttempt,
-  addToPulseBacklog,
   getUserPulseBacklog,
-  recordPulseBacklogReview,
   getPulseCategories,
-  getPulseQuestions,
 } from '@/lib/firestore-service';
 import { authFetch } from '@/lib/api-client';
 import type {
@@ -25,11 +18,10 @@ import type {
   PulseBacklogItem,
   PulseConfig,
   PulseCategory,
-  Question,
-  QuestionOption,
   KnowledgeModule,
 } from '@/lib/types-scalable';
-import { KNOWLEDGE_MODULE_LABELS, SEGMENTATION_FIELD_KEYS } from '@/lib/types-scalable';
+import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
+import type { AnswerReveal, PlayOption, PlayQuestion } from '@/lib/play-types';
 import {
   addDaysStr,
   computePulseStreak,
@@ -39,7 +31,6 @@ import {
   getPulsePhase,
   minutesUntilClose,
   pulseDateStr,
-  selectQuestionsForUser,
   DEFAULT_QUESTIONS_PER_PULSE,
   PULSE_PASS_PERCENTAGE,
 } from '@/lib/pulse-utils';
@@ -68,22 +59,25 @@ const MODULE_COLORS: Record<KnowledgeModule, string> = {
   incentivos: 'bg-yellow-500/10 text-yellow-700 border-yellow-200',
 };
 
+/** Minutos después del cierre en que se puede terminar un pulso ya empezado (igual que el servidor). */
+const PULSE_CLOSE_GRACE_MINUTES = 15;
+
 /** Días hacia atrás que se muestran en el historial. */
 const HISTORY_DAYS = 14;
 
-function shuffleOptions(options: QuestionOption[]): QuestionOption[] {
-  const arr = [...options];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
+/** Estado del pulso de hoy que devuelven /api/pulse/play y /api/pulse/start. */
+interface PulsePlayState {
+  attempt: PulseAttempt | null;
+  questions: PlayQuestion[];
+  reveals: Record<string, AnswerReveal>;
 }
 
-/** Preguntas asignadas a un intento (los intentos antiguos no guardaban la lista). */
-function attemptQuestionIds(attempt: PulseAttempt, pulse: DailyPulse | null): string[] {
-  if (attempt.questionIds?.length) return attempt.questionIds;
-  return (pulse?.questionIds ?? []).slice(0, attempt.totalQuestions || DEFAULT_QUESTIONS_PER_PULSE);
+/** POST a una ruta del pulso; lanza un Error con el mensaje del servidor si falla. */
+async function pulseApi<T>(path: string, body?: unknown): Promise<T> {
+  const res = await authFetch(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || `Error ${res.status}`), { status: res.status });
+  return data as T;
 }
 
 // ── Page shell (header + bottom nav) ───────────────────────────────────────
@@ -124,7 +118,8 @@ export default function PulsePage() {
   const [attempt, setAttempt] = useState<PulseAttempt | null>(null);
   const [pulseConfig, setPulseConfig] = useState<PulseConfig | null>(null);
   const [categories, setCategories] = useState<PulseCategory[]>([]);
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [questions, setQuestions] = useState<PlayQuestion[]>([]);
+  const [reveals, setReveals] = useState<Record<string, AnswerReveal>>({});
   const [backlog, setBacklog] = useState<PulseBacklogItem[]>([]);
   const [showBacklog, setShowBacklog] = useState(false);
   const [history, setHistory] = useState<PulseAttempt[]>([]);
@@ -165,6 +160,8 @@ export default function PulsePage() {
   const closeAt = pulseConfig?.closeAt;
   const phase = getPulsePhase(pulse, closeAt, now);
   const minutesLeft = minutesUntilClose(closeAt, now);
+  // Un pulso empezado acepta respuestas hasta 15 minutos después del cierre (lo valida el servidor).
+  const pastGrace = pulse?.status === 'closed' || minutesLeft <= -PULSE_CLOSE_GRACE_MINUTES;
   const questionsPerPulse = pulseConfig?.questionsPerPulse ?? DEFAULT_QUESTIONS_PER_PULSE;
 
   // ── Load data ──────────────────────────────────────────────────────────
@@ -178,14 +175,19 @@ export default function PulsePage() {
     setRecentPulseDates(pulses.filter(p => (p.questionIds ?? []).length > 0).map(p => p.date));
   }, []);
 
+  const applyState = (state: PulsePlayState) => {
+    setAttempt(state.attempt);
+    setQuestions(state.questions);
+    setReveals(state.reveals);
+  };
+
   const loadData = useCallback(async () => {
     if (!profile) return;
     const date = pulseDateStr();
     setLoading(true);
     try {
-      const [pulseData, attemptData, backlogData, cfg, cats] = await Promise.all([
+      const [pulseData, backlogData, cfg, cats] = await Promise.all([
         getDailyPulse(date),
-        getPulseAttempt(profile.uid, date),
         getUserPulseBacklog(profile.uid),
         getPulseConfig(),
         getPulseCategories().catch(() => [] as PulseCategory[]),
@@ -204,14 +206,12 @@ export default function PulsePage() {
       }
 
       setPulse(resolvedPulse);
-      setAttempt(attemptData);
       setBacklog(backlogData);
       setPulseConfig(cfg);
-
-      if (attemptData) {
-        setQuestions(await getPulseQuestions(attemptQuestionIds(attemptData, resolvedPulse)));
-      }
+      applyState(await pulseApi<PulsePlayState>('/api/pulse/play'));
       loadHistory(profile.uid, date).catch(() => {});
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo cargar el pulso', description: 'Revisa tu conexión e inténtalo de nuevo.' });
     } finally {
       setLoading(false);
     }
@@ -221,11 +221,10 @@ export default function PulsePage() {
 
   // ── Quiz flow ──────────────────────────────────────────────────────────
 
-  const enterQuiz = (att: PulseAttempt, qs: Question[]) => {
+  const enterQuiz = (att: PulseAttempt, qs: PlayQuestion[]) => {
     const saved = att.answers ?? [];
     const answeredIds = new Set(saved.map(a => a.questionId));
     const firstPending = qs.findIndex(q => !answeredIds.has(q.id));
-    setQuestions(qs);
     setAnswers(saved);
     setCurrentIndex(firstPending === -1 ? Math.max(qs.length - 1, 0) : firstPending);
     setSelectedOption(null);
@@ -239,89 +238,47 @@ export default function PulsePage() {
     setSubmitting(true);
     try {
       // Si ya hay intento (p. ej. se abrió en otra pestaña), se retoma: nunca se reinicia.
-      const existing = await getPulseAttempt(profile.uid, today);
-      if (existing) {
-        const qs = await getPulseQuestions(attemptQuestionIds(existing, pulse));
-        setAttempt(existing);
-        if (existing.status === 'in_progress') enterQuiz(existing, qs);
-        else setQuestions(qs);
-        return;
-      }
-
-      const od = profile.onboardingData ?? {};
-      const seg = {
-        vertical: od[SEGMENTATION_FIELD_KEYS.vertical],
-        hub: od[SEGMENTATION_FIELD_KEYS.hub],
-        estado: od[SEGMENTATION_FIELD_KEYS.estado],
-        cosecha: od[SEGMENTATION_FIELD_KEYS.fechaIngreso],
-      };
-
-      // Candidatas de sobra por si alguna pregunta del pool fue borrada o desactivada.
-      const candidates = selectQuestionsForUser(
-        pulse.questionIds, questionsPerPulse * 2, pulseConfig?.sameQuestionsForAll ?? true,
-      );
-      const loaded = (await getPulseQuestions(candidates)).filter(q => q.active !== false && q.options?.length > 0);
-      const assigned = loaded.slice(0, questionsPerPulse);
-      if (assigned.length === 0) {
-        toast({ variant: 'destructive', title: 'Pulso sin preguntas', description: 'Avísale a tu líder: las preguntas de hoy no están disponibles.' });
-        return;
-      }
-
-      const newAttempt = await startPulseAttempt(profile.uid, profile.nombre, today, seg, assigned.map(q => q.id));
-      setAttempt(newAttempt);
-      const qs = newAttempt.questionIds?.join() === assigned.map(q => q.id).join()
-        ? assigned
-        : await getPulseQuestions(attemptQuestionIds(newAttempt, pulse));
-      enterQuiz(newAttempt, qs);
-    } catch {
-      toast({ variant: 'destructive', title: 'No se pudo iniciar', description: 'Revisa tu conexión e inténtalo de nuevo.' });
+      const state = await pulseApi<PulsePlayState>('/api/pulse/start');
+      applyState(state);
+      if (state.attempt?.status === 'in_progress') enterQuiz(state.attempt, state.questions);
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'No se pudo iniciar', description: err instanceof Error ? err.message : 'Revisa tu conexión e inténtalo de nuevo.' });
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleResume = async () => {
+  const handleResume = () => {
     if (!attempt) return;
-    const qs = questions.length > 0 ? questions : await getPulseQuestions(attemptQuestionIds(attempt, pulse));
-    enterQuiz(attempt, qs);
+    enterQuiz(attempt, questions);
   };
 
   const currentQuestion = questions[currentIndex] ?? null;
-
-  // Orden de opciones — se mezcla una sola vez por pregunta cuando el admin
-  // activó "Orden aleatorio de respuestas" en la configuración del Pulso.
-  const displayedOptions = useMemo(() => {
-    if (!currentQuestion) return [];
-    const opts = [...currentQuestion.options].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    return pulseConfig?.randomizeAnswerOrder ? shuffleOptions(opts) : opts;
-  }, [currentQuestion, pulseConfig?.randomizeAnswerOrder]);
-
   const currentAnswer = currentQuestion ? answers.find(a => a.questionId === currentQuestion.id) : undefined;
 
   const handleConfirm = async () => {
     if (!selectedOption || !currentQuestion || !attempt || !profile) return;
-    const correct = currentQuestion.options.find(o => o.id === selectedOption)?.isCorrect ?? false;
-    const answer: PulseAnswer = {
-      questionId: currentQuestion.id,
-      selectedOptionIds: [selectedOption],
-      isCorrect: correct,
-      timeSpent: Math.round((Date.now() - startTime) / 1000),
-    };
-    // La respuesta se guarda ANTES de mostrar la solución: recargar no permite cambiarla.
+    // La respuesta se califica y guarda en el servidor ANTES de mostrar la
+    // solución: recargar no permite cambiarla.
     setSavingAnswer(true);
     try {
-      const saved = await savePulseAnswer(profile.uid, attempt.date, answer);
-      if (!saved.some(a => a.questionId === answer.questionId)) {
-        // El intento ya no acepta respuestas (p. ej. el proceso programado lo venció).
-        toast({ variant: 'destructive', title: 'Este pulso ya no acepta respuestas', description: 'La ventana de ese día terminó.' });
+      const res = await pulseApi<{ answers: PulseAnswer[]; reveal: AnswerReveal }>('/api/pulse/answer', {
+        questionId: currentQuestion.id,
+        optionId: selectedOption,
+        timeSpent: Math.round((Date.now() - startTime) / 1000),
+      });
+      setAnswers(res.answers);
+      setReveals(prev => ({ ...prev, [currentQuestion.id]: res.reveal }));
+      setRevealed(true);
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 409) {
+        toast({ variant: 'destructive', title: 'Este pulso ya no acepta respuestas', description: err instanceof Error ? err.message : '' });
         setQuizActive(false);
         await loadData();
-        return;
+      } else {
+        toast({ variant: 'destructive', title: 'No se guardó tu respuesta', description: 'Revisa tu conexión e inténtalo de nuevo.' });
       }
-      setAnswers(saved);
-      setRevealed(true);
-    } catch {
-      toast({ variant: 'destructive', title: 'No se guardó tu respuesta', description: 'Revisa tu conexión e inténtalo de nuevo.' });
     } finally {
       setSavingAnswer(false);
     }
@@ -340,22 +297,13 @@ export default function PulsePage() {
 
     setSubmitting(true);
     try {
-      const finished = await submitPulseAttempt(profile.uid, attempt.date);
+      const { attempt: finished } = await pulseApi<{ attempt: PulseAttempt }>('/api/pulse/submit');
       if (finished.status !== 'completed') {
         toast({ variant: 'destructive', title: 'Este pulso ya no acepta respuestas', description: 'La ventana de ese día terminó.' });
         setQuizActive(false);
         await loadData();
         return;
       }
-      const incorrect = (finished.answers ?? [])
-        .filter(a => !a.isCorrect)
-        .map(a => questions.find(q => q.id === a.questionId))
-        .filter((q): q is Question => !!q)
-        .map(q => ({ questionId: q.id, questionText: q.text, module: (q.module ?? 'herramientas') as KnowledgeModule }));
-      if (incorrect.length > 0) {
-        await addToPulseBacklog(profile.uid, incorrect, attempt.date).catch(() => {});
-      }
-
       setAttempt(finished);
       setQuizActive(false);
       setShowReview(false);
@@ -382,7 +330,7 @@ export default function PulsePage() {
   // ── Derived: streak & history ──────────────────────────────────────────
 
   // Hoy no rompe la racha mientras aún se pueda responder (ventana abierta o pulso a medias).
-  const todayStillAnswerable = phase === 'disponible' || (attempt?.status === 'in_progress' && attempt.date === today);
+  const todayStillAnswerable = phase === 'disponible' || (attempt?.status === 'in_progress' && attempt.date === today && !pastGrace);
   const streak = useMemo(
     () => computePulseStreak(recentPulseDates, history, today, todayStillAnswerable),
     [recentPulseDates, history, today, todayStillAnswerable],
@@ -455,7 +403,7 @@ export default function PulsePage() {
             <CardContent className="p-5 sm:p-7 space-y-5">
               <QuestionBody
                 question={currentQuestion}
-                options={displayedOptions}
+                reveal={revealed ? reveals[currentQuestion.id] : undefined}
                 selectedOption={revealed ? currentAnswer?.selectedOptionIds[0] ?? selectedOption : selectedOption}
                 revealed={revealed}
                 onSelect={id => { if (!revealed && !savingAnswer) setSelectedOption(id); }}
@@ -517,6 +465,7 @@ export default function PulsePage() {
           <ResultCard
             attempt={completed}
             questions={questions}
+            reveals={reveals}
             showReview={showReview}
             onToggleReview={() => setShowReview(v => !v)}
           />
@@ -528,13 +477,17 @@ export default function PulsePage() {
                 <p className="text-sm text-muted-foreground">
                   Llevas {inProgress.answers?.length ?? 0} de {inProgress.totalQuestions} preguntas. Tus respuestas están guardadas.
                 </p>
-                {phase === 'cerrado' && (
-                  <p className="text-xs text-orange-600">La ventana ya cerró, pero puedes terminar el pulso que empezaste.</p>
-                )}
+                {phase === 'cerrado' && (pastGrace ? (
+                  <p className="text-xs text-orange-600">La ventana cerró antes de que lo terminaras. Tus respuestas quedaron guardadas.</p>
+                ) : (
+                  <p className="text-xs text-orange-600">La ventana ya cerró: tienes {formatCountdown(PULSE_CLOSE_GRACE_MINUTES + minutesLeft)} para terminar el pulso que empezaste.</p>
+                ))}
               </div>
-              <Button className="w-full h-12 sm:h-14 rounded-xl font-semibold text-base sm:text-lg" size="lg" onClick={handleResume}>
-                <Play className="h-5 w-5 mr-2" /> Continuar pulso
-              </Button>
+              {!pastGrace && (
+                <Button className="w-full h-12 sm:h-14 rounded-xl font-semibold text-base sm:text-lg" size="lg" onClick={handleResume}>
+                  <Play className="h-5 w-5 mr-2" /> Continuar pulso
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : phase === 'sin_pulso' ? (
@@ -646,7 +599,6 @@ export default function PulsePage() {
                     onResolved={handleBacklogResolved}
                     moduleLabel={moduleLabel}
                     moduleColor={moduleColor}
-                    randomize={pulseConfig?.randomizeAnswerOrder ?? false}
                   />
                 ))}
               </div>
@@ -674,11 +626,12 @@ function StatusCard({ icon: Icon, title, text }: { icon: typeof Clock; title: st
 
 /** Pregunta con sus opciones; se reutiliza en el pulso y en el repaso del backlog. */
 function QuestionBody({
-  question, options, selectedOption, revealed, onSelect, moduleLabel, moduleColor, showModule = true,
+  question, reveal, selectedOption, revealed, onSelect, moduleLabel, moduleColor, showModule = true,
 }: {
   showModule?: boolean;
-  question: Question;
-  options: QuestionOption[];
+  question: PlayQuestion;
+  /** Respuesta correcta, una vez calificada en el servidor. */
+  reveal?: AnswerReveal;
   selectedOption: string | null;
   revealed: boolean;
   onSelect: (optionId: string) => void;
@@ -696,9 +649,9 @@ function QuestionBody({
       <h2 className="text-lg sm:text-xl font-semibold leading-snug">{question.text}</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        {options.map(opt => {
+        {question.options.map((opt: PlayOption) => {
           const isSelected = selectedOption === opt.id;
-          const isCorrect = opt.isCorrect;
+          const isCorrect = !!reveal?.correctOptionIds.includes(opt.id);
           let stateClass = 'border-border hover:border-primary/50 hover:bg-muted/40';
           if (revealed) {
             if (isCorrect) stateClass = 'border-green-500 bg-green-500/10 text-green-800';
@@ -729,10 +682,10 @@ function QuestionBody({
         })}
       </div>
 
-      {revealed && question.explanation && (
+      {revealed && reveal?.explanation && (
         <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-100 text-blue-800 text-sm">
           <p className="font-semibold mb-1 text-xs uppercase tracking-wide text-blue-600">Explicación</p>
-          <p className="leading-relaxed">{question.explanation}</p>
+          <p className="leading-relaxed">{reveal.explanation}</p>
         </div>
       )}
     </>
@@ -740,9 +693,10 @@ function QuestionBody({
 }
 
 /** Resultado del día con revisión: respuesta propia, correcta y explicación. */
-function ResultCard({ attempt, questions, showReview, onToggleReview }: {
+function ResultCard({ attempt, questions, reveals, showReview, onToggleReview }: {
   attempt: PulseAttempt;
-  questions: Question[];
+  questions: PlayQuestion[];
+  reveals: Record<string, AnswerReveal>;
   showReview: boolean;
   onToggleReview: () => void;
 }) {
@@ -778,8 +732,9 @@ function ResultCard({ attempt, questions, showReview, onToggleReview }: {
           <div className="divide-y border-t">
             {answers.map((ans, idx) => {
               const q = questions.find(x => x.id === ans.questionId);
+              const reveal = reveals[ans.questionId];
               const chosen = q?.options.find(o => ans.selectedOptionIds.includes(o.id));
-              const correct = q?.options.find(o => o.isCorrect);
+              const correctText = reveal?.correctAnswerText;
               return (
                 <div key={ans.questionId} className="py-3 space-y-1.5">
                   <div className="flex items-start gap-2.5">
@@ -793,10 +748,10 @@ function ResultCard({ attempt, questions, showReview, onToggleReview }: {
                       {!ans.isCorrect && chosen && (
                         <p className="text-red-700"><span className="font-semibold">Tu respuesta:</span> {chosen.text}</p>
                       )}
-                      {correct && (
-                        <p className="text-green-700"><span className="font-semibold">Correcta:</span> {correct.text}</p>
+                      {correctText && (
+                        <p className="text-green-700"><span className="font-semibold">Correcta:</span> {correctText}</p>
                       )}
-                      {q.explanation && <p className="text-muted-foreground leading-relaxed">{q.explanation}</p>}
+                      {reveal?.explanation && <p className="text-muted-foreground leading-relaxed">{reveal.explanation}</p>}
                     </div>
                   )}
                 </div>
@@ -810,56 +765,56 @@ function ResultCard({ attempt, questions, showReview, onToggleReview }: {
 }
 
 /** Ítem del backlog: se resuelve respondiendo la pregunta correctamente. */
-function BacklogItem({ item, onResolved, moduleLabel, moduleColor, randomize }: {
+function BacklogItem({ item, onResolved, moduleLabel, moduleColor }: {
   item: PulseBacklogItem;
   onResolved: (id: string) => void;
   moduleLabel: (m: KnowledgeModule) => string;
   moduleColor: (m: KnowledgeModule) => string;
-  randomize: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [question, setQuestion] = useState<Question | null>(null);
-  const [options, setOptions] = useState<QuestionOption[]>([]);
+  const [question, setQuestion] = useState<PlayQuestion | null>(null);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [reveal, setReveal] = useState<AnswerReveal | undefined>();
+  const [correct, setCorrect] = useState(false);
   const [saving, setSaving] = useState(false);
   // Tras un error se muestra la solución; volver a intentarlo el mismo día
   // sería trivial, así que el siguiente intento queda para mañana.
   const reviewedToday = !!item.lastReviewedAt && pulseDateStr(item.lastReviewedAt.toDate()) === pulseDateStr();
   const [missedToday, setMissedToday] = useState(reviewedToday);
 
-  const prepare = (q: Question) => {
-    const opts = [...q.options].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-    setOptions(randomize ? shuffleOptions(opts) : opts);
-    setSelected(null);
-    setRevealed(false);
-  };
-
   const handleOpen = async () => {
     setOpen(true);
-    if (question) { prepare(question); return; }
+    setSelected(null);
+    setRevealed(false);
+    setReveal(undefined);
+    if (question) return;
     setLoading(true);
     try {
-      const [q] = await getPulseQuestions([item.questionId]);
-      if (q) { setQuestion(q); prepare(q); }
+      const res = await pulseApi<{ question: PlayQuestion | null }>('/api/pulse/review', { itemId: item.id });
+      setQuestion(res.question);
+    } catch {
+      setQuestion(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const correct = question?.options.find(o => o.id === selected)?.isCorrect ?? false;
-
   const handleConfirm = async () => {
     if (!selected || !question) return;
     setSaving(true);
     try {
-      await recordPulseBacklogReview(item.id, correct);
+      const { result } = await pulseApi<{ result: { isCorrect: boolean; reveal: AnswerReveal } }>(
+        '/api/pulse/review', { itemId: item.id, optionId: selected },
+      );
+      setCorrect(result.isCorrect);
+      setReveal(result.reveal);
       setRevealed(true);
-      if (!correct) setMissedToday(true);
-      if (correct) toast({ title: '¡Correcto!', description: 'La pregunta salió de tu repaso pendiente.' });
-    } catch {
-      toast({ variant: 'destructive', title: 'No se pudo guardar', description: 'Revisa tu conexión.' });
+      if (!result.isCorrect) setMissedToday(true);
+      if (result.isCorrect) toast({ title: '¡Correcto!', description: 'La pregunta salió de tu repaso pendiente.' });
+    } catch (err) {
+      toast({ variant: 'destructive', title: 'No se pudo guardar', description: err instanceof Error ? err.message : 'Revisa tu conexión.' });
     } finally {
       setSaving(false);
     }
@@ -896,7 +851,7 @@ function BacklogItem({ item, onResolved, moduleLabel, moduleColor, randomize }: 
           <div className="space-y-3">
             <QuestionBody
               question={question}
-              options={options}
+              reveal={reveal}
               selectedOption={selected}
               revealed={revealed}
               onSelect={id => { if (!revealed) setSelected(id); }}

@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { postEvent } from '@/lib/api-client';
 
 /** Quizzes de evaluación del curso (por lección y por módulo). */
 function assessmentQuizIds(course: Course): string[] {
@@ -629,7 +630,7 @@ export default function CourseDetailPage() {
         await updateEnrollmentProgress(enr.id, {
           status: 'completed',
           completedAt: new Date() as unknown as import('firebase/firestore').Timestamp,
-        }).catch(console.error);
+        }).then(() => postEvent({ type: 'course_completed', courseId })).catch(console.error);
         enr = { ...enr, status: 'completed' };
       }
 
@@ -707,7 +708,7 @@ export default function CourseDetailPage() {
       completedModuleIds: newModuleIds,
       status: allComplete ? 'completed' : 'in_progress',
       ...(allComplete ? { completedAt: new Date() as unknown as import('firebase/firestore').Timestamp } : {}),
-    }).catch(console.error);
+    }).then(() => { if (allComplete) postEvent({ type: 'course_completed', courseId: course.id }); }).catch(console.error);
   }, [enrollment, selectedLesson, course, completedLessonIds, completedModuleIds, allLessons.length]);
 
   return (

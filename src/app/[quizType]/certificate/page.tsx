@@ -20,6 +20,7 @@ import {
 import type { CertificateConfig, Journey } from '@/lib/types-scalable';
 import { isJourneyStepUnlocked, journeySteps } from '@/lib/journey-progress';
 import { useAuth } from '@/context/AuthContext';
+import { postEvent } from '@/lib/api-client';
 
 interface CertificateData {
   fullName: string;
@@ -88,6 +89,7 @@ function CertificateContent() {
           getCertificateConfig().catch(() => null),
         ]);
         if (cancelled) return;
+        postEvent({ type: 'certificate_issued', journeyId: journey.id, stepId: certStep.id });
 
         completed.add(certStep.id);
         setData({

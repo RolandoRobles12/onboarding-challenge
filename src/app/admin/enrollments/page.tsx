@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils';
 import type { Course } from '@/lib/types-lms';
 import type { CourseEnrollment, EnrollmentStatus } from '@/lib/types-lms';
 import type { UserProfile, Journey, UserJourneyProgress, JourneyStep } from '@/lib/types-scalable';
+import { postEvent } from '@/lib/api-client';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,7 @@ export default function EnrollmentsPage() {
     setEnrolling(true);
     try {
       await adminEnrollUserInCourse(enrollUserId, selectedCourseId, profile.uid);
+      postEvent({ type: 'course_assigned', userId: enrollUserId, courseId: selectedCourseId });
       toast({ title: 'Usuario inscrito', description: 'La inscripción se registró correctamente.' });
       setEnrollDialogOpen(false);
       setEnrollUserId('');

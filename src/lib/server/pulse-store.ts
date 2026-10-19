@@ -57,7 +57,7 @@ export async function getPulseCronStatus(orgId = DEFAULT_ORG_ID): Promise<PulseC
 }
 
 export async function savePulseCronStatus(
-  status: { lastActions: string[]; lastError?: string; maintenanceDate?: string },
+  status: { lastActions: string[]; lastError?: string; maintenanceDate?: string; notificationsDate?: string },
   orgId = DEFAULT_ORG_ID,
 ): Promise<void> {
   await db().collection('pulse_cron_status').doc(orgId).set({
@@ -66,6 +66,7 @@ export async function savePulseCronStatus(
     lastActions: status.lastActions,
     lastError: status.lastError ?? null,
     ...(status.maintenanceDate ? { maintenanceDate: status.maintenanceDate } : {}),
+    ...(status.notificationsDate ? { notificationsDate: status.notificationsDate } : {}),
   }, { merge: true });
 }
 

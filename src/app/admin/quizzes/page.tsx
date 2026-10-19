@@ -19,6 +19,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import type { Quiz } from '@/lib/types-scalable';
+import { postEvent } from '@/lib/api-client';
 
 export default function QuizzesPage() {
   const { quizzes, loading, refresh } = useQuizzes(undefined, false);
@@ -43,6 +44,7 @@ export default function QuizzesPage() {
         toast({ title: 'Evaluación ocultada' });
       } else {
         await publishQuiz(quiz.id);
+        postEvent({ type: 'challenge_available', quizId: quiz.id });
         toast({ title: '🚀 Evaluación publicada exitosamente' });
       }
       await refresh();

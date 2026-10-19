@@ -11,7 +11,9 @@ import {
   getCourses,
   getAllBadges,
   getJourneyForms,
+  getAllSimModules,
 } from '@/lib/firestore-service';
+import type { SimModule } from '@/lib/types-simulation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,6 +27,7 @@ import {
   FileText, HelpCircle, BarChart2, Award, Save, RefreshCw,
   BookOpen, Swords, Medal, Info, ListChecks, Pencil, X, ClipboardList,
   Eye, EyeOff, Globe, FileEdit, CheckCircle2, Clock, CalendarClock, Flag, Compass, Layers,
+  MousePointerClick,
 } from 'lucide-react';
 import type {
   Journey, JourneyStep, JourneyStepType, JourneyStage,
@@ -99,7 +102,25 @@ const STEP_TYPE_CONFIG: Record<JourneyStepType, {
     defaultTitle: 'Lista de verificación',
     color: 'text-indigo-600',
   },
+  simulation: {
+    label: 'Simulación',
+    description: 'Práctica guiada de la herramienta; se completa al aprobarla',
+    icon: MousePointerClick,
+    defaultTitle: 'Simulación de la herramienta',
+    color: 'text-fuchsia-600',
+  },
 };
+
+/** Simulaciones publicadas, para elegir en los pasos de tipo simulación (se cargan una vez). */
+let simModulesCache: Promise<SimModule[]> | null = null;
+function useSimModules(): SimModule[] {
+  const [mods, setMods] = useState<SimModule[]>([]);
+  useEffect(() => {
+    simModulesCache ??= getAllSimModules().catch(() => []);
+    simModulesCache.then(setMods);
+  }, []);
+  return mods;
+}
 
 const PURPOSE_EMOJI: Record<string, string> = {
   seller_data: '📋',
@@ -129,6 +150,7 @@ function ActionCard({
 }) {
   const cfg = STEP_TYPE_CONFIG[action.type];
   const Icon = cfg.icon;
+  const simModules = useSimModules();
 
   return (
     <div className="flex items-start gap-3 p-3 border rounded-lg bg-card shadow-sm ml-3">
@@ -388,6 +410,51 @@ function ActionCard({
                 )}
               </SelectContent>
             </Select>
+          </div>
+        )}
+
+        {(action.type === 'challenge' || action.type === 'quiz') && (
+          <div className="space-y-1">
+            <Label className="text-xs">Puntaje mínimo para completar el paso (%)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              className="h-7 text-xs"
+              placeholder="Sin mínimo"
+              value={action.config.minimumScore ?? ''}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                onUpdate({ ...action, config: { ...action.config, minimumScore: Number.isNaN(v) ? undefined : Math.min(100, Math.max(0, v)) } });
+              }}
+            />
+            <p className="text-[10px] text-muted-foreground">Si el vendedor saca menos, el paso no se completa y puede volver a intentarlo.</p>
+          </div>
+        )}
+
+        {action.type === 'simulation' && (
+          <div className="space-y-1">
+            <Label className="text-xs">Simulación asignada</Label>
+            <Select
+              value={action.config.simModuleId || ''}
+              onValueChange={(v) => onUpdate({ ...action, config: { ...action.config, simModuleId: v } })}
+            >
+              <SelectTrigger className="h-7 text-xs">
+                <SelectValue placeholder="Selecciona una simulación..." />
+              </SelectTrigger>
+              <SelectContent>
+                {simModules.length === 0 ? (
+                  <SelectItem value="none" disabled>No hay simulaciones</SelectItem>
+                ) : (
+                  simModules.map(m => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.title}{m.active === false ? ' (inactiva)' : ''}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground">El paso se completa solo cuando el vendedor aprueba la simulación.</p>
           </div>
         )}
 

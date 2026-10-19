@@ -181,7 +181,7 @@ function ProductSection({ productId, productColor, productName, currentUserId }:
                     <span className="text-[10px] text-muted-foreground">{q.totalQuestions} preguntas</span>
                   </div>
                 </div>
-                <Link href={`/${productId}/quiz?quizId=${q.id}`}>
+                <Link href={`/${productId}/quiz?quizId=${q.id}&practice=1`}>
                   <Button size="sm" className="shrink-0 gap-1.5 rounded-lg h-8 px-3">
                     <Play className="h-3 w-3" /> Practicar
                   </Button>

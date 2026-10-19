@@ -25,8 +25,17 @@ function adminApp(): App {
   return initializeApp(PROJECT_ID ? { projectId: PROJECT_ID } : undefined);
 }
 
+let settingsApplied = false;
+
 export function adminDb() {
-  return getFirestore(adminApp());
+  const db = getFirestore(adminApp());
+  if (!settingsApplied) {
+    settingsApplied = true;
+    // Campos opcionales sin valor se omiten en vez de fallar la escritura.
+    // (Si el módulo se recarga en desarrollo, la instancia ya tiene la opción.)
+    try { db.settings({ ignoreUndefinedProperties: true }); } catch { /* ya configurado */ }
+  }
+  return db;
 }
 
 export function adminAuth() {

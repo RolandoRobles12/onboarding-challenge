@@ -11,3 +11,13 @@ export async function authFetch(input: string, init: RequestInit = {}): Promise<
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   return fetch(input, { ...init, headers });
 }
+
+/**
+ * Avisa al servidor de un evento de la capacitación (/api/events) para que
+ * mande avisos y entregue insignias. No bloquea ni falla la acción del usuario.
+ */
+export function postEvent(event: Record<string, unknown> & { type: string }): Promise<void> {
+  return authFetch('/api/events', { method: 'POST', body: JSON.stringify(event) })
+    .then(() => undefined)
+    .catch(err => console.error('[events]', event.type, err));
+}

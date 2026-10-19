@@ -22,8 +22,6 @@ import {
   arrayUnion,
   onSnapshot,
   runTransaction,
-  documentId,
-  type Transaction,
   QueryConstraint,
   DocumentData,
   WithFieldValue,
@@ -37,6 +35,7 @@ import type {
   UserProfile,
   Kiosko,
   QuizAttempt,
+  QuizQuestionResult,
   LeaderboardEntry,
   Achievement,
   WhitelistEntry,
@@ -70,6 +69,7 @@ import type {
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-scalable';
 import { withOptionIds } from './question-options';
+import { resolveNotificationConfig, type NotificationConfig, type NotificationLogEntry } from './notifications';
 import { addDaysStr, buildAutoPool, DEFAULT_PULSE_CONFIG, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
 import type {
   Course,
@@ -93,6 +93,7 @@ const COLLECTIONS = {
   QUESTIONS: 'questions',
   USERS: 'users',
   ATTEMPTS: 'attempts',
+  ATTEMPT_DETAILS: 'attempt_details',
   LEADERBOARDS: 'leaderboards',
   ACHIEVEMENTS: 'achievements',
   WHITELIST: 'whitelist',
@@ -134,6 +135,9 @@ const COLLECTIONS = {
   PULSE_CATEGORIES: 'pulseCategories',
   ROLE_PERMISSIONS: 'role_permissions',
   KIOSCOS: 'kioscos',
+  // --- Avisos a embajadores (Slack y push) ---
+  NOTIFICATION_CONFIG: 'notification_config',
+  NOTIFICATION_LOG: 'notification_log',
   // --- Prototipo: Simulaciones por nodos (hotspots sobre capturas) ---
   SIM_MODULES: 'sim_modules',
   SIM_ATTEMPTS: 'sim_attempts',
@@ -581,29 +585,6 @@ export async function getUsersByKiosko(kiosko: string, orgId: string = DEFAULT_O
 // QUIZ ATTEMPTS
 // ============================================================================
 
-export async function createQuizAttempt(
-  attempt: Omit<QuizAttempt, 'id'>
-): Promise<string> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.ATTEMPTS));
-    await setDoc(docRef, stripUndefined(attempt));
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating quiz attempt:', error);
-    throw error;
-  }
-}
-
-export async function updateQuizAttempt(attemptId: string, updates: Partial<QuizAttempt>): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.ATTEMPTS, attemptId);
-    await updateDoc(docRef, updates as DocumentData);
-  } catch (error) {
-    console.error('Error updating quiz attempt:', error);
-    throw error;
-  }
-}
-
 export async function getQuizAttempt(attemptId: string): Promise<QuizAttempt | null> {
   try {
     const docRef = getDocRef(COLLECTIONS.ATTEMPTS, attemptId);
@@ -613,6 +594,12 @@ export async function getQuizAttempt(attemptId: string): Promise<QuizAttempt | n
     console.error('Error getting quiz attempt:', error);
     throw error;
   }
+}
+
+/** Detalle por pregunta de un intento (solo lo leen el embajador y el staff). */
+export async function getAttemptDetails(attemptId: string): Promise<{ questionResults: QuizQuestionResult[]; showFeedback?: string } | null> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.ATTEMPT_DETAILS, attemptId));
+  return snap.exists() ? (snap.data() as { questionResults: QuizQuestionResult[]; showFeedback?: string }) : null;
 }
 
 /**
@@ -646,8 +633,9 @@ export async function getQuizLeaderboard(
     );
     const snapshot = await getDocs(q);
     let docs = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() } as QuizAttempt))
-      .filter(d => d.status === 'completed');
+      .map(d => ({ id: d.id, ...d.data() } as QuizAttempt & { practice?: boolean }))
+      // Lo jugado en Práctica no entra al ranking.
+      .filter(d => d.status === 'completed' && !d.practice);
     if (quizId) docs = docs.filter(d => d.quizId === quizId);
 
     // Keep only the best attempt per user (highest %, then fastest time)
@@ -2431,159 +2419,6 @@ export async function getPulseAttempt(userId: string, date: string, orgId = DEFA
   }
 }
 
-/**
- * Inicia el intento del día, o devuelve el existente si ya hay uno.
- * Nunca sobrescribe un intento: así recargar la página no reinicia el pulso
- * ni permite volver a responder preguntas ya vistas.
- *
- * @param questionIds  Preguntas asignadas a este usuario. Se guardan en el
- *                     intento para que siempre vea las mismas.
- */
-export async function startPulseAttempt(
-  userId: string,
-  userName: string,
-  date: string,
-  segmentation: { vertical?: string; hub?: string; estado?: string; cosecha?: string },
-  questionIds: string[],
-  orgId = DEFAULT_ORG_ID
-): Promise<PulseAttempt> {
-  const id = `${userId}_${date}`;
-  const docRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (snap.exists()) return { id: snap.id, ...snap.data() } as PulseAttempt;
-    const attempt: Omit<PulseAttempt, 'id'> = {
-      userId,
-      userName,
-      pulseId: `${orgId}_${date}`,
-      date,
-      organizationId: orgId,
-      ...segmentation,
-      questionIds,
-      answers: [],
-      totalQuestions: questionIds.length,
-      correctAnswers: 0,
-      percentage: 0,
-      startedAt: serverTimestamp() as unknown as Timestamp,
-      status: 'in_progress',
-    };
-    tx.set(docRef, stripUndefined(attempt));
-    return { id, ...attempt, startedAt: Timestamp.now() };
-  });
-}
-
-/**
- * Guarda una respuesta en cuanto el vendedor la confirma.
- * Si la pregunta ya tenía respuesta, conserva la primera (no se puede corregir
- * después de ver la solución). Devuelve las respuestas guardadas.
- */
-export async function savePulseAnswer(
-  userId: string,
-  date: string,
-  answer: PulseAnswer
-): Promise<PulseAnswer[]> {
-  const docRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, `${userId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
-    const data = snap.data() as PulseAttempt;
-    const answers = data.answers ?? [];
-    if (data.status !== 'in_progress' || answers.some(a => a.questionId === answer.questionId)) {
-      return answers;
-    }
-    const next = [...answers, answer];
-    tx.update(docRef, {
-      answers: next,
-      correctAnswers: next.filter(a => a.isCorrect).length,
-      lastAnswerAt: serverTimestamp(),
-    });
-    return next;
-  });
-}
-
-// ----------- Estadísticas de preguntas -----------
-
-type QuestionResult = { questionId: string; isCorrect: boolean };
-type QuestionStatsUpdate = { ref: ReturnType<typeof getDocRef>; timesUsed: number; timesCorrect: number };
-
-/** Lee las estadísticas actuales de las preguntas respondidas (una vez por pregunta). */
-async function readQuestionStats(tx: Transaction, results: QuestionResult[]): Promise<QuestionStatsUpdate[]> {
-  const byId = new Map<string, boolean>();
-  for (const r of results) if (r.questionId) byId.set(r.questionId, r.isCorrect);
-  const updates: QuestionStatsUpdate[] = [];
-  for (const [questionId, isCorrect] of byId) {
-    const ref = getDocRef(COLLECTIONS.QUESTIONS, questionId);
-    const snap = await tx.get(ref);
-    if (!snap.exists()) continue;
-    const data = snap.data();
-    const used = Number(data.timesUsed ?? 0);
-    const correct = typeof data.timesCorrect === 'number'
-      ? data.timesCorrect
-      : Math.round((Number(data.averageCorrectRate ?? 0) / 100) * used);
-    updates.push({ ref, timesUsed: used + 1, timesCorrect: correct + (isCorrect ? 1 : 0) });
-  }
-  return updates;
-}
-
-function writeQuestionStats(tx: Transaction, updates: QuestionStatsUpdate[]) {
-  for (const u of updates) {
-    tx.update(u.ref, {
-      timesUsed: u.timesUsed,
-      timesCorrect: u.timesCorrect,
-      averageCorrectRate: Math.round((u.timesCorrect / u.timesUsed) * 100),
-    });
-  }
-}
-
-/**
- * Suma una respuesta (correcta o no) a las estadísticas de cada pregunta:
- * `timesUsed`, `timesCorrect` y `averageCorrectRate`. El armado automático del
- * pulso usa la tasa de aciertos para reforzar lo que más se falla.
- */
-export async function recordQuestionResults(results: QuestionResult[]): Promise<void> {
-  if (results.length === 0) return;
-  await runTransaction(ensureFirestore(), async tx => {
-    writeQuestionStats(tx, await readQuestionStats(tx, results));
-  });
-}
-
-/**
- * Cierra el intento con las respuestas guardadas. Es idempotente: si ya estaba
- * completado no vuelve a sumar la respuesta al contador del pulso.
- */
-export async function submitPulseAttempt(
-  userId: string,
-  date: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<PulseAttempt> {
-  const attemptRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, `${userId}_${date}`);
-  const pulseRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(attemptRef);
-    if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
-    const data = { id: snap.id, ...snap.data() } as PulseAttempt;
-    // Ya completado (idempotente) o vencido por el proceso programado: no se toca.
-    if (data.status !== 'in_progress') return data;
-    const answers = data.answers ?? [];
-    // Lecturas antes de escribir (regla de las transacciones).
-    const stats = await readQuestionStats(tx, answers.map(a => ({ questionId: a.questionId, isCorrect: a.isCorrect })));
-    const total = data.questionIds?.length || data.totalQuestions || answers.length;
-    const correctAnswers = answers.filter(a => a.isCorrect).length;
-    const percentage = total > 0 ? Math.round((correctAnswers / total) * 100) : 0;
-    const patch = {
-      totalQuestions: total,
-      correctAnswers,
-      percentage,
-      completedAt: serverTimestamp(),
-      status: 'completed' as const,
-    };
-    tx.update(attemptRef, patch);
-    tx.update(pulseRef, { totalResponses: increment(1), updatedAt: serverTimestamp() });
-    writeQuestionStats(tx, stats);
-    return { ...data, ...patch, completedAt: Timestamp.now() };
-  });
-}
-
 /** Lista los intentos de un usuario (más recientes primero). */
 export async function getUserPulseAttempts(
   userId: string,
@@ -2658,60 +2493,6 @@ export async function getUserPulseBacklog(userId: string, orgId = DEFAULT_ORG_ID
     console.error('Error getting pulse backlog:', error);
     return [];
   }
-}
-
-/**
- * Agrega preguntas incorrectas al backlog del usuario. Si la pregunta ya está
- * pendiente en su backlog no se duplica.
- */
-export async function addToPulseBacklog(
-  userId: string,
-  questions: { questionId: string; questionText: string; module: KnowledgeModule; linkedVideoIds?: string[] }[],
-  pulseDate: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  const pending = await getUserPulseBacklog(userId, orgId);
-  const alreadyPending = new Set(pending.map(b => b.questionId));
-  const toAdd = questions.filter(q => !alreadyPending.has(q.questionId));
-  if (toAdd.length === 0) return;
-  const batch = writeBatch(ensureFirestore());
-  for (const q of toAdd) {
-    const docRef = doc(getCollectionRef(COLLECTIONS.PULSE_BACKLOGS));
-    const item: Omit<PulseBacklogItem, 'id'> = {
-      userId,
-      organizationId: orgId,
-      questionId: q.questionId,
-      questionText: q.questionText,
-      module: q.module,
-      addedAt: serverTimestamp() as unknown as Timestamp,
-      pulseDate,
-      status: 'pending',
-      reviewAttempts: 0,
-      linkedVideoIds: q.linkedVideoIds,
-    };
-    batch.set(docRef, stripUndefined(item));
-  }
-  await batch.commit();
-}
-
-/** Marca un ítem del backlog como resuelto. */
-export async function resolvePulseBacklogItem(itemId: string): Promise<void> {
-  await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
-    status: 'resolved',
-    resolvedAt: serverTimestamp(),
-  });
-}
-
-/**
- * Registra un repaso de una pregunta del backlog. Solo se resuelve cuando el
- * vendedor la responde correctamente.
- */
-export async function recordPulseBacklogReview(itemId: string, correct: boolean): Promise<void> {
-  await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
-    reviewAttempts: increment(1),
-    lastReviewedAt: serverTimestamp(),
-    ...(correct ? { status: 'resolved', resolvedAt: serverTimestamp() } : {}),
-  });
 }
 
 // ----------- Slack Config -----------
@@ -2809,21 +2590,6 @@ export async function requestPulseScheduleSync(orgId = DEFAULT_ORG_ID): Promise<
 }
 
 // ----------- Questions for the pulse -----------
-
-/** Carga las preguntas de un pulso en paralelo, conservando el orden recibido. */
-export async function getPulseQuestions(ids: string[]): Promise<Question[]> {
-  const unique = Array.from(new Set(ids));
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
-  const snaps = await Promise.all(chunks.map(chunk =>
-    getDocs(query(getCollectionRef(COLLECTIONS.QUESTIONS), where(documentId(), 'in', chunk)))
-  ));
-  const byId = new Map<string, Question>();
-  for (const snap of snaps) {
-    for (const d of snap.docs) byId.set(d.id, toQuestion(d.id, d.data()));
-  }
-  return ids.map(id => byId.get(id)).filter((q): q is Question => !!q);
-}
 
 // ----------- Auto-scheduling helpers -----------
 
@@ -3025,4 +2791,32 @@ export async function updateKiosko(id: string, updates: Partial<Kiosko>): Promis
 export async function deleteKiosko(id: string): Promise<void> {
   const firestore = ensureFirestore();
   await deleteDoc(doc(firestore, COLLECTIONS.KIOSCOS, id));
+}
+
+// ============================================================================
+// AVISOS A EMBAJADORES (Admin → Notificaciones)
+// ============================================================================
+
+export async function getNotificationConfig(orgId = DEFAULT_ORG_ID): Promise<NotificationConfig> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.NOTIFICATION_CONFIG, orgId));
+  return resolveNotificationConfig(snap.exists() ? (snap.data() as Partial<NotificationConfig>) : null, orgId);
+}
+
+export async function saveNotificationConfig(
+  rules: NotificationConfig['rules'],
+  updatedBy: string,
+  orgId = DEFAULT_ORG_ID,
+): Promise<void> {
+  await setDoc(getDocRef(COLLECTIONS.NOTIFICATION_CONFIG, orgId), stripUndefined({
+    organizationId: orgId,
+    rules,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  }));
+}
+
+/** Últimos avisos enviados (los escribe el servidor). */
+export async function getRecentNotifications(max = 30): Promise<NotificationLogEntry[]> {
+  const snap = await getDocs(query(getCollectionRef(COLLECTIONS.NOTIFICATION_LOG), orderBy('createdAt', 'desc'), limit(max)));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as NotificationLogEntry);
 }

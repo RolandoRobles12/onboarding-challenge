@@ -7,7 +7,9 @@ rules_version = '2';
 //   - seller → vendedor: solo lee contenido y escribe su propio progreso.
 //
 // Las rutas de /api y la función programada usan el Admin SDK, que no pasa por
-// estas reglas (crear perfiles, tokens, envío de Slack, estado del cron).
+// estas reglas: crear perfiles, calificar desafíos y pulsos, avisos, insignias
+// automáticas, estado del cron. Colecciones solo de servidor (sin regla, quedan
+// cerradas): quiz_sessions, push_subscriptions, server_secrets.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -144,37 +146,29 @@ service cloud.firestore {
     match /daily_pulses/{pulseId} {
       allow read: if isMember();
       allow write: if isStaff();
-      // Al terminar su pulso, el vendedor suma 1 al contador de respuestas.
-      allow update: if isMember()
-        && onlyChanges(['totalResponses', 'updatedAt'])
-        && request.resource.data.totalResponses == resource.data.get('totalResponses', 0) + 1;
     }
 
-    // id = "<uid>_<YYYY-MM-DD>"
+    // id = "<uid>_<YYYY-MM-DD>". Los crea y califica el servidor (/api/pulse/*):
+    // el vendedor no puede escribir sus respuestas ni si son correctas.
     match /pulse_attempts/{attemptId} {
       allow get: if isStaff() || (isMember() && ownsId(attemptId));
       allow list: if isStaff() || (isMember() && ownsExisting());
-      allow create: if isMember()
-        && createsForSelf()
-        && attemptId == request.auth.uid + '_' + request.resource.data.date
-        && request.resource.data.status == 'in_progress'
-        && request.resource.data.answers.size() == 0;
-      // Solo mientras está en curso: un intento completado o vencido ya no cambia.
-      allow update: if isStaff() || (isMember()
-        && keepsOwner()
-        && resource.data.status == 'in_progress'
-        && request.resource.data.status in ['in_progress', 'completed']
-        && onlyChanges(['answers', 'correctAnswers', 'lastAnswerAt', 'totalQuestions', 'percentage', 'completedAt', 'status']));
-      allow delete: if isStaff();
+      allow update, delete: if isStaff();
     }
 
+    // Repaso de preguntas falladas: lo escribe el servidor.
     match /pulse_backlogs/{itemId} {
       allow read: if isStaff() || (isMember() && ownsExisting());
-      allow create: if isMember() && createsForSelf();
-      allow update: if isStaff() || (isMember()
-        && keepsOwner()
-        && onlyChanges(['reviewAttempts', 'lastReviewedAt', 'status', 'resolvedAt']));
-      allow delete: if isStaff();
+      allow update, delete: if isStaff();
+    }
+
+    // Avisos a embajadores (Admin → Notificaciones). El registro lo escribe el servidor.
+    match /notification_config/{orgId} {
+      allow read, write: if isStaff();
+    }
+
+    match /notification_log/{entryId} {
+      allow read: if isStaff();
     }
 
     match /pulseCategories/{categoryId} {
@@ -184,22 +178,24 @@ service cloud.firestore {
 
     // ── Preguntas ──────────────────────────────────────────────────────────
 
+    // Traen la respuesta correcta: solo el staff. Los embajadores reciben las
+    // preguntas sin respuesta a través del servidor (/api/quiz/*, /api/pulse/*).
     match /questions/{questionId} {
-      allow read: if isMember();
-      allow write: if isStaff();
-      // Al responder, cualquier usuario actualiza las estadísticas de la pregunta.
-      allow update: if isMember()
-        && onlyChanges(['timesUsed', 'timesCorrect', 'averageCorrectRate'])
-        && request.resource.data.timesUsed == resource.data.get('timesUsed', 0) + 1;
+      allow read, write: if isStaff();
     }
 
     // ── Progreso del vendedor ──────────────────────────────────────────────
 
-    // Intentos de desafíos: los rankings leen los de todos.
+    // Intentos de desafíos: los registra el servidor (/api/quiz/finish) con el
+    // puntaje que él calculó. Los rankings leen los de todos.
     match /attempts/{attemptId} {
       allow read: if isMember();
-      allow create: if isMember() && createsForSelf();
       allow update, delete: if isStaff();
+    }
+
+    // Detalle por pregunta de un intento (incluye las respuestas correctas).
+    match /attempt_details/{attemptId} {
+      allow read: if isStaff() || (isMember() && ownsExisting());
     }
 
     // id = "<uid>_<journeyId>"

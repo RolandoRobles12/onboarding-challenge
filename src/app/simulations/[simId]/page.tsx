@@ -43,6 +43,7 @@ import type { SimHintStep } from '@/components/simulation/SimScreens';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Check, ChevronDown, HelpCircle, Loader2, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { postEvent } from '@/lib/api-client';
 
 /** Cuánto espera la pantalla de éxito antes de mostrar el cierre. */
 const SUCCESS_BEAT_MS = 900;
@@ -337,12 +338,12 @@ function SimulationRunner() {
     };
 
     try {
-      const attemptId = attemptIdRef.current ?? await attemptCreateRef.current;
+      let attemptId = attemptIdRef.current ?? await attemptCreateRef.current;
       if (attemptId) {
         await updateSimAttempt(attemptId, payload);
       } else {
         // El alta inicial pudo fallar (o seguir en vuelo): no perdemos el intento.
-        await createSimAttempt({
+        attemptId = await createSimAttempt({
           moduleId: module.id,
           moduleTitle: module.title,
           userId: user?.uid,
@@ -352,6 +353,8 @@ function SimulationRunner() {
           ...payload,
         });
       }
+      // Aprobada: completa el paso de la ruta y entrega insignias (lo verifica el servidor).
+      if (payload.passed && attemptId) postEvent({ type: 'simulation_passed', attemptId });
     } catch (error) {
       console.error('No se pudo guardar el intento de simulación:', error);
     }

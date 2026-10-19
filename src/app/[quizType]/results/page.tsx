@@ -17,8 +17,8 @@ import {
   ProgressRing,
 } from '@/components/GamificationEffects';
 import { cn } from '@/lib/utils';
-import { getQuiz, getQuizAttempt } from '@/lib/firestore-service';
-import { calcGamifiedXp, DEFAULT_GAMIFICATION_CONFIG, getQuizLevel } from '@/lib/quiz-completion';
+import { getAttemptDetails, getQuiz, getQuizAttempt } from '@/lib/firestore-service';
+import { getQuizLevel } from '@/lib/quiz-scoring';
 import type { QuizQuestionResult } from '@/lib/types-scalable';
 
 function getFeedbackMessage(percentage: number): string {
@@ -41,8 +41,8 @@ interface ResultData {
   xp: number;
   showFeedback: string;
   questionResults: QuizQuestionResult[];
-  /** false = el intento no se pudo guardar; solo se muestra. */
-  saved: boolean;
+  badges: string[];
+  aiFeedback?: string;
 }
 
 /**
@@ -80,36 +80,18 @@ function ResultsContent() {
       if (!cancelled) setQuizPassingScore(ps && ps > 0 ? ps : null);
 
       let result: ResultData | null = null;
-      if (attemptId) {
-        const attempt = await getQuizAttempt(attemptId).catch(() => null);
-        if (attempt && attempt.userId === user.uid) {
-          result = {
-            score: attempt.score,
-            totalQuestions: attempt.maxScore,
-            timeTaken: attempt.timeTaken ?? null,
-            xp: attempt.xpEarned ?? 0,
-            showFeedback: attempt.showFeedback ?? 'after_attempt',
-            questionResults: attempt.questionResults ?? [],
-            saved: true,
-          };
-        }
-      } else if (searchParams.get('score') && searchParams.get('totalQuestions')) {
-        // El intento no se pudo guardar: se muestran los datos que dejó el quiz.
-        const score = parseInt(searchParams.get('score')!, 10) || 0;
-        const totalQuestions = parseInt(searchParams.get('totalQuestions')!, 10) || 0;
-        const startTime = parseInt(searchParams.get('startTime') || '', 10);
-        let questionResults: QuizQuestionResult[] = [];
-        try {
-          questionResults = JSON.parse(sessionStorage.getItem(`quiz_results_${productId}`) || '[]');
-        } catch { /* sin datos */ }
+      const attempt = attemptId ? await getQuizAttempt(attemptId).catch(() => null) : null;
+      if (attempt && attempt.userId === user.uid) {
+        const details = await getAttemptDetails(attempt.id).catch(() => null);
         result = {
-          score,
-          totalQuestions,
-          timeTaken: Number.isFinite(startTime) ? Math.round((Date.now() - startTime) / 1000) : null,
-          xp: calcGamifiedXp(quiz?.gamificationConfig ?? DEFAULT_GAMIFICATION_CONFIG, score, totalQuestions, questionResults),
-          showFeedback: searchParams.get('showFeedback') || 'after_attempt',
-          questionResults,
-          saved: false,
+          score: attempt.score,
+          totalQuestions: attempt.maxScore,
+          timeTaken: attempt.timeTaken ?? null,
+          xp: attempt.xpEarned ?? 0,
+          showFeedback: details?.showFeedback ?? attempt.showFeedback ?? 'after_attempt',
+          questionResults: details?.questionResults ?? [],
+          badges: attempt.badgesEarned ?? [],
+          aiFeedback: attempt.aiFeedback,
         };
       }
 
@@ -242,6 +224,17 @@ function ResultsContent() {
               </motion.div>
             </motion.div>
 
+            {data.badges.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.8 }}
+                className="rounded-xl px-5 py-3 border bg-yellow-50 border-yellow-200 text-yellow-800 text-sm font-semibold text-center"
+              >
+                🏅 ¡Ganaste {data.badges.length === 1 ? 'la insignia' : 'las insignias'} {data.badges.map(b => `«${b}»`).join(', ')}!
+              </motion.div>
+            )}
+
             {passed !== null && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -269,7 +262,7 @@ function ResultsContent() {
               className="text-center p-5 border rounded-xl bg-white/60 border-white/80"
             >
               <blockquote className="text-lg italic text-foreground leading-relaxed">
-                "{getFeedbackMessage(percentage)}"
+                "{data.aiFeedback || getFeedbackMessage(percentage)}"
               </blockquote>
             </motion.div>
 

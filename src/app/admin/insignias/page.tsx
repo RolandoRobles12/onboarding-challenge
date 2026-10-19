@@ -10,7 +10,7 @@ import {
   awardBadge,
   getAllUsers,
 } from '@/lib/firestore-service';
-import type { Badge, UserProfile } from '@/lib/types-scalable';
+import type { Badge, BadgeCriteria, UserProfile } from '@/lib/types-scalable';
 import { BadgeDisplay } from '@/components/BadgeDisplay';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -46,6 +46,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { Medal, Plus, Pencil, Trash2, Gift } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { postEvent } from '@/lib/api-client';
+import { BadgeCriteriaFields, criteriaError, describeCriteria, useCriteriaCatalog } from '@/components/admin/BadgeCriteriaFields';
 
 // ─── Sugerencias de emojis (no restrictivas) ──────────────────────────────────
 const EMOJI_SUGGESTIONS = [
@@ -55,7 +57,9 @@ const EMOJI_SUGGESTIONS = [
   '✨','🎊','🎉','🏄','🤿','🛡️','⚔️','🔮','🧩','🎸',
 ];
 
-const DEFAULT_FORM = { name: '', description: '', emoji: '🏅', color: '#0a6b3e', category: '' };
+const DEFAULT_FORM: { name: string; description: string; emoji: string; color: string; category: string; criteria: BadgeCriteria } = {
+  name: '', description: '', emoji: '🏅', color: '#0a6b3e', category: '', criteria: { type: 'manual' },
+};
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function InsigniasPage() {
@@ -71,6 +75,7 @@ export default function InsigniasPage() {
   const [editingBadge, setEditingBadge] = useState<Badge | null>(null);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
+  const catalog = useCriteriaCatalog();
 
   // Delete confirm
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -99,7 +104,7 @@ export default function InsigniasPage() {
   function openDialog(badge?: Badge) {
     if (badge) {
       setEditingBadge(badge);
-      setForm({ name: badge.name, description: badge.description, emoji: badge.emoji, color: badge.color, category: badge.category ?? '' });
+      setForm({ name: badge.name, description: badge.description, emoji: badge.emoji, color: badge.color, category: badge.category ?? '', criteria: badge.criteria ?? { type: 'manual' } });
     } else {
       setEditingBadge(null);
       setForm(DEFAULT_FORM);
@@ -112,6 +117,11 @@ export default function InsigniasPage() {
       toast({ variant: 'destructive', title: 'Campos requeridos', description: 'Completa el nombre y el emoji.' });
       return;
     }
+    const missing = criteriaError(form.criteria);
+    if (missing) {
+      toast({ variant: 'destructive', title: 'Falta completar cómo se gana', description: missing });
+      return;
+    }
     setSaving(true);
     try {
       if (editingBadge) {
@@ -121,6 +131,7 @@ export default function InsigniasPage() {
           emoji: form.emoji.trim(),
           color: form.color,
           category: form.category.trim() || undefined,
+          criteria: form.criteria,
         });
         toast({ title: 'Insignia actualizada' });
       } else {
@@ -131,6 +142,7 @@ export default function InsigniasPage() {
           emoji: form.emoji.trim(),
           color: form.color,
           category: form.category.trim() || undefined,
+          criteria: form.criteria,
           active: true,
         });
         toast({ title: 'Insignia creada' });
@@ -165,6 +177,7 @@ export default function InsigniasPage() {
     setAwarding(true);
     try {
       await awardBadge(awardUserId, badge, { awardedBy: user.uid, reason: awardReason.trim() || undefined });
+      postEvent({ type: 'badge_awarded', userId: awardUserId, badgeId: badge.id });
       toast({ title: 'Insignia otorgada', description: `${badge.emoji} ${badge.name} asignada exitosamente.` });
       setAwardDialogOpen(false);
       setAwardBadgeId('');
@@ -215,8 +228,9 @@ export default function InsigniasPage() {
           <div className="text-sm text-amber-800">
             <p className="font-medium">¿Cómo funcionan las insignias?</p>
             <p className="mt-0.5 text-amber-700">
-              Crea insignias aquí y asígnalas a pasos de tipo <strong>"badge"</strong> en las Rutas del Jaguar Aviva,
-              o bien otórgalas manualmente desde el botón <strong>"Otorgar insignia"</strong>.
+              Elige en cada insignia <strong>cómo se gana</strong>: al aprobar un desafío, terminar un curso, obtener un
+              certificado, aprobar una simulación o por racha del Pulso, y se entrega sola. También puedes otorgarlas
+              manualmente con <strong>"Otorgar insignia"</strong> o pedirlas en pasos de tipo <strong>"badge"</strong> de las Rutas.
               Los participantes las verán en su perfil.
             </p>
           </div>
@@ -244,7 +258,7 @@ export default function InsigniasPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {activeBadges.map(badge => (
-                <BadgeCard key={badge.id} badge={badge} onEdit={() => openDialog(badge)} onDelete={() => setDeleteId(badge.id)} />
+                <BadgeCard key={badge.id} badge={badge} criteriaText={describeCriteria(badge.criteria, catalog.names)} onEdit={() => openDialog(badge)} onDelete={() => setDeleteId(badge.id)} />
               ))}
             </div>
           )}
@@ -261,7 +275,7 @@ export default function InsigniasPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {inactiveBadges.map(badge => (
-                <BadgeCard key={badge.id} badge={badge} locked onEdit={() => openDialog(badge)} onDelete={() => setDeleteId(badge.id)} />
+                <BadgeCard key={badge.id} badge={badge} criteriaText={describeCriteria(badge.criteria, catalog.names)} locked onEdit={() => openDialog(badge)} onDelete={() => setDeleteId(badge.id)} />
               ))}
             </div>
           )}
@@ -355,6 +369,8 @@ export default function InsigniasPage() {
               <Label>Categoría (opcional)</Label>
               <Input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} placeholder="Ej. Ventas, Capacitación, Liderazgo" />
             </div>
+
+            <BadgeCriteriaFields value={form.criteria} onChange={criteria => setForm({ ...form, criteria })} catalog={catalog} />
           </div>
 
           <DialogFooter>
@@ -455,7 +471,7 @@ export default function InsigniasPage() {
 }
 
 // ── Sub-component: Badge card in list ──────────────────────────────────────────
-function BadgeCard({ badge, locked, onEdit, onDelete }: { badge: Badge; locked?: boolean; onEdit: () => void; onDelete: () => void }) {
+function BadgeCard({ badge, locked, criteriaText, onEdit, onDelete }: { badge: Badge; locked?: boolean; criteriaText?: string | null; onEdit: () => void; onDelete: () => void }) {
   return (
     <Card className={locked ? 'opacity-60' : ''}>
       <CardContent className="py-4 flex items-center gap-4">
@@ -477,6 +493,9 @@ function BadgeCard({ badge, locked, onEdit, onDelete }: { badge: Badge; locked?:
           </div>
           {badge.description && (
             <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{badge.description}</p>
+          )}
+          {criteriaText && (
+            <p className="text-[11px] text-primary mt-1">⚡ Automática: {criteriaText}</p>
           )}
         </div>
         <div className="flex gap-1 shrink-0">

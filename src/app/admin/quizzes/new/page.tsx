@@ -23,6 +23,9 @@ import {
 import { cn } from '@/lib/utils';
 import type { Mission, QuizDifficulty, Question, AssessmentConfig, FeedbackMode, QuestionType } from '@/lib/types-scalable';
 import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
+import type { GamificationConfig } from '@/lib/types-scalable';
+import { DEFAULT_GAMIFICATION_CONFIG } from '@/lib/quiz-scoring';
+import { QuizGamificationCard } from '@/components/admin/QuizGamificationCard';
 import { createQuestion } from '@/lib/firestore-service';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
@@ -422,6 +425,8 @@ export default function NewQuizPage() {
 
   const [saving, setSaving] = useState(false);
   const [assessmentConfig, setAssessmentConfig] = useState<AssessmentConfig>({ ...DEFAULT_ASSESSMENT_CONFIG });
+  const [gamification, setGamification] = useState<GamificationConfig>({ ...DEFAULT_GAMIFICATION_CONFIG });
+  const [prerequisites, setPrerequisites] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     productId: '',
     title: '',
@@ -543,17 +548,8 @@ export default function NewQuizPage() {
           version: 1,
           createdBy: profile?.uid || '',
           assessmentConfig,
-          gamificationConfig: {
-            enableLives: true,
-            maxLives: 3,
-            enableBonusLives: true,
-            pointsPerCorrectAnswer: 10,
-            pointsPerTrickyQuestion: 20,
-            penaltyPerError: 0,
-            timeBonus: assessmentConfig.timeLimit > 0,
-            enableBadges: true,
-            badgeIds: ['first_mission', 'perfectionist', 'speedster', 'no_errors'],
-          },
+          gamificationConfig: { ...gamification, timeBonus: gamification.timeBonus && assessmentConfig.timeLimit > 0 },
+          prerequisites,
         } as any,
         profile?.uid || ''
       );
@@ -813,6 +809,17 @@ export default function NewQuizPage() {
           </div>
         </CardContent>
       </Card>
+
+      <QuizGamificationCard
+        quizId={undefined}
+        gamification={gamification}
+        onGamificationChange={setGamification}
+        requirePass={!!assessmentConfig.requirePassToAdvance}
+        onRequirePassChange={v => setAssessmentConfig(prev => ({ ...prev, requirePassToAdvance: v }))}
+        prerequisites={prerequisites}
+        onPrerequisitesChange={setPrerequisites}
+        hasTimeLimit={assessmentConfig.timeLimit > 0}
+      />
 
       {/* Stats bar */}
       <div className="flex gap-6 text-sm">

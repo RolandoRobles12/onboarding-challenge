@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo, Suspense, useRef } from 'react';
 import { useRouter, useSearchParams, useParams } from 'next/navigation';
-import type { Option } from '@/lib/types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FloatingParticles, StreakCounter, MissionCompleteBanner } from '@/components/GamificationEffects';
 import { Button } from '@/components/ui/button';
@@ -25,82 +24,36 @@ import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getQuizzes, getQuiz, getQuestionsByIds, getUserAttempts } from '@/lib/firestore-service';
-import type { AssessmentConfig, GamificationConfig, QuizQuestionResult } from '@/lib/types-scalable';
-import { saveQuizCompletion } from '@/lib/quiz-completion';
 import { toast } from '@/hooks/use-toast';
-import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
-import { useAuth } from '@/context/AuthContext';
+import { authFetch } from '@/lib/api-client';
+import type { AnswerReveal, PlayOption, PlayQuestion, QuizAnswerResult, QuizSessionStart } from '@/lib/play-types';
 
-/** Fisher-Yates shuffle — returns a new shuffled array */
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-// Estructura de runtime que el motor del quiz espera
-interface RuntimeQuestion {
-  id: string;
-  text: string;
-  imageUrl?: string;         // imagen opcional de la pregunta
-  options: Option[];
-  isTricky?: boolean;
-  isMultiSelect?: boolean;
-  isOpenText?: boolean;
-  isFillInBlank?: boolean;   // fill_in_the_blank: tap-to-place word bank
-  validAnswers?: string[];   // conceptos clave para auto-evaluación
-  modelAnswer?: string;      // respuesta modelo (se muestra como feedback)
-  type?: string;             // tipo original de la pregunta
-}
-
-/** Evalúa una respuesta abierta contra los conceptos clave. Retorna 0–1. */
-function evaluateOpenText(answer: string, keywords: string[]): { score: number; found: string[]; missing: string[] } {
-  if (keywords.length === 0) return { score: 1, found: [], missing: [] };
-  const normalized = answer.toLowerCase();
-  const found = keywords.filter(kw => normalized.includes(kw.toLowerCase()));
-  const missing = keywords.filter(kw => !normalized.includes(kw.toLowerCase()));
-  return { score: found.length / keywords.length, found, missing };
-}
-interface RuntimeMission {
-  id: string;
-  title: string;
-  narrative: string;
-  questions: RuntimeQuestion[];
-  maxErrors: number;
-}
-interface RuntimeQuiz {
-  title: string;
-  missions: RuntimeMission[];
-}
+type RuntimeQuiz = Pick<QuizSessionStart, 'title' | 'missions'>;
 
 function QuizComponent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { user, profile } = useAuth();
-  const isAdmin = !!(profile && ['super_admin', 'admin', 'trainer'].includes(profile.rol));
   const audioRef = useRef<HTMLAudioElement>(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Resultado por pregunta (en un ref para no re-renderizar). `missionIndex`
-  // permite descartar los de una misión que se reinicia.
-  const questionResultsRef = useRef<(QuizQuestionResult & { missionIndex: number })[]>([]);
   const finishingRef = useRef(false);
   const [finishing, setFinishing] = useState(false);
-  const [quizGamification, setQuizGamification] = useState<GamificationConfig | null>(null);
+  // Petición en curso que debe terminar antes de mandar la siguiente (p. ej. reiniciar misión).
+  const pendingRef = useRef<Promise<unknown>>(Promise.resolve());
+  const [checking, setChecking] = useState(false);
 
-  // Quiz cargado desde Firestore
+  // Sesión del desafío: las preguntas llegan sin la respuesta y cada una se
+  // califica en el servidor (/api/quiz/answer).
+  const [session, setSession] = useState<QuizSessionStart | null>(null);
   const [quiz, setQuiz] = useState<RuntimeQuiz | null>(null);
-  const [quizId, setQuizId] = useState('');
+  const [reveals, setReveals] = useState<Record<string, AnswerReveal>>({});
   const [loadingQuiz, setLoadingQuiz] = useState(true);
   const [quizNotAvailable, setQuizNotAvailable] = useState(false);
   const [attemptsExhausted, setAttemptsExhausted] = useState<{ count: number; limit: number } | null>(null);
-  const [assessmentCfg, setAssessmentCfg] = useState<AssessmentConfig>(DEFAULT_ASSESSMENT_CONFIG);
+  const [missingPrerequisites, setMissingPrerequisites] = useState<string[] | null>(null);
+  const timeLimit = session?.timeLimit ?? 0;
   // Countdown timer (seconds remaining, only when timeLimit > 0)
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [timeExpired, setTimeExpired] = useState(false);
@@ -109,13 +62,13 @@ function QuizComponent() {
     currentMissionIndex: 0,
     currentQuestionIndex: 0,
     score: 0,
-    selectedOptions: [] as Option[],
+    selectedOptions: [] as PlayOption[],
     isAnswered: false,
     showMissionIntro: true,
     missionFailed: false,
     missionScore: 0,
     showMissionFailedScreen: false,
-    initialSelection: null as { option: Option, isCorrect: boolean } | null,
+    initialSelection: null as { option: PlayOption } | null,
     isConfirming: false,
     specialFeedback: null as string | null,
     bonusLives: 0,
@@ -137,7 +90,7 @@ function QuizComponent() {
   const avatarKey = searchParams.get('avatar');
   const Avatar = getAvatarComponent(avatarKey);
 
-  // Cargar quiz desde Firestore
+  // Abre la sesión del desafío
   useEffect(() => {
     if (!quizType) {
       router.push('/');
@@ -146,92 +99,21 @@ function QuizComponent() {
 
     async function loadQuiz() {
       try {
-        // Allow caller to specify a particular quiz via ?quizId=...
-        const requestedQuizId = searchParams.get('quizId');
-        let q;
-        if (requestedQuizId) {
-          // Fetch by ID directly — journey-assigned quizzes can load without
-          // matching quizType/productId, but must still be published+active
-          // for anyone who isn't an admin/trainer previewing it.
-          q = await getQuiz(requestedQuizId);
-          if (!q || (!isAdmin && (!q.published || !q.active))) {
-            setQuizNotAvailable(true);
-            setLoadingQuiz(false);
-            return;
-          }
-        } else {
-          const firestoreQuizzes = await getQuizzes(quizType, true);
-          if (!firestoreQuizzes.length) {
-            setLoadingQuiz(false);
-            return;
-          }
-          q = firestoreQuizzes[0];
+        const res = await authFetch('/api/quiz/start', {
+          method: 'POST',
+          body: JSON.stringify({ quizId: searchParams.get('quizId') || undefined, productId: quizType, practice: searchParams.get('practice') === '1' }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (data.code === 'exhausted') setAttemptsExhausted({ count: data.count, limit: data.limit });
+          else if (data.code === 'prerequisites') setMissingPrerequisites(data.missing ?? []);
+          else if (data.code === 'not_available') setQuizNotAvailable(true);
+          return;
         }
-        setQuizId(q.id);
-        setQuizGamification(q.gamificationConfig ?? null);
-
-        // Read assessment config (defaults if not set on the quiz doc)
-        const cfg: AssessmentConfig = { ...DEFAULT_ASSESSMENT_CONFIG, ...(q as any).assessmentConfig };
-        setAssessmentCfg(cfg);
-
-        // maxAttempts / allowRetry: cuenta los intentos completados previos del
-        // usuario para este quiz y bloquea si ya alcanzó el límite configurado.
-        if (user && !isAdmin) {
-          const previousAttempts = await getUserAttempts(user.uid, q.id).catch(() => []);
-          const count = previousAttempts.length;
-          const limit = !cfg.allowRetry ? 1 : cfg.maxAttempts > 0 ? cfg.maxAttempts : 0;
-          if (limit > 0 && count >= limit) {
-            setAttemptsExhausted({ count, limit });
-            setLoadingQuiz(false);
-            return;
-          }
-        }
-
-        // Cargar todas las preguntas de todas las misiones
-        const allIds = q.missions.flatMap((m) => m.questionIds);
-        const allQuestions = await getQuestionsByIds(allIds);
-        const qMap = Object.fromEntries(allQuestions.map((q) => [q.id, q]));
-
-        const buildOptions = (rawOptions: { text: string; isCorrect: boolean; order: number }[]) => {
-          const sorted = rawOptions.sort((a, b) => a.order - b.order).map(o => ({ text: o.text, isCorrect: o.isCorrect }));
-          return cfg.randomizeOptions ? shuffle(sorted) : sorted;
-        };
-
-        let runtimeMissions: RuntimeMission[] = q.missions
-          .sort((a, b) => a.order - b.order)
-          .map((mission) => {
-            let questions = mission.questionIds
-              .map((id) => qMap[id])
-              .filter(Boolean)
-              .map((q) => ({
-                id: q.id,
-                text: q.text,
-                imageUrl: q.imageUrl,
-                options: q.type === 'open_text' ? [] : buildOptions(q.options),
-                type: q.type,
-                isTricky: q.isTricky || q.type === 'tricky',
-                isMultiSelect: q.type === 'multiple_choice',
-                isOpenText: q.type === 'open_text',
-                isFillInBlank: q.type === 'fill_in_the_blank',
-                validAnswers: q.validAnswers || [],
-                modelAnswer: q.modelAnswer,
-              }));
-            if (cfg.randomizeQuestions) questions = shuffle(questions);
-            return {
-              id: mission.id,
-              title: mission.title,
-              narrative: mission.narrative,
-              questions,
-              maxErrors: mission.maxErrors && mission.maxErrors > 0 ? mission.maxErrors : 1,
-            };
-          });
-
-        setQuiz({ title: q.title, missions: runtimeMissions });
-
-        // Initialize countdown if time limit is set
-        if (cfg.timeLimit > 0) {
-          setTimeRemaining(cfg.timeLimit);
-        }
+        const started = data as QuizSessionStart;
+        setSession(started);
+        setQuiz({ title: started.title, missions: started.missions });
+        if (started.timeLimit > 0) setTimeRemaining(started.timeLimit);
       } catch (error) {
         console.error('Error loading quiz:', error);
       } finally {
@@ -241,7 +123,7 @@ function QuizComponent() {
 
     loadQuiz();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quizType, router, user]);
+  }, [quizType]);
 
   useEffect(() => {
     if (!startTime || gameState.showMissionFailedScreen || gameState.showMissionIntro) return;
@@ -250,8 +132,8 @@ function QuizComponent() {
       setElapsedTime(elapsed);
 
       // Countdown timer
-      if (assessmentCfg.timeLimit > 0) {
-        const remaining = assessmentCfg.timeLimit - elapsed;
+      if (timeLimit > 0) {
+        const remaining = timeLimit - elapsed;
         if (remaining <= 0) {
           setTimeRemaining(0);
           setTimeExpired(true);
@@ -262,7 +144,7 @@ function QuizComponent() {
       }
     }, 1000);
     return () => clearInterval(timer);
-  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro, assessmentCfg.timeLimit]);
+  }, [startTime, gameState.showMissionFailedScreen, gameState.showMissionIntro, timeLimit]);
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -290,13 +172,7 @@ function QuizComponent() {
   const currentMission = quiz?.missions[gameState.currentMissionIndex];
   const currentQuestion = currentMission?.questions[gameState.currentQuestionIndex];
 
-  useEffect(() => {
-    const bonusLivesParam = searchParams.get('bonusLives');
-    setGameState(prev => ({
-      ...prev,
-      bonusLives: bonusLivesParam ? parseInt(bonusLivesParam, 10) : 0,
-    }));
-  }, [searchParams]);
+  const currentReveal = currentQuestion ? reveals[currentQuestion.id] : undefined;
 
   const toggleMusic = () => {
     if (isMusicPlaying) {
@@ -307,55 +183,58 @@ function QuizComponent() {
     setIsMusicPlaying(!isMusicPlaying);
   };
 
-  const processAnswer = (selected: Option[]) => {
-    let isCorrect;
-    if (currentQuestion?.isMultiSelect) {
-      const correctOptions = currentQuestion.options.filter(o => o.isCorrect);
-      const selectedTexts = new Set(selected.map(o => o.text));
-      const correctTexts = new Set(correctOptions.map(o => o.text));
-      isCorrect = selected.length === correctOptions.length && [...selectedTexts].every(text => correctTexts.has(text));
-    } else {
-      isCorrect = selected.length > 0 && selected[0].isCorrect;
+  /** Manda la respuesta al servidor; null si no se pudo calificar. */
+  const submitAnswer = async (payload: { optionIds?: string[]; text?: string }): Promise<QuizAnswerResult | null> => {
+    if (!session || !currentQuestion) return null;
+    setChecking(true);
+    try {
+      await pendingRef.current;
+      const res = await authFetch('/api/quiz/answer', {
+        method: 'POST',
+        body: JSON.stringify({ sessionId: session.sessionId, questionId: currentQuestion.id, ...payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.code === 'time_up') setTimeExpired(true);
+        else toast({ variant: 'destructive', title: 'No se pudo calificar', description: data.error || 'Revisa tu conexión e inténtalo de nuevo.' });
+        return null;
+      }
+      const result = data as QuizAnswerResult;
+      if (result.reveal) setReveals(prev => ({ ...prev, [currentQuestion.id]: result.reveal! }));
+      return result;
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo calificar', description: 'Revisa tu conexión e inténtalo de nuevo.' });
+      return null;
+    } finally {
+      setChecking(false);
     }
+  };
 
+  /** Aplica el resultado de una respuesta al estado del juego (vidas, misión, racha). */
+  const applyResult = (isCorrect: boolean, withTrickyFeedback: boolean) => {
     let feedback = null;
     let bonusLivesChange = 0;
-
-    if (gameState.initialSelection) {
-      const initialIsCorrect = gameState.initialSelection.isCorrect;
-      if (initialIsCorrect && isCorrect) {
-        feedback = "¡Correcto! ¡Bien hecho por confiar en tu instinto! Has ganado una vida extra para la siguiente misión.";
-        bonusLivesChange = 1;
-      } else if (initialIsCorrect && !isCorrect) {
-        feedback = "¡Oh no! Tu primera respuesta era la correcta. ¡Confía más en tu conocimiento de Aviva!";
-      } else if (!initialIsCorrect && isCorrect) {
-        feedback = "¡Excelente corrección! Es de sabios cambiar de opinión. ¡Bien hecho!";
+    if (withTrickyFeedback) {
+      if (isCorrect) {
+        const canEarn = !!session?.enableBonusLives && gameState.bonusLives < (session?.maxBonusLives ?? 3);
+        feedback = canEarn
+          ? '¡Correcto! ¡Bien hecho por confiar en tu instinto! Has ganado una vida extra para la siguiente misión.'
+          : '¡Correcto! ¡Bien hecho por confiar en tu instinto!';
+        bonusLivesChange = canEarn ? 1 : 0;
+      } else {
+        feedback = '¡Oh no! Era una pregunta clave. ¡Repasa este tema para la próxima!';
       }
     }
 
     let newMissionFailed = false;
     let newErrorsInMission = gameState.errorsInMission;
-
     if (!isCorrect) {
       newErrorsInMission = gameState.errorsInMission + 1;
-      if (newErrorsInMission > (currentMission?.maxErrors ?? 1)) {
+      // Sin "vidas" en el quiz, las misiones no se pierden por errores.
+      if (session?.enableLives !== false && newErrorsInMission > (currentMission?.maxErrors ?? 1)) {
         newMissionFailed = true;
       }
     }
-
-    // Record per-question result
-    const correctAnswerText = currentQuestion?.options.find(o => o.isCorrect)?.text
-      ?? currentQuestion?.validAnswers?.[0] ?? '';
-    const userAnswerText = selected.map(o => o.text).join(', ');
-    questionResultsRef.current.push({
-      questionId: currentQuestion?.id,
-      missionIndex: gameState.currentMissionIndex,
-      text: currentQuestion?.text ?? '',
-      isCorrect: !!isCorrect,
-      userAnswer: userAnswerText,
-      correctAnswer: correctAnswerText,
-      isTricky: !!currentQuestion?.isTricky,
-    });
 
     setParticleType(isCorrect ? 'correct' : 'wrong');
     setShowParticles(true);
@@ -375,25 +254,28 @@ function QuizComponent() {
     }));
   };
 
-  const handleSingleOptionSelect = (option: Option) => {
-    if (gameState.isAnswered || gameState.isConfirming) return;
+  const processAnswer = async (selected: PlayOption[]) => {
+    if (checking || gameState.isAnswered) return;
+    const result = await submitAnswer({ optionIds: selected.map(o => o.id) });
+    if (!result) return;
+    applyResult(result.isCorrect, !!gameState.initialSelection);
+  };
+
+  const handleSingleOptionSelect = (option: PlayOption) => {
+    if (gameState.isAnswered || gameState.isConfirming || checking) return;
     setGameState(prev => ({ ...prev, selectedOptions: [option] }));
     if (currentQuestion?.isTricky && !gameState.initialSelection) {
-      setGameState(prev => ({
-        ...prev,
-        isConfirming: true,
-        initialSelection: { option, isCorrect: option.isCorrect }
-      }));
+      setGameState(prev => ({ ...prev, isConfirming: true, initialSelection: { option } }));
     } else {
       processAnswer([option]);
     }
   };
 
-  const handleMultiOptionToggle = (option: Option) => {
-    if (gameState.isAnswered) return;
+  const handleMultiOptionToggle = (option: PlayOption) => {
+    if (gameState.isAnswered || checking) return;
     setGameState(prev => {
-      const newSelection = prev.selectedOptions.some(o => o.text === option.text)
-        ? prev.selectedOptions.filter(o => o.text !== option.text)
+      const newSelection = prev.selectedOptions.some(o => o.id === option.id)
+        ? prev.selectedOptions.filter(o => o.id !== option.id)
         : [...prev.selectedOptions, option];
       return { ...prev, selectedOptions: newSelection };
     });
@@ -413,60 +295,36 @@ function QuizComponent() {
   };
 
   /**
-   * Guarda el intento una sola vez y abre los resultados con su id. Si no se
-   * pudo guardar (sin conexión), los resultados se muestran sin registrarse.
+   * Cierra la sesión: el servidor calcula el puntaje con las respuestas que
+   * calificó y registra el intento una sola vez. Luego abre los resultados.
    */
   const finishQuiz = async ({ bonusLives, timeExpired: expired }: { bonusLives: number; timeExpired: boolean }) => {
-    if (finishingRef.current) return;
+    if (finishingRef.current || !session) return;
     finishingRef.current = true;
     setFinishing(true);
-
-    const results = questionResultsRef.current.map(({ missionIndex: _m, ...r }) => r);
-    const params = new URLSearchParams();
-    for (const key of ['avatar', 'returnTo']) {
-      const value = searchParams.get(key);
-      if (value) params.set(key, value);
-    }
-    params.set('quizTitle', quiz?.title || '');
-    if (quizId) params.set('quizId', quizId);
-
-    let attemptId: string | null = null;
-    if (user && profile && quizId) {
-      try {
-        attemptId = await saveQuizCompletion({
-          userId: user.uid,
-          displayName: user.displayName,
-          profile,
-          quizId,
-          productId: quizType,
-          gamification: quizGamification,
-          showFeedback: assessmentCfg.showFeedback,
-          score: gameState.score,
-          totalQuestions,
-          bonusLives,
-          startedAt: startTime,
-          timeExpired: expired,
-          questionResults: results,
-        });
-      } catch (err) {
-        console.error('No se pudo guardar el intento:', err);
-        toast({ variant: 'destructive', title: 'No se guardó tu intento', description: 'Revisa tu conexión. Tus resultados se muestran, pero no quedaron registrados.' });
+    try {
+      await pendingRef.current;
+      const res = await authFetch('/api/quiz/finish', {
+        method: 'POST',
+        body: JSON.stringify({ sessionId: session.sessionId, bonusLives, timeExpired: expired }),
+      });
+      const data = await res.json() as { attemptId?: string; error?: string };
+      if (!res.ok || !data.attemptId) throw new Error(data.error || `Error ${res.status}`);
+      const params = new URLSearchParams();
+      for (const key of ['avatar', 'returnTo']) {
+        const value = searchParams.get(key);
+        if (value) params.set(key, value);
       }
+      params.set('quizTitle', session.title);
+      params.set('quizId', session.quizId);
+      params.set('attemptId', data.attemptId);
+      router.replace(`/${quizType}/results?${params.toString()}`);
+    } catch (err) {
+      console.error('No se pudo registrar el intento:', err);
+      toast({ variant: 'destructive', title: 'No se guardó tu intento', description: 'Revisa tu conexión y vuelve a tocar el botón para intentarlo.' });
+      finishingRef.current = false;
+      setFinishing(false);
     }
-
-    if (attemptId) {
-      params.set('attemptId', attemptId);
-    } else {
-      // Solo para mostrar: la pantalla de resultados no guarda nada desde la URL.
-      params.set('score', gameState.score.toString());
-      params.set('totalQuestions', totalQuestions.toString());
-      if (startTime) params.set('startTime', startTime.toString());
-      params.set('showFeedback', assessmentCfg.showFeedback);
-      try {
-        sessionStorage.setItem(`quiz_results_${quizType}`, JSON.stringify(results));
-      } catch { /* sin espacio */ }
-    }
-    router.replace(`/${quizType}/results?${params.toString()}`);
   };
 
   const handleNext = () => {
@@ -522,56 +380,39 @@ function QuizComponent() {
     }
   };
 
-  const handleOpenTextSubmit = () => {
-    if (!currentQuestion?.isOpenText || gameState.isAnswered) return;
-    const result = evaluateOpenText(openTextAnswer, currentQuestion.validAnswers || []);
-    setOpenTextResult(result);
-    // Correct if score ≥ 70%, or if no keywords were defined (score = 1)
-    const isCorrect = result.score >= 0.7;
-
-    // Record open-text result
-    questionResultsRef.current.push({
-      questionId: currentQuestion?.id,
-      missionIndex: gameState.currentMissionIndex,
-      text: currentQuestion?.text ?? '',
-      isCorrect,
-      userAnswer: openTextAnswer,
-      correctAnswer: currentQuestion?.validAnswers?.join(', ') ?? '',
-      isTricky: !!currentQuestion?.isTricky,
-    });
-
-    setParticleType(isCorrect ? 'correct' : 'wrong');
-    setShowParticles(true);
-    setTimeout(() => setShowParticles(false), 1500);
-
-    let newMissionFailed = false;
-    let newErrorsInMission = gameState.errorsInMission;
-    if (!isCorrect) {
-      newErrorsInMission = gameState.errorsInMission + 1;
-      if (newErrorsInMission > (currentMission?.maxErrors ?? 1)) newMissionFailed = true;
-    }
-    setGameState(prev => ({
-      ...prev,
-      isAnswered: true,
-      score: isCorrect ? prev.score + 1 : prev.score,
-      missionScore: isCorrect ? prev.missionScore + 1 : prev.missionScore,
-      missionFailed: newMissionFailed,
-      errorsInMission: newErrorsInMission,
-      lastAnswerWasCorrect: isCorrect,
-      streak: isCorrect ? prev.streak + 1 : 0,
-    }));
+  const handleOpenTextSubmit = async () => {
+    if (!currentQuestion?.isOpenText || gameState.isAnswered || checking) return;
+    const result = await submitAnswer({ text: openTextAnswer });
+    if (!result) return;
+    setOpenTextResult(result.reveal?.openText ?? null);
+    applyResult(result.isCorrect, false);
   };
 
   const startMission = () => {
     if (gameState.currentMissionIndex === 0 && !startTime) {
       setStartTime(Date.now());
+      // El tiempo límite del servidor empieza junto con el cronómetro.
+      if (session) {
+        pendingRef.current = authFetch('/api/quiz/answer', {
+          method: 'POST',
+          body: JSON.stringify({ sessionId: session.sessionId, begin: true }),
+        }).catch(() => {});
+      }
     }
     setGameState(prev => ({ ...prev, showMissionIntro: false, lifeUsedMessage: null }));
   };
 
   const restartMission = () => {
     // Las respuestas de la misión fallida no cuentan: se vuelve a jugar.
-    questionResultsRef.current = questionResultsRef.current.filter(r => r.missionIndex !== gameState.currentMissionIndex);
+    if (session) {
+      const missionIndex = gameState.currentMissionIndex;
+      pendingRef.current = pendingRef.current.then(() => authFetch('/api/quiz/answer', {
+        method: 'POST',
+        body: JSON.stringify({ sessionId: session.sessionId, restartMission: missionIndex }),
+      })).catch(() => {});
+      const missionIds = new Set(currentMission?.questions.map(q => q.id) ?? []);
+      setReveals(prev => Object.fromEntries(Object.entries(prev).filter(([id]) => !missionIds.has(id))));
+    }
     setGameState(prev => ({
       ...prev,
       score: prev.score - prev.missionScore,
@@ -618,6 +459,22 @@ function QuizComponent() {
           <CardTitle className="text-destructive">Evaluación no disponible</CardTitle>
           <CardDescription>
             Esta evaluación aún no está lista. Por favor contacta a tu Hub Manager o capacitador para que la habilite.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" onClick={() => router.push('/')}>Volver al inicio</Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (missingPrerequisites) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-destructive">Primero completa los desafíos previos</CardTitle>
+          <CardDescription>
+            Para abrir este desafío necesitas aprobar: {missingPrerequisites.join(', ') || 'los desafíos previos'}.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -720,16 +577,11 @@ function QuizComponent() {
 
   // ── Fill-in-the-blank: tap-to-place word bank ──────────────────────────────
   const renderFillInBlank = () => {
-    // Build word bank: prefer options (new format with isCorrect flags),
-    // fall back to validAnswers for legacy questions that have no options stored.
-    const wordBank: { text: string; isCorrect: boolean }[] =
-      currentQuestion.options.length > 0
-        ? currentQuestion.options
-        : (currentQuestion.validAnswers || []).map((v, i) => ({ text: v, isCorrect: i === 0 }));
-    const correctWord = wordBank.find(o => o.isCorrect)?.text ?? (currentQuestion.validAnswers?.[0] ?? '');
-    const words = [...wordBank].sort(() => Math.random() - 0.5);
+    // El banco de palabras llega ya mezclado y sin marcar la correcta.
+    const words = currentQuestion.options;
+    const correctWord = currentReveal?.correctAnswerText ?? '';
     const parts = currentQuestion.text.split(/_{2,}/);
-    const isCorrect = fillAnswer === correctWord;
+    const isCorrect = gameState.lastAnswerWasCorrect;
 
     return (
       <div className="space-y-5">
@@ -788,7 +640,8 @@ function QuizComponent() {
         {/* Verify button */}
         {!gameState.isAnswered && fillAnswer && (
           <Button
-            onClick={() => processAnswer(wordBank.filter(o => o.text === fillAnswer))}
+            onClick={() => processAnswer(words.filter(o => o.text === fillAnswer).slice(0, 1))}
+            disabled={checking}
             className="w-full text-primary-foreground bg-primary hover:bg-primary/90"
             size="lg"
           >
@@ -797,7 +650,7 @@ function QuizComponent() {
         )}
 
         {/* Post-answer: show correct word if wrong */}
-        {gameState.isAnswered && !isCorrect && (
+        {gameState.isAnswered && !isCorrect && correctWord && (
           <div className="text-sm text-muted-foreground bg-muted rounded-lg px-4 py-3">
             La respuesta correcta era: <strong className="text-foreground">{correctWord}</strong>
           </div>
@@ -808,8 +661,12 @@ function QuizComponent() {
 
   const renderOptions = () => {
     return currentQuestion.options.map((option, index) => {
-      const isSelected = gameState.selectedOptions.some(o => o.text === option.text);
-      const isCorrect = option.isCorrect;
+      const isSelected = gameState.selectedOptions.some(o => o.id === option.id);
+      // Sin la respuesta revelada (el quiz la muestra al final), solo se marca
+      // si lo que eligió fue correcto o no.
+      const isCorrect = currentReveal
+        ? currentReveal.correctOptionIds.includes(option.id)
+        : isSelected && gameState.lastAnswerWasCorrect;
       let optionStyle = "border-primary/30 text-primary bg-card hover:bg-primary/10";
       let Icon = null;
       let radioOrCheck = <div className="w-6 h-6 rounded-full border-2 border-primary/50 shrink-0"></div>;
@@ -890,7 +747,7 @@ function QuizComponent() {
           <Button variant="outline" size="icon" onClick={toggleMusic} className="rounded-full shadow-md border" aria-label={isMusicPlaying ? "Pausar música" : "Reproducir música"}>
             {isMusicPlaying ? <VolumeX className="h-5 w-5" /> : <Music className="h-5 w-5" />}
           </Button>
-          {assessmentCfg.timeLimit > 0 ? (
+          {timeLimit > 0 ? (
             // Countdown timer
             <div className={cn(
               "flex items-center gap-2 p-2 px-3 rounded-full shadow-md border font-mono text-sm font-bold",
@@ -978,10 +835,10 @@ function QuizComponent() {
                           </span>
                         ))}
                       </div>
-                      {gameState.isAnswered && currentQuestion.modelAnswer && (
+                      {gameState.isAnswered && currentReveal?.modelAnswer && (
                         <div className="mt-2 rounded-lg bg-muted p-3 text-sm">
                           <p className="font-medium text-xs text-muted-foreground mb-1">Respuesta modelo:</p>
-                          <p className="text-foreground leading-relaxed">{currentQuestion.modelAnswer}</p>
+                          <p className="text-foreground leading-relaxed">{currentReveal.modelAnswer}</p>
                         </div>
                       )}
                     </div>
@@ -995,7 +852,7 @@ function QuizComponent() {
             {/* Verify buttons */}
             {currentQuestion.isOpenText && !gameState.isAnswered && (
               <CardFooter>
-                <Button onClick={handleOpenTextSubmit} disabled={!openTextAnswer.trim()} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
+                <Button onClick={handleOpenTextSubmit} disabled={!openTextAnswer.trim() || checking} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
                   <Check className="mr-2" />
                   Verificar respuesta
                 </Button>
@@ -1004,7 +861,7 @@ function QuizComponent() {
 
             {currentQuestion.isMultiSelect && !gameState.isAnswered && (
               <CardFooter>
-                <Button onClick={handleVerifyMultiSelectAnswer} disabled={gameState.selectedOptions.length === 0} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
+                <Button onClick={handleVerifyMultiSelectAnswer} disabled={gameState.selectedOptions.length === 0 || checking} className="w-full text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
                   <Check className="mr-2" />
                   Verificar respuesta
                 </Button>
@@ -1026,9 +883,14 @@ function QuizComponent() {
                     {gameState.specialFeedback ||
                       (gameState.lastAnswerWasCorrect
                         ? '¡Excelente! Sigamos adelante.'
+                        : session?.enableLives === false
+                        ? 'Sigue adelante: en este desafío los errores no reinician la misión.'
                         : gameState.missionFailed
-                        ? 'Este fue tu segundo error en la misión. Deberás reiniciar para continuar.'
-                        : 'Cuidado, este es tu primer error. ¡Aún te queda una oportunidad en esta misión!')}
+                        ? 'Llegaste al límite de errores de la misión. Deberás reiniciarla para continuar.'
+                        : 'Cuidado, cuenta como error. ¡Aún puedes completar esta misión!')}
+                    {currentReveal?.explanation && (
+                      <span className="block mt-2 text-foreground/80">{currentReveal.explanation}</span>
+                    )}
                   </AlertDescription>
                 </Alert>
                 <Button onClick={handleNext} disabled={finishing} className="w-full rounded-lg text-primary-foreground bg-primary hover:bg-primary/90" size="lg">
