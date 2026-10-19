@@ -8,7 +8,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getOrgTokenValue } from './pulse-store';
 
-const MODEL = 'claude-opus-5-5';
+// Haiku: el modelo más económico; basta para un mensaje de dos oraciones.
+const MODEL = 'claude-haiku-5-5';
 // El resultado del desafío espera este mensaje: si tarda más, se omite.
 const TIMEOUT_MS = 8000;
 
@@ -46,13 +47,10 @@ export async function generateQuizFeedback(input: {
 
   try {
     const client = new Anthropic({ apiKey, timeout: TIMEOUT_MS, maxRetries: 0 });
-    const response = await client.beta.messages.create({
+    const response = await client.messages.create({
       model: MODEL,
       max_tokens: 2000,
       output_config: { effort: 'low' },
-      // Si el modelo declina, la API reintenta sola con el modelo de respaldo.
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: details }],
     });
