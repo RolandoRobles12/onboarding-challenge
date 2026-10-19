@@ -593,7 +593,7 @@ function ProductList() {
 - [Next.js 15](https://nextjs.org/docs)
 - [Radix UI](https://www.radix-ui.com/)
 - [Tailwind CSS](https://tailwindcss.com/)
-- [Google Genkit](https://firebase.google.com/docs/genkit)
+- [Claude API (Anthropic)](https://docs.claude.com/)
 
 ### Archivos Clave
 
@@ -663,7 +663,7 @@ Para agregar nuevas features o mejorar las existentes:
 ### Costos
 
 - **Firestore**: Pay-as-you-go, optimizar queries
-- **Google Gemini**: Costo por llamada de IA, hacer opcional
+- **Claude (Anthropic)**: Costo por llamada de IA, hacer opcional
 - **Firebase Auth**: Gratis hasta 10k usuarios/mes
 - **Firebase Hosting**: Gratis nivel básico
 

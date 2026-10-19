@@ -41,6 +41,11 @@ const KNOWN_TOKENS: { key: string; label: string; description: string }[] = [
     label: 'Slack Bot Token',
     description: 'Token del bot de Slack (xoxb-...). Se usa para enviar notificaciones del Pulso de Conocimiento.',
   },
+  {
+    key: 'anthropic_api_key',
+    label: 'API key de Claude (Anthropic)',
+    description: 'Llave de la API de Claude (sk-ant-...). Genera el mensaje motivacional con IA en los resultados de los desafíos.',
+  },
 ];
 
 function maskToken(value: string): string {
@@ -294,6 +299,7 @@ export default function TokensPage() {
           <p className="pt-1 font-medium">Variables de entorno equivalentes:</p>
           <ul className="list-disc pl-4 space-y-0.5">
             <li><code className="bg-muted px-1 rounded">slack_bot_token</code> → <code className="bg-muted px-1 rounded">SLACK_BOT_TOKEN</code></li>
+            <li><code className="bg-muted px-1 rounded">anthropic_api_key</code> → <code className="bg-muted px-1 rounded">ANTHROPIC_API_KEY</code></li>
           </ul>
         </CardContent>
       </Card>

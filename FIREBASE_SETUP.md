@@ -46,7 +46,7 @@ firebase deploy --only firestore:rules,firestore:indexes,storage
 | `PULSE_CRON_SECRET` | Secreto alterno para `/api/pulse/cron` (la función programada genera uno solo). |
 | `SLACK_BOT_TOKEN` | Respaldo del token del bot si no está en Admin → Tokens. |
 | `APP_URL` | URL pública de la app para los enlaces de los avisos, si no está en la configuración de Slack. |
-| `GEMINI_API_KEY` (o `GOOGLE_API_KEY`) | Activa la retroalimentación con IA en los resultados de los desafíos. Sin ella, los resultados se muestran sin ese bloque. |
+| `ANTHROPIC_API_KEY` | Respaldo de la API key de Claude si no está en Admin → Tokens (`anthropic_api_key`). Activa el mensaje con IA en los resultados de los desafíos; sin llave, se muestran las frases fijas. |
 
 ## 🔔 Avisos (Slack y push)
 
