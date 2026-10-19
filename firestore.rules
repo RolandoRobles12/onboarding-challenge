@@ -206,8 +206,10 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
+    // id nuevo = "<uid>_<courseId>" (se puede leer aunque aún no exista).
     match /enrollments/{enrollmentId} {
-      allow read: if isStaff() || (isMember() && ownsExisting());
+      allow get: if isStaff() || (isMember() && (ownsId(enrollmentId) || ownsExisting()));
+      allow list: if isStaff() || (isMember() && ownsExisting());
       allow create: if isStaff() || (isMember() && createsForSelf());
       allow update: if isStaff() || (isMember()
         && keepsOwner()

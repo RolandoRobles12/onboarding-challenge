@@ -17,7 +17,8 @@ export async function authFetch(input: string, init: RequestInit = {}): Promise<
  * mande avisos y entregue insignias. No bloquea ni falla la acción del usuario.
  */
 export function postEvent(event: Record<string, unknown> & { type: string }): Promise<void> {
-  return authFetch('/api/events', { method: 'POST', body: JSON.stringify(event) })
+  // keepalive: el aviso no se pierde si el usuario sale de la página justo después.
+  return authFetch('/api/events', { method: 'POST', body: JSON.stringify(event), keepalive: true })
     .then(() => undefined)
     .catch(err => console.error('[events]', event.type, err));
 }

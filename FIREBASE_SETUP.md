@@ -32,6 +32,11 @@ firebase deploy --only firestore:rules,firestore:indexes,storage
 - La cuenta de servicio del backend de App Hosting necesita acceso a Firestore
   (rol **Cloud Datastore User** o **Firebase Admin**). Si las rutas de `/api`
   responden "Error interno" con `PERMISSION_DENIED` en los logs, falta ese rol.
+  También necesita leer Storage (rol **Storage Object Viewer**): los paquetes
+  SCORM se sirven desde la misma app por `/scorm/...`.
+- Orden recomendado: primero la app (App Hosting) y después reglas e índices.
+  Las reglas nuevas ya no dejan que el navegador escriba intentos, puntajes ni
+  el Pulso; si se despliegan antes que la app, la versión vieja deja de guardar.
 
 ### Variables de entorno (opcionales)
 
@@ -40,6 +45,26 @@ firebase deploy --only firestore:rules,firestore:indexes,storage
 | `SUPER_ADMIN_EMAILS` | Correos, separados por comas, que reciben `super_admin` en su primer inicio de sesión si no están en la whitelist. Por defecto, los que ya tenía la app. |
 | `PULSE_CRON_SECRET` | Secreto alterno para `/api/pulse/cron` (la función programada genera uno solo). |
 | `SLACK_BOT_TOKEN` | Respaldo del token del bot si no está en Admin → Tokens. |
+| `APP_URL` | URL pública de la app para los enlaces de los avisos, si no está en la configuración de Slack. |
+| `GEMINI_API_KEY` (o `GOOGLE_API_KEY`) | Activa la retroalimentación con IA en los resultados de los desafíos. Sin ella, los resultados se muestran sin ese bloque. |
+
+## 🔔 Avisos (Slack y push)
+
+Los avisos salen por **mensaje directo de Slack** y **notificación push** (no
+hay correo). Se configuran en **Admin → Notificaciones**: cada regla se puede
+apagar, elegir canal y ajustar los días de anticipación; el botón "Enviarme una
+prueba" manda un aviso al admin para revisar ambos canales.
+
+- **Slack**: usa el token del bot (Admin → Tokens) y el **Slack ID** del perfil
+  de cada persona. Sin Slack ID, ese aviso solo llega por push. El bot necesita
+  el permiso `chat:write`.
+- **Push**: cada embajador lo activa desde su perfil o el aviso de la pantalla
+  de inicio. Las llaves VAPID se generan solas la primera vez y se guardan en
+  `server_secrets`. En iPhone, el push solo funciona con la app instalada en la
+  pantalla de inicio (iOS 16.4 o posterior).
+- Los avisos de plazos, re-certificación e inactividad los corre la función
+  programada del Pulso una vez al día. Cada aviso se manda una sola vez
+  (`notification_log`).
 
 ## 👥 Invitar usuarios
 

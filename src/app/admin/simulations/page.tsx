@@ -31,7 +31,7 @@ import { toast } from '@/hooks/use-toast';
 import { useConfirm } from '@/components/ConfirmDialog';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import {
-  getAllSimModules, createSimModule, updateSimModule, deleteSimModule, getSimAttempts,
+  getAllSimModules, createSimModule, updateSimModule, deleteSimModule, getSimAttempts, updateSimAttempt,
 } from '@/lib/firestore-service';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -49,6 +49,9 @@ import {
   Play, Map as MapIcon, Images,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import { postEvent } from '@/lib/api-client';
+import { serverTimestamp } from 'firebase/firestore';
 
 /** Valor del selector de destino de una zona. */
 function destinationValue(hotspot: SimHotspot): string {
@@ -1201,6 +1204,32 @@ function NodeCanvas({
 
 function AttemptsDialog({ module, onClose }: { module: SimModule | null; onClose: () => void }) {
   const [attempts, setAttempts] = useState<SimAttempt[] | null>(null);
+  const { profile } = useAuth();
+  const [reviewing, setReviewing] = useState<string | null>(null);
+
+  /** Revisión de respuestas abiertas: aprobar completa el paso de la ruta y entrega insignias. */
+  const review = async (attempt: SimAttempt, approved: boolean) => {
+    if (!attempt.id || !profile) return;
+    setReviewing(attempt.id);
+    try {
+      const reviewData = {
+        status: approved ? 'approved' as const : 'rejected' as const,
+        reviewedBy: profile.uid,
+        reviewerName: profile.nombre,
+        reviewedAt: serverTimestamp(),
+      };
+      await updateSimAttempt(attempt.id, { outcome: approved ? 'passed' : 'failed', passed: approved, needsManualReview: false, review: reviewData });
+      if (approved) postEvent({ type: 'simulation_reviewed', attemptId: attempt.id });
+      setAttempts(prev => prev?.map(a => a.id === attempt.id
+        ? { ...a, outcome: approved ? 'passed' : 'failed', passed: approved, needsManualReview: false, review: { ...reviewData, reviewedAt: new Date() as never } }
+        : a) ?? null);
+      toast({ title: approved ? 'Intento aprobado' : 'Intento marcado para repasar' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo guardar la revisión' });
+    } finally {
+      setReviewing(null);
+    }
+  };
 
   useEffect(() => {
     if (!module) { setAttempts(null); return; }
@@ -1272,6 +1301,17 @@ function AttemptsDialog({ module, onClose }: { module: SimModule | null; onClose
                       </p>
                     ))}
                   </div>
+                )}
+                {attempt.outcome === 'pending_review' && !attempt.review && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <Button size="sm" onClick={() => review(attempt, true)} disabled={reviewing === attempt.id}>Aprobar</Button>
+                    <Button size="sm" variant="outline" onClick={() => review(attempt, false)} disabled={reviewing === attempt.id}>Pedir que repase</Button>
+                  </div>
+                )}
+                {attempt.review && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {attempt.review.status === 'approved' ? 'Aprobado' : 'Para repasar'} por {attempt.review.reviewerName || 'un capacitador'}
+                  </p>
                 )}
               </div>
             ))}

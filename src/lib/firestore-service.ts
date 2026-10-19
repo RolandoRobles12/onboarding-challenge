@@ -211,32 +211,6 @@ function toQuestion(id: string, data: DocumentData): Question {
 // ORGANIZACIONES
 // ============================================================================
 
-export async function getOrganization(orgId: string = DEFAULT_ORG_ID): Promise<Organization | null> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.ORGANIZATIONS, orgId);
-    const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Organization : null;
-  } catch (error) {
-    console.error('Error getting organization:', error);
-    throw error;
-  }
-}
-
-export async function createOrganization(org: Omit<Organization, 'id'>): Promise<string> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.ORGANIZATIONS));
-    await setDoc(docRef, {
-      ...org,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating organization:', error);
-    throw error;
-  }
-}
-
 // ============================================================================
 // PRODUCTOS
 // ============================================================================
@@ -464,30 +438,6 @@ export async function getQuestion(questionId: string): Promise<Question | null> 
   }
 }
 
-export async function getQuestionsByIds(questionIds: string[]): Promise<Question[]> {
-  try {
-    const questions: Question[] = [];
-
-    // Firestore tiene un límite de 10 elementos en el operador 'in'
-    // Por lo que dividimos en chunks si hay más de 10 IDs
-    const chunkSize = 10;
-    for (let i = 0; i < questionIds.length; i += chunkSize) {
-      const chunk = questionIds.slice(i, i + chunkSize);
-      const q = query(
-        getCollectionRef(COLLECTIONS.QUESTIONS),
-        where('__name__', 'in', chunk)
-      );
-      const snapshot = await getDocs(q);
-      questions.push(...snapshot.docs.map(doc => toQuestion(doc.id, doc.data())));
-    }
-
-    return questions;
-  } catch (error) {
-    console.error('Error getting questions by IDs:', error);
-    throw error;
-  }
-}
-
 export async function createQuestion(
   question: NewQuestion,
   userId: string
@@ -561,22 +511,6 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
     } as DocumentData);
   } catch (error) {
     console.error('Error updating user profile:', error);
-    throw error;
-  }
-}
-
-export async function getUsersByKiosko(kiosko: string, orgId: string = DEFAULT_ORG_ID): Promise<UserProfile[]> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.USERS),
-      where('organizationId', '==', orgId),
-      where('assignedKiosko', '==', kiosko),
-      where('active', '==', true)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile));
-  } catch (error) {
-    console.error('Error getting users by kiosko:', error);
     throw error;
   }
 }
@@ -684,97 +618,9 @@ export async function getAllQuizAttempts(
 // LEADERBOARD
 // ============================================================================
 
-export async function addLeaderboardEntry(entry: Omit<LeaderboardEntry, 'id'>): Promise<void> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.LEADERBOARDS));
-    await setDoc(docRef, entry);
-  } catch (error) {
-    console.error('Error adding leaderboard entry:', error);
-    throw error;
-  }
-}
-
-export async function getLeaderboard(
-  quizId: string,
-  limitCount: number = 10,
-  kiosko?: string
-): Promise<LeaderboardEntry[]> {
-  try {
-    const constraints: QueryConstraint[] = [
-      where('quizId', '==', quizId),
-      orderBy('score', 'desc'),
-      orderBy('timeTaken', 'asc'),
-      limit(limitCount)
-    ];
-
-    if (kiosko) {
-      constraints.push(where('assignedKiosko', '==', kiosko));
-    }
-
-    const q = query(getCollectionRef(COLLECTIONS.LEADERBOARDS), ...constraints);
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry));
-  } catch (error) {
-    console.error('Error getting leaderboard:', error);
-    throw error;
-  }
-}
-
-export async function getProductLeaderboard(
-  productId: string,
-  limitCount: number = 10
-): Promise<LeaderboardEntry[]> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.LEADERBOARDS),
-      where('productId', '==', productId),
-      orderBy('score', 'desc'),
-      orderBy('timeTaken', 'asc'),
-      limit(limitCount)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry));
-  } catch (error) {
-    console.error('Error getting product leaderboard:', error);
-    throw error;
-  }
-}
-
 // ============================================================================
 // ACHIEVEMENTS
 // ============================================================================
-
-export async function getAchievements(orgId: string = DEFAULT_ORG_ID): Promise<Achievement[]> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.ACHIEVEMENTS),
-      where('organizationId', '==', orgId),
-      where('active', '==', true),
-      orderBy('order', 'asc')
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Achievement));
-  } catch (error) {
-    console.error('Error getting achievements:', error);
-    throw error;
-  }
-}
-
-export async function createAchievement(
-  achievement: Omit<Achievement, 'id'>
-): Promise<string> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.ACHIEVEMENTS));
-    await setDoc(docRef, {
-      ...achievement,
-      createdAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating achievement:', error);
-    throw error;
-  }
-}
 
 // ============================================================================
 // WHITELIST
@@ -844,37 +690,6 @@ export async function deleteWhitelistEntry(entryId: string): Promise<void> {
 // ============================================================================
 // REAL-TIME LISTENERS
 // ============================================================================
-
-export function subscribeToLeaderboard(
-  quizId: string,
-  callback: (entries: LeaderboardEntry[]) => void,
-  limitCount: number = 10
-) {
-  const q = query(
-    getCollectionRef(COLLECTIONS.LEADERBOARDS),
-    where('quizId', '==', quizId),
-    orderBy('score', 'desc'),
-    orderBy('timeTaken', 'asc'),
-    limit(limitCount)
-  );
-
-  return onSnapshot(q, (snapshot) => {
-    const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry));
-    callback(entries);
-  });
-}
-
-export function subscribeToUserProfile(
-  userId: string,
-  callback: (profile: UserProfile | null) => void
-) {
-  const docRef = getDocRef(COLLECTIONS.USERS, userId);
-
-  return onSnapshot(docRef, (doc) => {
-    const profile = doc.exists() ? { uid: doc.id, ...doc.data() } as UserProfile : null;
-    callback(profile);
-  });
-}
 
 // ============================================================================
 // BATCH OPERATIONS
@@ -1263,18 +1078,26 @@ export async function saveSellerOnboardingData(
 // LMS - INSCRIPCIONES (Enrollments)
 // ============================================================================
 
+/**
+ * Inscribe al usuario en un curso. El id es `<uid>_<courseId>`: abrir el curso
+ * dos veces (o en dos pestañas) no crea inscripciones duplicadas. Devuelve la
+ * inscripción existente si ya estaba inscrito.
+ */
 export async function enrollUserInCourse(
   enrollmentData: Omit<CourseEnrollment, 'id' | 'updatedAt'>
 ): Promise<string> {
   try {
-    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
-    const docRef = doc(colRef);
-    await setDoc(docRef, {
-      ...enrollmentData,
-      status: 'enrolled',
-      completedLessonIds: [],
-      completedModuleIds: [],
-      updatedAt: serverTimestamp(),
+    const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, `${enrollmentData.userId}_${enrollmentData.courseId}`);
+    await runTransaction(ensureFirestore(), async tx => {
+      const snap = await tx.get(docRef);
+      if (snap.exists()) return;
+      tx.set(docRef, {
+        ...enrollmentData,
+        status: 'enrolled',
+        completedLessonIds: [],
+        completedModuleIds: [],
+        updatedAt: serverTimestamp(),
+      });
     });
     return docRef.id;
   } catch (error) {
@@ -1283,12 +1106,26 @@ export async function enrollUserInCourse(
   }
 }
 
+/**
+ * Inscripciones del usuario, una por curso. Si hay duplicadas (las creadas
+ * antes de usar un id fijo), se queda con la más avanzada.
+ */
 export async function getUserEnrollments(userId: string): Promise<CourseEnrollment[]> {
   try {
     const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
-    const q = query(colRef, where('userId', '==', userId), orderBy('enrolledAt', 'desc'));
+    const q = query(colRef, where('userId', '==', userId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CourseEnrollment));
+    const rank = (e: CourseEnrollment) =>
+      (e.status === 'completed' ? 3 : e.status === 'in_progress' ? 2 : e.status === 'enrolled' ? 1 : 0) * 10_000
+      + (e.completedLessonIds?.length ?? 0);
+    const byCourse = new Map<string, CourseEnrollment>();
+    for (const d of snapshot.docs) {
+      const e = { id: d.id, ...d.data() } as CourseEnrollment;
+      const prev = byCourse.get(e.courseId);
+      if (!prev || rank(e) > rank(prev)) byCourse.set(e.courseId, e);
+    }
+    return Array.from(byCourse.values())
+      .sort((a, b) => (b.enrolledAt?.toMillis?.() ?? 0) - (a.enrolledAt?.toMillis?.() ?? 0));
   } catch (error) {
     console.error('Error fetching user enrollments:', error);
     throw error;
@@ -1297,7 +1134,7 @@ export async function getUserEnrollments(userId: string): Promise<CourseEnrollme
 
 export async function updateEnrollmentProgress(
   enrollmentId: string,
-  updates: Partial<Pick<CourseEnrollment, 'completedLessonIds' | 'completedModuleIds' | 'status' | 'overallScore' | 'completedAt' | 'lastAccessedAt'>>
+  updates: Partial<Pick<CourseEnrollment, 'completedLessonIds' | 'completedModuleIds' | 'status' | 'overallScore' | 'completedAt' | 'lastAccessedAt' | 'certificateIssuedAt'>>
 ): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, enrollmentId);
@@ -1329,16 +1166,21 @@ export async function getCourseEnrollments(
   }
 }
 
-/** Inscribe manualmente un usuario en un curso (desde el panel de admin) */
+/**
+ * Inscribe manualmente un usuario en un curso (desde el panel de admin).
+ * Devuelve `created: false` si ya estaba inscrito.
+ */
 export async function adminEnrollUserInCourse(
   userId: string,
   courseId: string,
   assignedBy: string,
   orgId: string = DEFAULT_ORG_ID
-): Promise<string> {
+): Promise<{ id: string; created: boolean }> {
   try {
-    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
-    const docRef = doc(colRef);
+    const existing = await getUserEnrollments(userId);
+    const current = existing.find(e => e.courseId === courseId);
+    if (current) return { id: current.id, created: false };
+    const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, `${userId}_${courseId}`);
     await setDoc(docRef, {
       userId,
       courseId,
@@ -1351,7 +1193,7 @@ export async function adminEnrollUserInCourse(
       enrolledAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    return docRef.id;
+    return { id: docRef.id, created: true };
   } catch (error) {
     console.error('Error enrolling user:', error);
     throw error;
@@ -1380,6 +1222,12 @@ export async function upsertLessonProgress(
     console.error('Error upserting lesson progress:', error);
     throw error;
   }
+}
+
+/** Progreso de una lección (id `<uid>_<lessonId>`). */
+export async function getLessonProgress(userId: string, lessonId: string): Promise<LessonProgress | null> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.LESSON_PROGRESS, `${userId}_${lessonId}`));
+  return snap.exists() ? ({ id: snap.id, ...snap.data() } as LessonProgress) : null;
 }
 
 export async function getLessonProgressForCourse(
@@ -2117,6 +1965,17 @@ export async function updateSimAttempt(attemptId: string, updates: Partial<Omit<
  * crear un índice compuesto en Firestore, y el volumen de un módulo de
  * capacitación no lo amerita.
  */
+/** Intentos de simulación del usuario (para su listado de simulaciones). */
+export async function getUserSimAttempts(userId: string): Promise<SimAttempt[]> {
+  try {
+    const snap = await getDocs(query(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS), where('userId', '==', userId)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as SimAttempt);
+  } catch (error) {
+    console.error('Error getting user sim attempts:', error);
+    return [];
+  }
+}
+
 export async function getSimAttempts(moduleId: string, max = 100): Promise<SimAttempt[]> {
   try {
     const q = query(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS), where('moduleId', '==', moduleId));
@@ -2819,4 +2678,23 @@ export async function saveNotificationConfig(
 export async function getRecentNotifications(max = 30): Promise<NotificationLogEntry[]> {
   const snap = await getDocs(query(getCollectionRef(COLLECTIONS.NOTIFICATION_LOG), orderBy('createdAt', 'desc'), limit(max)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }) as NotificationLogEntry);
+}
+
+// ============================================================================
+// ANALYTICS DE USUARIOS (panel)
+// ============================================================================
+
+export async function getAllEnrollments(): Promise<CourseEnrollment[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.ENROLLMENTS));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as CourseEnrollment);
+}
+
+export async function getAllJourneyProgress(): Promise<UserJourneyProgress[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.JOURNEY_PROGRESS));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as UserJourneyProgress);
+}
+
+export async function getAllUserBadges(): Promise<UserBadge[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.USER_BADGES));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as UserBadge);
 }

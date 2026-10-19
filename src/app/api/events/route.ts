@@ -12,6 +12,7 @@
  *   { type: 'course_assigned', userId, courseId }
  *   { type: 'challenge_available', quizId }
  *   { type: 'badge_awarded', userId, badgeId }
+ *   { type: 'simulation_reviewed', attemptId }
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -110,6 +111,24 @@ export async function POST(req: NextRequest) {
           ? await markJourneySteps(profile, profile.producto, s => s.type === 'simulation' && s.config?.simModuleId === attempt.moduleId)
           : [];
         const badges = await awardBadgesFor(profile, { type: 'simulation_passed', simModuleId: attempt.moduleId });
+        return NextResponse.json({ ok: true, steps, badges });
+      }
+
+      case 'simulation_reviewed': {
+        // Un capacitador aprobó las respuestas abiertas de una simulación.
+        if (!isStaff) return bad('No tienes permiso para hacer esto.', 403);
+        if (!body.attemptId) return bad('Falta el intento.');
+        const snap = await db.collection('sim_attempts').doc(body.attemptId).get();
+        const attempt = snap.data();
+        if (!snap.exists || attempt?.passed !== true || attempt?.review?.status !== 'approved' || !attempt.userId) {
+          return bad('La simulación no está aprobada.', 409);
+        }
+        const seller = await getUser(attempt.userId);
+        if (!seller) return bad('El usuario no existe.', 404);
+        const steps = seller.producto
+          ? await markJourneySteps(seller, seller.producto, s => s.type === 'simulation' && s.config?.simModuleId === attempt.moduleId)
+          : [];
+        const badges = await awardBadgesFor(seller, { type: 'simulation_passed', simModuleId: attempt.moduleId });
         return NextResponse.json({ ok: true, steps, badges });
       }
 

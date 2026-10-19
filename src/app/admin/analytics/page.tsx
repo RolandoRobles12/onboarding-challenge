@@ -17,6 +17,7 @@ import { db } from '@/lib/firebase';
 import type { PulseAttempt, DailyPulse, Question, KnowledgeModule, UserProfile, QuizAttempt } from '@/lib/types-scalable';
 import { KNOWLEDGE_MODULE_LABELS } from '@/lib/types-scalable';
 import { cn } from '@/lib/utils';
+import { UserAnalytics } from '@/components/admin/UserAnalytics';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -1353,13 +1354,10 @@ export default function AnalyticsPage() {
                     );
                   })}
                 </div>
-                <div className="mt-6 p-4 bg-muted/50 rounded-lg text-center">
-                  <Users className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                  <p className="text-sm text-muted-foreground">Analytics detallados de usuarios próximamente.</p>
-                </div>
               </CardContent>
             </Card>
           </div>
+          <UserAnalytics />
         </TabsContent>
 
         {/* ── PULSE TAB ────────────────────────────────────────────────────── */}

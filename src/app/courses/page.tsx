@@ -20,7 +20,10 @@ import {
   PlayCircle,
   Circle,
   Clock,
+  Lock,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { courseAudienceMatches, courseDueDate, isCourseClosed, missingPrerequisites } from '@/lib/course-access';
 
 function courseStats(course: Course) {
   const lessons = course.modules.flatMap(m => m.lessons);
@@ -34,6 +37,7 @@ export default function CoursesPage() {
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [enrollments, setEnrollments] = useState<Record<string, CourseEnrollment>>({});
+  const [allCourses, setAllCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,13 +49,18 @@ export default function CoursesPage() {
       getUserEnrollments(profile.uid).catch(() => [] as CourseEnrollment[]),
     ]).then(([allCourses, myEnrollments]) => {
       if (cancelled) return;
-      setCourses(allCourses.filter(c => c.status === 'published'));
       const map: Record<string, CourseEnrollment> = {};
       myEnrollments.forEach(e => { map[e.courseId] = e; });
       setEnrollments(map);
+      setAllCourses(allCourses);
+      // Solo los publicados para su perfil; los cerrados, solo si ya estaba inscrito.
+      setCourses(allCourses.filter(c => c.status === 'published' && (
+        !!map[c.id] || isAdmin || (courseAudienceMatches(c, profile) && !isCourseClosed(c))
+      )));
     }).finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   return (
@@ -144,6 +153,10 @@ export default function CoursesPage() {
                     const enr = enrollments[course.id];
                     const done = enr?.completedLessonIds?.length ?? 0;
                     const status = enr?.status;
+                    const missing = !isAdmin && status !== 'completed'
+                      ? missingPrerequisites(course, allCourses, Object.values(enrollments))
+                      : [];
+                    const due = courseDueDate(course, enr);
                     return (
                       <Card key={course.id} className="overflow-hidden flex flex-col">
                         {course.thumbnail ? (
@@ -180,6 +193,17 @@ export default function CoursesPage() {
                               <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {minutes} min</span>
                             )}
                           </div>
+                          {missing.length > 0 && (
+                            <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <Lock className="h-3 w-3" /> Primero termina: {missing.map(c => c.title).join(', ')}
+                            </p>
+                          )}
+                          {due && status !== 'completed' && (
+                            <p className={cn('text-[11px] font-medium', due.getTime() < Date.now() ? 'text-destructive' : 'text-orange-600')}>
+                              {due.getTime() < Date.now() ? 'Venció el ' : 'Termínalo antes del '}
+                              {due.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })}
+                            </p>
+                          )}
                           {status && lessonCount > 0 && (
                             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                               <div
@@ -188,11 +212,17 @@ export default function CoursesPage() {
                               />
                             </div>
                           )}
-                          <Button asChild size="sm" className="w-full gap-1.5">
-                            <Link href={`/courses/${course.id}`}>
-                              {status === 'completed' ? 'Ver de nuevo' : status ? 'Continuar' : 'Empezar curso'}
-                            </Link>
-                          </Button>
+                          {missing.length > 0 ? (
+                            <Button size="sm" className="w-full gap-1.5" disabled>
+                              <Lock className="h-3.5 w-3.5" /> Bloqueado
+                            </Button>
+                          ) : (
+                            <Button asChild size="sm" className="w-full gap-1.5">
+                              <Link href={`/courses/${course.id}`}>
+                                {status === 'completed' ? 'Ver de nuevo' : status ? 'Continuar' : 'Empezar curso'}
+                              </Link>
+                            </Button>
+                          )}
                         </CardContent>
                       </Card>
                     );

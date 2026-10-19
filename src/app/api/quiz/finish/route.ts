@@ -17,6 +17,7 @@ import { getQuizDoc, isTimeUp, TIME_GRACE_MS, type QuizSession } from '@/lib/ser
 import { loadQuestions, recordQuestionStats } from '@/lib/server/grading';
 import { markJourneySteps } from '@/lib/server/progress';
 import { awardBadgesFor } from '@/lib/server/badges';
+import { generateQuizFeedback } from '@/lib/server/ai-feedback';
 import { calcGamifiedXp, calcTimeBonus, DEFAULT_GAMIFICATION_CONFIG, getQuizLevel } from '@/lib/quiz-scoring';
 import { DEFAULT_ASSESSMENT_CONFIG, type QuizQuestionResult } from '@/lib/types-scalable';
 
@@ -118,7 +119,7 @@ export async function POST(req: NextRequest) {
     });
     await batch.commit();
 
-    const [, , awardedBadges] = await Promise.all([
+    const [, , awardedBadges, aiFeedback] = await Promise.all([
       recordQuestionStats(questionResults
         .filter(r => r.userAnswer !== '' || r.isCorrect)
         .map(r => ({ questionId: r.questionId!, isCorrect: r.isCorrect })))
@@ -135,10 +136,20 @@ export async function POST(req: NextRequest) {
       ).catch(err => console.error('[quiz/finish] ruta:', err)),
       awardBadgesFor(profile, { type: 'quiz_completed', quizId: session.quizId, passed, percentage })
         .catch(err => { console.error('[quiz/finish] insignias:', err); return [] as string[]; }),
+      generateQuizFeedback({
+        quizTopic: quiz?.title ?? 'Desafío',
+        score: Math.round(percentage),
+        passed,
+        missedTopics: questionResults.filter(r => !r.isCorrect).map(r => r.text),
+      }),
     ]);
 
-    if (awardedBadges.length > 0) {
-      await db.collection('attempts').doc(attemptId).update({ badgesEarned: awardedBadges }).catch(() => {});
+    const extra = {
+      ...(awardedBadges.length > 0 ? { badgesEarned: awardedBadges } : {}),
+      ...(aiFeedback ? { aiFeedback } : {}),
+    };
+    if (Object.keys(extra).length > 0) {
+      await db.collection('attempts').doc(attemptId).update(extra).catch(() => {});
     }
     return NextResponse.json({ attemptId, awardedBadges });
   } catch (err) {
