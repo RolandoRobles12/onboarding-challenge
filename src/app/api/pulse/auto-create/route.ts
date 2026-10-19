@@ -4,10 +4,9 @@
  * "autoDailyPulse" está habilitada en la configuración del pulso.
  *
  * Lo llama la página del vendedor al abrirse, como respaldo de /api/pulse/cron.
- * Es idempotente: si el pulso ya existe no hace nada.
- *
- * Body (opcional): { date?: "YYYY-MM-DD" } — si se omite, usa la fecha de hoy
- * en la zona horaria del equipo.
+ * Es idempotente: si el pulso ya existe no hace nada. Requiere sesión
+ * (header `Authorization: Bearer <ID token>`) y solo crea el pulso de hoy, en
+ * la zona horaria del equipo.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -16,15 +15,14 @@ import {
   getDailyPulse,
   createDailyPulseIfMissing,
   scheduleAutoPulse,
-} from '@/lib/firestore-service';
+} from '@/lib/server/pulse-store';
 import { pulseDateStr } from '@/lib/pulse-utils';
+import { authErrorResponse, requireUser } from '@/lib/server/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({})) as { date?: string };
-    const today = pulseDateStr();
-    // Solo se permite crear el pulso de hoy (evita crear días arbitrarios desde el cliente).
-    const date = body.date && body.date === today ? body.date : today;
+    await requireUser(req);
+    const date = pulseDateStr();
 
     const config = await getPulseConfig();
     if (!config.autoDailyPulse) {
@@ -39,7 +37,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: `El pulso para ${date} ya existe.`, alreadyExists: true });
     }
 
-    const questionIds = await scheduleAutoPulse(undefined, date);
+    const questionIds = await scheduleAutoPulse(date);
     if (questionIds.length === 0) {
       return NextResponse.json(
         { error: 'No hay preguntas activas con módulo asignado. Agrega preguntas en el banco.' },
@@ -57,15 +55,9 @@ export async function POST(req: NextRequest) {
       questionsInPool: questionIds.length,
     });
   } catch (err: unknown) {
+    const authError = authErrorResponse(err);
+    if (authError) return authError;
     console.error('[auto-create] Error:', err);
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }
-}
-
-/**
- * GET /api/pulse/auto-create
- * Alias de POST para facilitar llamadas desde cron jobs que solo soportan GET.
- */
-export async function GET(req: NextRequest) {
-  return POST(req);
 }

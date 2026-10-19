@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { PushToggle } from '@/components/PushToggle';
 import { useAuth } from '@/context/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { AvivaLogo } from '@/components/AvivaLogo';
@@ -265,6 +266,7 @@ export default function PerfilPage() {
               </div>
             </div>
 
+            <PushToggle />
           </div>
         </main>
 

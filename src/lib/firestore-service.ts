@@ -19,9 +19,9 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
+  arrayUnion,
   onSnapshot,
   runTransaction,
-  documentId,
   QueryConstraint,
   DocumentData,
   WithFieldValue,
@@ -31,9 +31,11 @@ import type {
   Product,
   Quiz,
   Question,
+  QuestionOption,
   UserProfile,
   Kiosko,
   QuizAttempt,
+  QuizQuestionResult,
   LeaderboardEntry,
   Achievement,
   WhitelistEntry,
@@ -57,7 +59,6 @@ import type {
   PulseAttempt,
   PulseAnswer,
   PulseBacklogItem,
-  PulseSlackResult,
   PulseCronStatus,
   SlackNotificationConfig,
   PulseConfig,
@@ -67,7 +68,9 @@ import type {
   PulseCategory,
 } from './types-scalable';
 import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-scalable';
-import { addDaysStr, buildAutoPool, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
+import { withOptionIds } from './question-options';
+import { resolveNotificationConfig, type NotificationConfig, type NotificationLogEntry } from './notifications';
+import { addDaysStr, buildAutoPool, DEFAULT_PULSE_CONFIG, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
 import type {
   Course,
   CourseEnrollment,
@@ -90,6 +93,7 @@ const COLLECTIONS = {
   QUESTIONS: 'questions',
   USERS: 'users',
   ATTEMPTS: 'attempts',
+  ATTEMPT_DETAILS: 'attempt_details',
   LEADERBOARDS: 'leaderboards',
   ACHIEVEMENTS: 'achievements',
   WHITELIST: 'whitelist',
@@ -131,6 +135,9 @@ const COLLECTIONS = {
   PULSE_CATEGORIES: 'pulseCategories',
   ROLE_PERMISSIONS: 'role_permissions',
   KIOSCOS: 'kioscos',
+  // --- Avisos a embajadores (Slack y push) ---
+  NOTIFICATION_CONFIG: 'notification_config',
+  NOTIFICATION_LOG: 'notification_log',
   // --- Prototipo: Simulaciones por nodos (hotspots sobre capturas) ---
   SIM_MODULES: 'sim_modules',
   SIM_ATTEMPTS: 'sim_attempts',
@@ -184,35 +191,25 @@ function stripUndefined<T>(data: T): T {
   return data;
 }
 
+/** Firestore limita cada batch a 500 escrituras. */
+const BATCH_LIMIT = 450;
+
+/** Opción tal como la arma el panel: el id se asigna al guardar si falta. */
+type QuestionOptionInput = Omit<QuestionOption, 'id'> & { id?: string };
+
+/** Datos para crear una pregunta (las estadísticas y el autor los pone el servicio). */
+export type NewQuestion = Omit<Question, 'id' | 'createdAt' | 'updatedAt' | 'timesUsed' | 'timesCorrect' | 'averageCorrectRate' | 'createdBy' | 'options'> & {
+  options: QuestionOptionInput[];
+};
+
+/** Pregunta leída de Firestore, con ids en todas sus opciones (ver withOptionIds). */
+function toQuestion(id: string, data: DocumentData): Question {
+  return { id, ...data, options: withOptionIds(data.options) } as Question;
+}
+
 // ============================================================================
 // ORGANIZACIONES
 // ============================================================================
-
-export async function getOrganization(orgId: string = DEFAULT_ORG_ID): Promise<Organization | null> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.ORGANIZATIONS, orgId);
-    const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Organization : null;
-  } catch (error) {
-    console.error('Error getting organization:', error);
-    throw error;
-  }
-}
-
-export async function createOrganization(org: Omit<Organization, 'id'>): Promise<string> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.ORGANIZATIONS));
-    await setDoc(docRef, {
-      ...org,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating organization:', error);
-    throw error;
-  }
-}
 
 // ============================================================================
 // PRODUCTOS
@@ -423,7 +420,7 @@ export async function getQuestions(
 
     const q = query(getCollectionRef(COLLECTIONS.QUESTIONS), ...constraints);
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question));
+    return snapshot.docs.map(doc => toQuestion(doc.id, doc.data()));
   } catch (error) {
     console.error('Error getting questions:', error);
     throw error;
@@ -434,46 +431,24 @@ export async function getQuestion(questionId: string): Promise<Question | null> 
   try {
     const docRef = getDocRef(COLLECTIONS.QUESTIONS, questionId);
     const docSnap = await getDoc(docRef);
-    return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } as Question : null;
+    return docSnap.exists() ? toQuestion(docSnap.id, docSnap.data()) : null;
   } catch (error) {
     console.error('Error getting question:', error);
     throw error;
   }
 }
 
-export async function getQuestionsByIds(questionIds: string[]): Promise<Question[]> {
-  try {
-    const questions: Question[] = [];
-
-    // Firestore tiene un límite de 10 elementos en el operador 'in'
-    // Por lo que dividimos en chunks si hay más de 10 IDs
-    const chunkSize = 10;
-    for (let i = 0; i < questionIds.length; i += chunkSize) {
-      const chunk = questionIds.slice(i, i + chunkSize);
-      const q = query(
-        getCollectionRef(COLLECTIONS.QUESTIONS),
-        where('__name__', 'in', chunk)
-      );
-      const snapshot = await getDocs(q);
-      questions.push(...snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question)));
-    }
-
-    return questions;
-  } catch (error) {
-    console.error('Error getting questions by IDs:', error);
-    throw error;
-  }
-}
-
 export async function createQuestion(
-  question: Omit<Question, 'id' | 'createdAt' | 'updatedAt' | 'timesUsed' | 'averageCorrectRate'>,
+  question: NewQuestion,
   userId: string
 ): Promise<string> {
   try {
     const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
     await setDoc(docRef, {
       ...stripUndefined(question),
+      options: withOptionIds(stripUndefined(question.options)),
       timesUsed: 0,
+      timesCorrect: 0,
       averageCorrectRate: 0,
       createdBy: userId,
       createdAt: serverTimestamp(),
@@ -486,11 +461,15 @@ export async function createQuestion(
   }
 }
 
-export async function updateQuestion(questionId: string, updates: Partial<Question>): Promise<void> {
+export async function updateQuestion(
+  questionId: string,
+  updates: Partial<Omit<Question, 'options'>> & { options?: QuestionOptionInput[] }
+): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.QUESTIONS, questionId);
     await updateDoc(docRef, {
       ...stripUndefined(updates),
+      ...(updates.options ? { options: withOptionIds(stripUndefined(updates.options)) } : {}),
       updatedAt: serverTimestamp(),
     } as DocumentData);
   } catch (error) {
@@ -523,36 +502,6 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   }
 }
 
-export async function createUserProfile(
-  userId: string,
-  profile: Omit<UserProfile, 'uid' | 'createdAt' | 'updatedAt'>
-): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.USERS, userId);
-
-    // Filtrar campos undefined
-    const data: any = {
-      uid: userId,
-      email: profile.email,
-      nombre: profile.nombre,
-      rol: profile.rol,
-      onboardingCompleted: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    };
-
-    // Solo agregar producto si tiene valor
-    if (profile.producto) {
-      data.producto = profile.producto;
-    }
-
-    await setDoc(docRef, data);
-  } catch (error) {
-    console.error('Error creating user profile:', error);
-    throw error;
-  }
-}
-
 export async function updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.USERS, userId);
@@ -566,48 +515,9 @@ export async function updateUserProfile(userId: string, updates: Partial<UserPro
   }
 }
 
-export async function getUsersByKiosko(kiosko: string, orgId: string = DEFAULT_ORG_ID): Promise<UserProfile[]> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.USERS),
-      where('organizationId', '==', orgId),
-      where('assignedKiosko', '==', kiosko),
-      where('active', '==', true)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserProfile));
-  } catch (error) {
-    console.error('Error getting users by kiosko:', error);
-    throw error;
-  }
-}
-
 // ============================================================================
 // QUIZ ATTEMPTS
 // ============================================================================
-
-export async function createQuizAttempt(
-  attempt: Omit<QuizAttempt, 'id'>
-): Promise<string> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.ATTEMPTS));
-    await setDoc(docRef, attempt);
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating quiz attempt:', error);
-    throw error;
-  }
-}
-
-export async function updateQuizAttempt(attemptId: string, updates: Partial<QuizAttempt>): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.ATTEMPTS, attemptId);
-    await updateDoc(docRef, updates as DocumentData);
-  } catch (error) {
-    console.error('Error updating quiz attempt:', error);
-    throw error;
-  }
-}
 
 export async function getQuizAttempt(attemptId: string): Promise<QuizAttempt | null> {
   try {
@@ -620,21 +530,25 @@ export async function getQuizAttempt(attemptId: string): Promise<QuizAttempt | n
   }
 }
 
+/** Detalle por pregunta de un intento (solo lo leen el embajador y el staff). */
+export async function getAttemptDetails(attemptId: string): Promise<{ questionResults: QuizQuestionResult[]; showFeedback?: string } | null> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.ATTEMPT_DETAILS, attemptId));
+  return snap.exists() ? (snap.data() as { questionResults: QuizQuestionResult[]; showFeedback?: string }) : null;
+}
+
+/**
+ * Intentos completados de un usuario (más recientes primero). Filtra por un
+ * solo campo y ordena en memoria para no depender de un índice compuesto: el
+ * límite de intentos de un quiz se calcula con esta consulta.
+ */
 export async function getUserAttempts(userId: string, quizId?: string): Promise<QuizAttempt[]> {
   try {
-    const constraints: QueryConstraint[] = [
-      where('userId', '==', userId),
-      where('status', '==', 'completed'),
-      orderBy('completedAt', 'desc')
-    ];
-
-    if (quizId) {
-      constraints.push(where('quizId', '==', quizId));
-    }
-
-    const q = query(getCollectionRef(COLLECTIONS.ATTEMPTS), ...constraints);
+    const q = query(getCollectionRef(COLLECTIONS.ATTEMPTS), where('userId', '==', userId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as QuizAttempt));
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() } as QuizAttempt))
+      .filter(a => a.status === 'completed' && (!quizId || a.quizId === quizId))
+      .sort((a, b) => (b.completedAt?.toMillis?.() ?? 0) - (a.completedAt?.toMillis?.() ?? 0));
   } catch (error) {
     console.error('Error getting user attempts:', error);
     throw error;
@@ -653,8 +567,9 @@ export async function getQuizLeaderboard(
     );
     const snapshot = await getDocs(q);
     let docs = snapshot.docs
-      .map(d => ({ id: d.id, ...d.data() } as QuizAttempt))
-      .filter(d => d.status === 'completed');
+      .map(d => ({ id: d.id, ...d.data() } as QuizAttempt & { practice?: boolean }))
+      // Lo jugado en Práctica no entra al ranking.
+      .filter(d => d.status === 'completed' && !d.practice);
     if (quizId) docs = docs.filter(d => d.quizId === quizId);
 
     // Keep only the best attempt per user (highest %, then fastest time)
@@ -703,97 +618,9 @@ export async function getAllQuizAttempts(
 // LEADERBOARD
 // ============================================================================
 
-export async function addLeaderboardEntry(entry: Omit<LeaderboardEntry, 'id'>): Promise<void> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.LEADERBOARDS));
-    await setDoc(docRef, entry);
-  } catch (error) {
-    console.error('Error adding leaderboard entry:', error);
-    throw error;
-  }
-}
-
-export async function getLeaderboard(
-  quizId: string,
-  limitCount: number = 10,
-  kiosko?: string
-): Promise<LeaderboardEntry[]> {
-  try {
-    const constraints: QueryConstraint[] = [
-      where('quizId', '==', quizId),
-      orderBy('score', 'desc'),
-      orderBy('timeTaken', 'asc'),
-      limit(limitCount)
-    ];
-
-    if (kiosko) {
-      constraints.push(where('assignedKiosko', '==', kiosko));
-    }
-
-    const q = query(getCollectionRef(COLLECTIONS.LEADERBOARDS), ...constraints);
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry));
-  } catch (error) {
-    console.error('Error getting leaderboard:', error);
-    throw error;
-  }
-}
-
-export async function getProductLeaderboard(
-  productId: string,
-  limitCount: number = 10
-): Promise<LeaderboardEntry[]> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.LEADERBOARDS),
-      where('productId', '==', productId),
-      orderBy('score', 'desc'),
-      orderBy('timeTaken', 'asc'),
-      limit(limitCount)
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry));
-  } catch (error) {
-    console.error('Error getting product leaderboard:', error);
-    throw error;
-  }
-}
-
 // ============================================================================
 // ACHIEVEMENTS
 // ============================================================================
-
-export async function getAchievements(orgId: string = DEFAULT_ORG_ID): Promise<Achievement[]> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.ACHIEVEMENTS),
-      where('organizationId', '==', orgId),
-      where('active', '==', true),
-      orderBy('order', 'asc')
-    );
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Achievement));
-  } catch (error) {
-    console.error('Error getting achievements:', error);
-    throw error;
-  }
-}
-
-export async function createAchievement(
-  achievement: Omit<Achievement, 'id'>
-): Promise<string> {
-  try {
-    const docRef = doc(getCollectionRef(COLLECTIONS.ACHIEVEMENTS));
-    await setDoc(docRef, {
-      ...achievement,
-      createdAt: serverTimestamp(),
-    });
-    return docRef.id;
-  } catch (error) {
-    console.error('Error creating achievement:', error);
-    throw error;
-  }
-}
 
 // ============================================================================
 // WHITELIST
@@ -812,41 +639,6 @@ export async function addToWhitelist(
     return docRef.id;
   } catch (error) {
     console.error('Error adding to whitelist:', error);
-    throw error;
-  }
-}
-
-export async function checkWhitelist(email: string, orgId: string = DEFAULT_ORG_ID): Promise<WhitelistEntry | null> {
-  try {
-    const q = query(
-      getCollectionRef(COLLECTIONS.WHITELIST),
-      where('organizationId', '==', orgId),
-      where('email', '==', email),
-      limit(1)
-    );
-    const snapshot = await getDocs(q);
-
-    if (snapshot.empty) {
-      console.log('No whitelist entry found for:', email);
-      return null;
-    }
-
-    const entry = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as WhitelistEntry;
-    console.log('Whitelist entry found:', entry);
-    return entry;
-  } catch (error: any) {
-    // Si la colección no existe o hay error de permisos, no es crítico
-    console.warn('Could not check whitelist (collection may not exist):', error?.message);
-    return null; // Retornar null en lugar de lanzar error
-  }
-}
-
-export async function markWhitelistAsUsed(entryId: string): Promise<void> {
-  try {
-    const docRef = getDocRef(COLLECTIONS.WHITELIST, entryId);
-    await updateDoc(docRef, { used: true });
-  } catch (error) {
-    console.error('Error marking whitelist as used:', error);
     throw error;
   }
 }
@@ -899,64 +691,36 @@ export async function deleteWhitelistEntry(entryId: string): Promise<void> {
 // REAL-TIME LISTENERS
 // ============================================================================
 
-export function subscribeToLeaderboard(
-  quizId: string,
-  callback: (entries: LeaderboardEntry[]) => void,
-  limitCount: number = 10
-) {
-  const q = query(
-    getCollectionRef(COLLECTIONS.LEADERBOARDS),
-    where('quizId', '==', quizId),
-    orderBy('score', 'desc'),
-    orderBy('timeTaken', 'asc'),
-    limit(limitCount)
-  );
-
-  return onSnapshot(q, (snapshot) => {
-    const entries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as LeaderboardEntry));
-    callback(entries);
-  });
-}
-
-export function subscribeToUserProfile(
-  userId: string,
-  callback: (profile: UserProfile | null) => void
-) {
-  const docRef = getDocRef(COLLECTIONS.USERS, userId);
-
-  return onSnapshot(docRef, (doc) => {
-    const profile = doc.exists() ? { id: doc.id, ...doc.data() } as UserProfile : null;
-    callback(profile);
-  });
-}
-
 // ============================================================================
 // BATCH OPERATIONS
 // ============================================================================
 
 export async function batchCreateQuestions(
-  questions: Omit<Question, 'id' | 'createdAt' | 'updatedAt' | 'timesUsed' | 'averageCorrectRate'>[],
+  questions: NewQuestion[],
   userId: string
 ): Promise<string[]> {
   try {
     const firestore = ensureFirestore();
-    const batch = writeBatch(firestore);
     const ids: string[] = [];
 
-    for (const question of questions) {
-      const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
-      batch.set(docRef, {
-        ...stripUndefined(question),
-        timesUsed: 0,
-        averageCorrectRate: 0,
-        createdBy: userId,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-      ids.push(docRef.id);
+    for (let i = 0; i < questions.length; i += BATCH_LIMIT) {
+      const batch = writeBatch(firestore);
+      for (const question of questions.slice(i, i + BATCH_LIMIT)) {
+        const docRef = doc(getCollectionRef(COLLECTIONS.QUESTIONS));
+        batch.set(docRef, {
+          ...stripUndefined(question),
+          options: withOptionIds(stripUndefined(question.options)),
+          timesUsed: 0,
+          timesCorrect: 0,
+          averageCorrectRate: 0,
+          createdBy: userId,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        ids.push(docRef.id);
+      }
+      await batch.commit();
     }
-
-    await batch.commit();
     return ids;
   } catch (error) {
     console.error('Error batch creating questions:', error);
@@ -1072,10 +836,7 @@ export async function getUserJourneyProgress(
   journeyId: string
 ): Promise<UserJourneyProgress | null> {
   try {
-    const docRef = doc(
-      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
-      `${userId}_${journeyId}`
-    );
+    const docRef = getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`);
     const snap = await getDoc(docRef);
     if (!snap.exists()) return null;
     return { id: snap.id, ...snap.data() } as UserJourneyProgress;
@@ -1088,7 +849,7 @@ export async function getUserJourneyProgress(
 export async function getUserAllJourneyProgress(userId: string): Promise<UserJourneyProgress[]> {
   try {
     const q = query(
-      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      getCollectionRef(COLLECTIONS.JOURNEY_PROGRESS),
       where('userId', '==', userId)
     );
     const snap = await getDocs(q);
@@ -1101,9 +862,7 @@ export async function getUserAllJourneyProgress(userId: string): Promise<UserJou
 
 export async function resetUserJourneyProgress(userId: string, journeyId: string): Promise<void> {
   try {
-    const docId = `${userId}_${journeyId}`;
-    const docRef = doc(collection(db, COLLECTIONS.JOURNEY_PROGRESS), docId);
-    await deleteDoc(docRef);
+    await deleteDoc(getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`));
   } catch (error) {
     console.error('Error resetting journey progress:', error);
     throw error;
@@ -1113,7 +872,7 @@ export async function resetUserJourneyProgress(userId: string, journeyId: string
 export async function getJourneyProgressByJourney(journeyId: string): Promise<UserJourneyProgress[]> {
   try {
     const q = query(
-      collection(db, COLLECTIONS.JOURNEY_PROGRESS),
+      getCollectionRef(COLLECTIONS.JOURNEY_PROGRESS),
       where('journeyId', '==', journeyId)
     );
     const snap = await getDocs(q);
@@ -1124,6 +883,11 @@ export async function getJourneyProgressByJourney(journeyId: string): Promise<Us
   }
 }
 
+/**
+ * Marca un paso de la ruta como completado. Es una transacción con
+ * `arrayUnion`: varias marcas en paralelo (p. ej. el paso del quiz y el de
+ * resultados al terminar un desafío) no se pisan entre sí.
+ */
 export async function markJourneyStepComplete(
   userId: string,
   journeyId: string,
@@ -1132,36 +896,84 @@ export async function markJourneyStepComplete(
   userMeta?: { userName?: string; userEmail?: string }
 ): Promise<void> {
   try {
-    const docId = `${userId}_${journeyId}`;
-    const docRef = doc(collection(db, COLLECTIONS.JOURNEY_PROGRESS), docId);
-    const snap = await getDoc(docRef);
-
-    if (!snap.exists()) {
-      await setDoc(docRef, {
-        userId,
-        ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
-        ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
-        journeyId,
-        productId,
-        completedStepIds: [stepId],
-        startedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      const existing = snap.data().completedStepIds as string[] ?? [];
-      if (!existing.includes(stepId)) {
-        await updateDoc(docRef, {
-          completedStepIds: [...existing, stepId],
-          ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
-          ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
+    const docRef = getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`);
+    const meta = {
+      ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
+      ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
+    };
+    await runTransaction(ensureFirestore(), async tx => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists()) {
+        tx.set(docRef, {
+          userId,
+          ...meta,
+          journeyId,
+          productId,
+          completedStepIds: [stepId],
+          startedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else if (!((snap.data().completedStepIds as string[] | undefined) ?? []).includes(stepId)) {
+        tx.update(docRef, {
+          userId,
+          ...meta,
+          completedStepIds: arrayUnion(stepId),
           updatedAt: serverTimestamp(),
         });
       }
-    }
+    });
   } catch (error) {
     console.error('Error marking step complete:', error);
     throw error;
   }
+}
+
+/**
+ * Emite el certificado de un paso de la ruta: lo marca como completado y
+ * guarda la fecha de emisión la primera vez. Devuelve esa fecha, para que el
+ * certificado muestre siempre el mismo día aunque se abra después.
+ */
+export async function issueJourneyCertificate(
+  userId: string,
+  journeyId: string,
+  productId: string,
+  stepId: string,
+  userMeta?: { userName?: string; userEmail?: string }
+): Promise<Date> {
+  const docRef = getDocRef(COLLECTIONS.JOURNEY_PROGRESS, `${userId}_${journeyId}`);
+  const meta = {
+    ...(userMeta?.userName ? { userName: userMeta.userName } : {}),
+    ...(userMeta?.userEmail ? { userEmail: userMeta.userEmail } : {}),
+  };
+  return runTransaction(ensureFirestore(), async tx => {
+    const snap = await tx.get(docRef);
+    const issued = snap.exists()
+      ? (snap.data().certificateIssuedAt as Record<string, Timestamp> | undefined)?.[stepId]
+      : undefined;
+    if (issued) return issued.toDate();
+    const now = Timestamp.now();
+    if (!snap.exists()) {
+      tx.set(docRef, {
+        userId,
+        ...meta,
+        journeyId,
+        productId,
+        completedStepIds: [stepId],
+        certificateIssuedAt: { [stepId]: now },
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      tx.update(docRef, {
+        userId,
+        ...meta,
+        completedStepIds: arrayUnion(stepId),
+        [`certificateIssuedAt.${stepId}`]: now,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    return now.toDate();
+  });
 }
 
 // ============================================================================
@@ -1266,18 +1078,26 @@ export async function saveSellerOnboardingData(
 // LMS - INSCRIPCIONES (Enrollments)
 // ============================================================================
 
+/**
+ * Inscribe al usuario en un curso. El id es `<uid>_<courseId>`: abrir el curso
+ * dos veces (o en dos pestañas) no crea inscripciones duplicadas. Devuelve la
+ * inscripción existente si ya estaba inscrito.
+ */
 export async function enrollUserInCourse(
   enrollmentData: Omit<CourseEnrollment, 'id' | 'updatedAt'>
 ): Promise<string> {
   try {
-    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
-    const docRef = doc(colRef);
-    await setDoc(docRef, {
-      ...enrollmentData,
-      status: 'enrolled',
-      completedLessonIds: [],
-      completedModuleIds: [],
-      updatedAt: serverTimestamp(),
+    const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, `${enrollmentData.userId}_${enrollmentData.courseId}`);
+    await runTransaction(ensureFirestore(), async tx => {
+      const snap = await tx.get(docRef);
+      if (snap.exists()) return;
+      tx.set(docRef, {
+        ...enrollmentData,
+        status: 'enrolled',
+        completedLessonIds: [],
+        completedModuleIds: [],
+        updatedAt: serverTimestamp(),
+      });
     });
     return docRef.id;
   } catch (error) {
@@ -1286,12 +1106,26 @@ export async function enrollUserInCourse(
   }
 }
 
+/**
+ * Inscripciones del usuario, una por curso. Si hay duplicadas (las creadas
+ * antes de usar un id fijo), se queda con la más avanzada.
+ */
 export async function getUserEnrollments(userId: string): Promise<CourseEnrollment[]> {
   try {
     const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
-    const q = query(colRef, where('userId', '==', userId), orderBy('enrolledAt', 'desc'));
+    const q = query(colRef, where('userId', '==', userId));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as CourseEnrollment));
+    const rank = (e: CourseEnrollment) =>
+      (e.status === 'completed' ? 3 : e.status === 'in_progress' ? 2 : e.status === 'enrolled' ? 1 : 0) * 10_000
+      + (e.completedLessonIds?.length ?? 0);
+    const byCourse = new Map<string, CourseEnrollment>();
+    for (const d of snapshot.docs) {
+      const e = { id: d.id, ...d.data() } as CourseEnrollment;
+      const prev = byCourse.get(e.courseId);
+      if (!prev || rank(e) > rank(prev)) byCourse.set(e.courseId, e);
+    }
+    return Array.from(byCourse.values())
+      .sort((a, b) => (b.enrolledAt?.toMillis?.() ?? 0) - (a.enrolledAt?.toMillis?.() ?? 0));
   } catch (error) {
     console.error('Error fetching user enrollments:', error);
     throw error;
@@ -1300,7 +1134,7 @@ export async function getUserEnrollments(userId: string): Promise<CourseEnrollme
 
 export async function updateEnrollmentProgress(
   enrollmentId: string,
-  updates: Partial<Pick<CourseEnrollment, 'completedLessonIds' | 'completedModuleIds' | 'status' | 'overallScore' | 'completedAt' | 'lastAccessedAt'>>
+  updates: Partial<Pick<CourseEnrollment, 'completedLessonIds' | 'completedModuleIds' | 'status' | 'overallScore' | 'completedAt' | 'lastAccessedAt' | 'certificateIssuedAt'>>
 ): Promise<void> {
   try {
     const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, enrollmentId);
@@ -1332,16 +1166,21 @@ export async function getCourseEnrollments(
   }
 }
 
-/** Inscribe manualmente un usuario en un curso (desde el panel de admin) */
+/**
+ * Inscribe manualmente un usuario en un curso (desde el panel de admin).
+ * Devuelve `created: false` si ya estaba inscrito.
+ */
 export async function adminEnrollUserInCourse(
   userId: string,
   courseId: string,
   assignedBy: string,
   orgId: string = DEFAULT_ORG_ID
-): Promise<string> {
+): Promise<{ id: string; created: boolean }> {
   try {
-    const colRef = getCollectionRef(COLLECTIONS.ENROLLMENTS);
-    const docRef = doc(colRef);
+    const existing = await getUserEnrollments(userId);
+    const current = existing.find(e => e.courseId === courseId);
+    if (current) return { id: current.id, created: false };
+    const docRef = getDocRef(COLLECTIONS.ENROLLMENTS, `${userId}_${courseId}`);
     await setDoc(docRef, {
       userId,
       courseId,
@@ -1354,7 +1193,7 @@ export async function adminEnrollUserInCourse(
       enrolledAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-    return docRef.id;
+    return { id: docRef.id, created: true };
   } catch (error) {
     console.error('Error enrolling user:', error);
     throw error;
@@ -1383,6 +1222,12 @@ export async function upsertLessonProgress(
     console.error('Error upserting lesson progress:', error);
     throw error;
   }
+}
+
+/** Progreso de una lección (id `<uid>_<lessonId>`). */
+export async function getLessonProgress(userId: string, lessonId: string): Promise<LessonProgress | null> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.LESSON_PROGRESS, `${userId}_${lessonId}`));
+  return snap.exists() ? ({ id: snap.id, ...snap.data() } as LessonProgress) : null;
 }
 
 export async function getLessonProgressForCourse(
@@ -2120,6 +1965,17 @@ export async function updateSimAttempt(attemptId: string, updates: Partial<Omit<
  * crear un índice compuesto en Firestore, y el volumen de un módulo de
  * capacitación no lo amerita.
  */
+/** Intentos de simulación del usuario (para su listado de simulaciones). */
+export async function getUserSimAttempts(userId: string): Promise<SimAttempt[]> {
+  try {
+    const snap = await getDocs(query(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS), where('userId', '==', userId)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }) as SimAttempt);
+  } catch (error) {
+    console.error('Error getting user sim attempts:', error);
+    return [];
+  }
+}
+
 export async function getSimAttempts(moduleId: string, max = 100): Promise<SimAttempt[]> {
   try {
     const q = query(getCollectionRef(COLLECTIONS.SIM_ATTEMPTS), where('moduleId', '==', moduleId));
@@ -2392,26 +2248,6 @@ function newDailyPulse(date: string, questionIds: string[], createdBy: string, o
 }
 
 /**
- * Crea el pulso del día solo si no existe (transacción: si varios vendedores
- * abren la app al mismo tiempo, se crea una sola vez).
- * Devuelve true si lo creó.
- */
-export async function createDailyPulseIfMissing(
-  date: string,
-  questionIds: string[],
-  createdBy = 'auto',
-  orgId = DEFAULT_ORG_ID
-): Promise<boolean> {
-  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (snap.exists()) return false;
-    tx.set(docRef, stripUndefined(newDailyPulse(date, questionIds, createdBy, orgId)));
-    return true;
-  });
-}
-
-/**
  * Actualiza el estado del pulso (active → closed, etc.).
  * Con `touchTimestamps=false` (p. ej. al reabrir) no reescribe sentAt/closedAt.
  */
@@ -2428,35 +2264,6 @@ export async function updatePulseStatus(
   await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, id), extra);
 }
 
-/**
- * Reserva el envío de Slack del pulso: pasa de 'scheduled' a 'active' en una
- * transacción para que dos ejecuciones simultáneas no manden el aviso dos veces.
- * Devuelve true si esta llamada obtuvo la reserva.
- */
-export async function claimPulseSlackSend(date: string, orgId = DEFAULT_ORG_ID): Promise<boolean> {
-  const docRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (!snap.exists()) return false;
-    const data = snap.data() as DailyPulse;
-    if (data.status !== 'scheduled' || data.sentAt) return false;
-    tx.update(docRef, { status: 'active', sentAt: serverTimestamp(), updatedAt: serverTimestamp() });
-    return true;
-  });
-}
-
-/** Guarda el resultado del envío de Slack en el pulso del día. */
-export async function recordPulseSlackResult(
-  date: string,
-  result: Omit<PulseSlackResult, 'at'>,
-  orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  await updateDoc(getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`), stripUndefined({
-    slackResult: { ...result, at: serverTimestamp() },
-    updatedAt: serverTimestamp(),
-  }));
-}
-
 // ----------- Pulse Attempts -----------
 
 /** Obtiene el intento de un usuario para un día específico. */
@@ -2469,110 +2276,6 @@ export async function getPulseAttempt(userId: string, date: string, orgId = DEFA
     console.error('Error getting pulse attempt:', error);
     return null;
   }
-}
-
-/**
- * Inicia el intento del día, o devuelve el existente si ya hay uno.
- * Nunca sobrescribe un intento: así recargar la página no reinicia el pulso
- * ni permite volver a responder preguntas ya vistas.
- *
- * @param questionIds  Preguntas asignadas a este usuario. Se guardan en el
- *                     intento para que siempre vea las mismas.
- */
-export async function startPulseAttempt(
-  userId: string,
-  userName: string,
-  date: string,
-  segmentation: { vertical?: string; hub?: string; estado?: string; cosecha?: string },
-  questionIds: string[],
-  orgId = DEFAULT_ORG_ID
-): Promise<PulseAttempt> {
-  const id = `${userId}_${date}`;
-  const docRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, id);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (snap.exists()) return { id: snap.id, ...snap.data() } as PulseAttempt;
-    const attempt: Omit<PulseAttempt, 'id'> = {
-      userId,
-      userName,
-      pulseId: `${orgId}_${date}`,
-      date,
-      organizationId: orgId,
-      ...segmentation,
-      questionIds,
-      answers: [],
-      totalQuestions: questionIds.length,
-      correctAnswers: 0,
-      percentage: 0,
-      startedAt: serverTimestamp() as unknown as Timestamp,
-      status: 'in_progress',
-    };
-    tx.set(docRef, stripUndefined(attempt));
-    return { id, ...attempt, startedAt: Timestamp.now() };
-  });
-}
-
-/**
- * Guarda una respuesta en cuanto el vendedor la confirma.
- * Si la pregunta ya tenía respuesta, conserva la primera (no se puede corregir
- * después de ver la solución). Devuelve las respuestas guardadas.
- */
-export async function savePulseAnswer(
-  userId: string,
-  date: string,
-  answer: PulseAnswer
-): Promise<PulseAnswer[]> {
-  const docRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, `${userId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(docRef);
-    if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
-    const data = snap.data() as PulseAttempt;
-    const answers = data.answers ?? [];
-    if (data.status !== 'in_progress' || answers.some(a => a.questionId === answer.questionId)) {
-      return answers;
-    }
-    const next = [...answers, answer];
-    tx.update(docRef, {
-      answers: next,
-      correctAnswers: next.filter(a => a.isCorrect).length,
-      lastAnswerAt: serverTimestamp(),
-    });
-    return next;
-  });
-}
-
-/**
- * Cierra el intento con las respuestas guardadas. Es idempotente: si ya estaba
- * completado no vuelve a sumar la respuesta al contador del pulso.
- */
-export async function submitPulseAttempt(
-  userId: string,
-  date: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<PulseAttempt> {
-  const attemptRef = getDocRef(COLLECTIONS.PULSE_ATTEMPTS, `${userId}_${date}`);
-  const pulseRef = getDocRef(COLLECTIONS.DAILY_PULSES, `${orgId}_${date}`);
-  return runTransaction(ensureFirestore(), async tx => {
-    const snap = await tx.get(attemptRef);
-    if (!snap.exists()) throw new Error('No existe un intento para este pulso.');
-    const data = { id: snap.id, ...snap.data() } as PulseAttempt;
-    // Ya completado (idempotente) o vencido por el proceso programado: no se toca.
-    if (data.status !== 'in_progress') return data;
-    const answers = data.answers ?? [];
-    const total = data.questionIds?.length || data.totalQuestions || answers.length;
-    const correctAnswers = answers.filter(a => a.isCorrect).length;
-    const percentage = total > 0 ? Math.round((correctAnswers / total) * 100) : 0;
-    const patch = {
-      totalQuestions: total,
-      correctAnswers,
-      percentage,
-      completedAt: serverTimestamp(),
-      status: 'completed' as const,
-    };
-    tx.update(attemptRef, patch);
-    tx.update(pulseRef, { totalResponses: increment(1), updatedAt: serverTimestamp() });
-    return { ...data, ...patch, completedAt: Timestamp.now() };
-  });
 }
 
 /** Lista los intentos de un usuario (más recientes primero). */
@@ -2634,32 +2337,6 @@ export async function getPulseAttemptsByDateRange(
   }
 }
 
-/**
- * Marca como 'expired' los intentos que quedaron a medias en días anteriores.
- * Devuelve cuántos actualizó.
- */
-export async function expireStalePulseAttempts(
-  today: string,
-  lookbackStart: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<number> {
-  const q = query(
-    getCollectionRef(COLLECTIONS.PULSE_ATTEMPTS),
-    where('date', '>=', lookbackStart),
-    where('date', '<', today),
-  );
-  const snap = await getDocs(q);
-  const stale = snap.docs.filter(d => {
-    const a = d.data() as PulseAttempt;
-    return a.organizationId === orgId && a.status === 'in_progress';
-  });
-  if (stale.length === 0) return 0;
-  const batch = writeBatch(ensureFirestore());
-  for (const d of stale) batch.update(d.ref, { status: 'expired' });
-  await batch.commit();
-  return stale.length;
-}
-
 // ----------- Pulse Backlog (MVP2) -----------
 
 /** Obtiene el backlog pendiente de un usuario (más antiguos primero). */
@@ -2675,60 +2352,6 @@ export async function getUserPulseBacklog(userId: string, orgId = DEFAULT_ORG_ID
     console.error('Error getting pulse backlog:', error);
     return [];
   }
-}
-
-/**
- * Agrega preguntas incorrectas al backlog del usuario. Si la pregunta ya está
- * pendiente en su backlog no se duplica.
- */
-export async function addToPulseBacklog(
-  userId: string,
-  questions: { questionId: string; questionText: string; module: KnowledgeModule; linkedVideoIds?: string[] }[],
-  pulseDate: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  const pending = await getUserPulseBacklog(userId, orgId);
-  const alreadyPending = new Set(pending.map(b => b.questionId));
-  const toAdd = questions.filter(q => !alreadyPending.has(q.questionId));
-  if (toAdd.length === 0) return;
-  const batch = writeBatch(ensureFirestore());
-  for (const q of toAdd) {
-    const docRef = doc(getCollectionRef(COLLECTIONS.PULSE_BACKLOGS));
-    const item: Omit<PulseBacklogItem, 'id'> = {
-      userId,
-      organizationId: orgId,
-      questionId: q.questionId,
-      questionText: q.questionText,
-      module: q.module,
-      addedAt: serverTimestamp() as unknown as Timestamp,
-      pulseDate,
-      status: 'pending',
-      reviewAttempts: 0,
-      linkedVideoIds: q.linkedVideoIds,
-    };
-    batch.set(docRef, stripUndefined(item));
-  }
-  await batch.commit();
-}
-
-/** Marca un ítem del backlog como resuelto. */
-export async function resolvePulseBacklogItem(itemId: string): Promise<void> {
-  await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
-    status: 'resolved',
-    resolvedAt: serverTimestamp(),
-  });
-}
-
-/**
- * Registra un repaso de una pregunta del backlog. Solo se resuelve cuando el
- * vendedor la responde correctamente.
- */
-export async function recordPulseBacklogReview(itemId: string, correct: boolean): Promise<void> {
-  await updateDoc(getDocRef(COLLECTIONS.PULSE_BACKLOGS, itemId), {
-    reviewAttempts: increment(1),
-    lastReviewedAt: serverTimestamp(),
-    ...(correct ? { status: 'resolved', resolvedAt: serverTimestamp() } : {}),
-  });
 }
 
 // ----------- Slack Config -----------
@@ -2778,15 +2401,6 @@ export async function rememberAppUrl(url: string, orgId = DEFAULT_ORG_ID): Promi
 
 // ----------- Pulse Config -----------
 
-const DEFAULT_PULSE_CONFIG: Omit<PulseConfig, 'id' | 'organizationId' | 'updatedAt' | 'updatedBy'> = {
-  questionsPerPulse: 7,
-  activeModules: [],          // empty = all modules
-  closeAt: '12:00',
-  sameQuestionsForAll: true,
-  randomizeAnswerOrder: false,
-  autoDailyPulse: false,
-};
-
 /** Obtiene la configuración global del pulso de conocimiento. */
 export async function getPulseConfig(orgId = DEFAULT_ORG_ID): Promise<PulseConfig> {
   try {
@@ -2825,19 +2439,6 @@ export async function getPulseCronStatus(orgId = DEFAULT_ORG_ID): Promise<PulseC
   }
 }
 
-export async function savePulseCronStatus(
-  status: { lastActions: string[]; lastError?: string; maintenanceDate?: string },
-  orgId = DEFAULT_ORG_ID
-): Promise<void> {
-  await setDoc(getDocRef(COLLECTIONS.PULSE_CRON_STATUS, orgId), stripUndefined({
-    organizationId: orgId,
-    lastRunAt: serverTimestamp(),
-    lastActions: status.lastActions,
-    lastError: status.lastError ?? null,
-    maintenanceDate: status.maintenanceDate,
-  }), { merge: true });
-}
-
 /**
  * Pide a la función programada que revise a qué hora está su ejecución diaria
  * (la función escucha cambios en slack_config). Lo usa el panel si detecta que
@@ -2848,21 +2449,6 @@ export async function requestPulseScheduleSync(orgId = DEFAULT_ORG_ID): Promise<
 }
 
 // ----------- Questions for the pulse -----------
-
-/** Carga las preguntas de un pulso en paralelo, conservando el orden recibido. */
-export async function getPulseQuestions(ids: string[]): Promise<Question[]> {
-  const unique = Array.from(new Set(ids));
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
-  const snaps = await Promise.all(chunks.map(chunk =>
-    getDocs(query(getCollectionRef(COLLECTIONS.QUESTIONS), where(documentId(), 'in', chunk)))
-  ));
-  const byId = new Map<string, Question>();
-  for (const snap of snaps) {
-    for (const d of snap.docs) byId.set(d.id, { id: d.id, ...d.data() } as Question);
-  }
-  return ids.map(id => byId.get(id)).filter((q): q is Question => !!q);
-}
 
 // ----------- Auto-scheduling helpers -----------
 
@@ -2895,20 +2481,6 @@ export async function scheduleAutoPulse(
 }
 
 // ----------- Org Tokens -----------
-
-/** Obtiene un token específico de la organización por su clave. */
-export async function getOrgToken(
-  key: string,
-  orgId = DEFAULT_ORG_ID
-): Promise<OrgTokenConfig | null> {
-  try {
-    const snap = await getDoc(doc(ensureFirestore(), COLLECTIONS.ORG_TOKENS, `${orgId}_${key}`));
-    return snap.exists() ? (snap.data() as OrgTokenConfig) : null;
-  } catch (error) {
-    console.error('Error getting org token:', error);
-    return null;
-  }
-}
 
 /** Lista todos los tokens configurados para la organización. */
 export async function getOrgTokens(orgId = DEFAULT_ORG_ID): Promise<OrgTokenConfig[]> {
@@ -3078,4 +2650,51 @@ export async function updateKiosko(id: string, updates: Partial<Kiosko>): Promis
 export async function deleteKiosko(id: string): Promise<void> {
   const firestore = ensureFirestore();
   await deleteDoc(doc(firestore, COLLECTIONS.KIOSCOS, id));
+}
+
+// ============================================================================
+// AVISOS A EMBAJADORES (Admin → Notificaciones)
+// ============================================================================
+
+export async function getNotificationConfig(orgId = DEFAULT_ORG_ID): Promise<NotificationConfig> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.NOTIFICATION_CONFIG, orgId));
+  return resolveNotificationConfig(snap.exists() ? (snap.data() as Partial<NotificationConfig>) : null, orgId);
+}
+
+export async function saveNotificationConfig(
+  rules: NotificationConfig['rules'],
+  updatedBy: string,
+  orgId = DEFAULT_ORG_ID,
+): Promise<void> {
+  await setDoc(getDocRef(COLLECTIONS.NOTIFICATION_CONFIG, orgId), stripUndefined({
+    organizationId: orgId,
+    rules,
+    updatedAt: serverTimestamp(),
+    updatedBy,
+  }));
+}
+
+/** Últimos avisos enviados (los escribe el servidor). */
+export async function getRecentNotifications(max = 30): Promise<NotificationLogEntry[]> {
+  const snap = await getDocs(query(getCollectionRef(COLLECTIONS.NOTIFICATION_LOG), orderBy('createdAt', 'desc'), limit(max)));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as NotificationLogEntry);
+}
+
+// ============================================================================
+// ANALYTICS DE USUARIOS (panel)
+// ============================================================================
+
+export async function getAllEnrollments(): Promise<CourseEnrollment[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.ENROLLMENTS));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as CourseEnrollment);
+}
+
+export async function getAllJourneyProgress(): Promise<UserJourneyProgress[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.JOURNEY_PROGRESS));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as UserJourneyProgress);
+}
+
+export async function getAllUserBadges(): Promise<UserBadge[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.USER_BADGES));
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }) as UserBadge);
 }

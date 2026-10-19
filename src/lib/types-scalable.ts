@@ -86,6 +86,8 @@ export interface AssessmentConfig {
   showFeedback: FeedbackMode;   // Cuándo mostrar respuesta correcta/explicación
   allowRetry: boolean;          // Puede reintentar si reprueba
   isStandalone: boolean;        // Examen independiente (no requiere pertenecer a una ruta)
+  /** Si es true, el paso de la ruta solo se completa al aprobar (passingScore). */
+  requirePassToAdvance?: boolean;
 }
 
 export const DEFAULT_ASSESSMENT_CONFIG: AssessmentConfig = {
@@ -199,15 +201,19 @@ export interface Mission {
 }
 
 export interface GamificationConfig {
+  /** false = las misiones no se pierden por errores (sin límite de errores). */
   enableLives: boolean;
+  /** Máximo de vidas extra que se pueden acumular. */
   maxLives: number;
-  enableBonusLives: boolean; // vidas extra por preguntas tricky
+  enableBonusLives: boolean; // vidas extra por acertar preguntas tricky
   pointsPerCorrectAnswer: number;
   pointsPerTrickyQuestion: number;
   penaltyPerError: number;
-  timeBonus: boolean; // bonus por completar rápido
+  timeBonus: boolean; // bonus por completar rápido (requiere tiempo límite)
+  /** @deprecated Las insignias se configuran en Admin → Insignias (criterio "aprobar desafío"). */
   enableBadges: boolean;
-  badgeIds: string[]; // badges disponibles para este quiz
+  /** @deprecated Ver enableBadges. */
+  badgeIds: string[];
 }
 
 // ============================================================================
@@ -230,8 +236,9 @@ export interface Question {
 
   // Metadata
   active: boolean;
-  timesUsed: number; // contador de usos
-  averageCorrectRate: number; // % de aciertos
+  timesUsed: number; // veces respondida (pulso y desafíos)
+  timesCorrect?: number; // veces respondida correctamente
+  averageCorrectRate: number; // % de aciertos (timesCorrect / timesUsed)
 
   // Configuración especial
   isTricky: boolean;
@@ -281,6 +288,7 @@ export interface UserProfile {
   fechaIngreso?: string;     // Fecha de ingreso (YYYY-MM-DD)
   active?: boolean;          // false = usuario desactivado (sin acceso)
   slackId?: string;          // ID de usuario en Slack (ej: U01234567)
+  pushEnabled?: boolean;     // tiene algún dispositivo con notificaciones push (lo mantiene el servidor)
 
   // Metadata
   createdAt: Timestamp;
@@ -322,6 +330,15 @@ export interface UserStats {
 // INTENTOS Y RESULTADOS
 // ============================================================================
 
+export interface QuizQuestionResult {
+  questionId?: string;
+  text: string;
+  isCorrect: boolean;
+  userAnswer: string;
+  correctAnswer: string;
+  isTricky: boolean;
+}
+
 export interface QuizAttempt {
   id: string;
   organizationId: string;
@@ -344,6 +361,12 @@ export interface QuizAttempt {
   // Respuestas detalladas
   missionResults: MissionResult[];
   answers: QuestionAnswer[];
+  /** Resultado por pregunta, para el detalle de la pantalla de resultados. */
+  questionResults?: QuizQuestionResult[];
+  /** `assessmentConfig.showFeedback` del quiz al momento del intento. */
+  showFeedback?: string;
+  /** El tiempo límite se agotó antes de terminar. */
+  timeExpired?: boolean;
 
   // Feedback
   aiFeedback?: string;
@@ -569,7 +592,8 @@ export type JourneyStepType =
   | 'results'     // Pantalla de resultados
   | 'certificate' // Emisión de certificado
   | 'badge'       // Otorgamiento de insignia
-  | 'checklist';  // Lista de verificación antes de avanzar
+  | 'checklist'   // Lista de verificación antes de avanzar
+  | 'simulation'; // Simulación de la herramienta (se completa al aprobarla)
 
 /** @deprecated Use JourneyForm with formId instead */
 export type JourneyFormType =
@@ -601,6 +625,7 @@ export interface JourneyStep {
     /** @deprecated use formId */
     formType?: JourneyFormType;
     checklistItems?: ChecklistItem[];   // para pasos de tipo 'checklist'
+    simModuleId?: string;               // para pasos de tipo 'simulation'
   };
 }
 
@@ -795,6 +820,19 @@ export interface CertificateSigner {
 // INSIGNIAS (BADGES)
 // ============================================================================
 
+/**
+ * Cómo se gana una insignia automáticamente. Sin criterio (o 'manual'), solo
+ * la entrega un admin desde Admin → Insignias.
+ */
+export type BadgeCriteria =
+  | { type: 'manual' }
+  | { type: 'quiz_passed'; quizId: string }        // aprobar un desafío
+  | { type: 'quiz_perfect'; quizId?: string }      // 100% en un desafío (o en cualquiera)
+  | { type: 'course_completed'; courseId: string } // terminar un curso
+  | { type: 'journey_completed'; journeyId?: string } // obtener el certificado de una ruta (o de cualquiera)
+  | { type: 'pulse_streak'; days: number }         // racha de pulsos completados
+  | { type: 'simulation_passed'; simModuleId: string }; // aprobar una simulación
+
 export interface Badge {
   id: string;
   organizationId: string;
@@ -803,6 +841,7 @@ export interface Badge {
   emoji: string;        // ej. "🏆", "⭐", "🎯"
   color: string;        // color hex del fondo del badge
   category?: string;   // ej. "Ventas", "Capacitación", "Liderazgo"
+  criteria?: BadgeCriteria;
   active: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -899,6 +938,8 @@ export interface UserJourneyProgress {
   journeyId: string;
   productId: string;
   completedStepIds: string[];
+  /** Fecha de emisión de cada certificado de la ruta (stepId → fecha). */
+  certificateIssuedAt?: Record<string, Timestamp>;
   startedAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -1439,6 +1480,8 @@ export interface PulseCronStatus {
   lastTickAt?: Timestamp;
   /** Último día (YYYY-MM-DD) en que se hizo la limpieza diaria de días anteriores. */
   maintenanceDate?: string;
+  /** Último día en que se revisaron los avisos diarios a embajadores. */
+  notificationsDate?: string;
   /** Hora (HH:MM) a la que quedó programada la ejecución diaria en Cloud Scheduler. */
   scheduledSendAt?: string;
   scheduleSyncedAt?: Timestamp;

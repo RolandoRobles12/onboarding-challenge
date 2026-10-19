@@ -104,6 +104,35 @@ self.addEventListener('fetch', event => {
   }
 });
 
+// ── Notificaciones push (avisos de cursos, desafíos, plazos…) ──
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
+  const title = data.title || 'Aviva';
+  event.waitUntil(self.registration.showNotification(title, {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag || undefined,
+    data: { url: data.url || '/' },
+  }));
+});
+
+// Al tocar el aviso: enfoca la app si ya está abierta o la abre en la página indicada.
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin);
+  // Solo páginas de la propia app.
+  const url = target.origin === self.location.origin ? target.href : self.location.origin + '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      const existing = clients.find(c => c.url.startsWith(self.location.origin));
+      if (existing) return existing.focus().then(c => (c && 'navigate' in c ? c.navigate(url) : undefined));
+      return self.clients.openWindow(url);
+    })
+  );
+});
+
 // Permite que la app pida activar una versión nueva sin esperar
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') self.skipWaiting();

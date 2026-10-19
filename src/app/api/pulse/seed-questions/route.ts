@@ -2,10 +2,12 @@
  * POST /api/pulse/seed-questions
  * Agrega las preguntas base al banco de preguntas del Pulso de Conocimiento.
  * Idempotente: omite preguntas con el mismo texto si ya existen.
+ * Requiere sesión de admin o capacitador (header `Authorization: Bearer <ID token>`).
  */
 
-import { NextResponse } from 'next/server';
-import { createQuestion, getQuestions } from '@/lib/firestore-service';
+import { NextRequest, NextResponse } from 'next/server';
+import { createQuestion, getQuestionTexts } from '@/lib/server/pulse-store';
+import { authErrorResponse, requireUser, STAFF_ROLES } from '@/lib/server/auth';
 import type { KnowledgeModule } from '@/lib/types-scalable';
 
 function makeOptions(options: string[], correctText: string) {
@@ -307,11 +309,10 @@ const SEED_QUESTIONS: {
   },
 ];
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   try {
-    // Fetch existing questions to avoid duplicates (no productId filter = all questions)
-    const existing = await getQuestions(undefined, false);
-    const existingTexts = new Set(existing.map(q => q.text.trim()));
+    const { profile } = await requireUser(req, STAFF_ROLES);
+    const existingTexts = await getQuestionTexts();
 
     const results: { text: string; status: 'created' | 'skipped' }[] = [];
 
@@ -333,7 +334,7 @@ export async function POST() {
           active: true,
           isTricky: false,
         },
-        'system'
+        profile.uid
       );
 
       results.push({ text: q.text, status: 'created' });
@@ -344,6 +345,8 @@ export async function POST() {
 
     return NextResponse.json({ message: `${created} preguntas creadas, ${skipped} omitidas (ya existían)`, results });
   } catch (err: unknown) {
+    const authError = authErrorResponse(err);
+    if (authError) return authError;
     console.error('[seed-questions] Error:', err);
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 });
   }

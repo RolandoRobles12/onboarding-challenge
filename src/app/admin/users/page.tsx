@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useProducts } from '@/hooks/use-firestore';
-import { getAllUsers, updateUserProfile, addToWhitelist, getKioscos, getUserAllJourneyProgress, resetUserJourneyProgress } from '@/lib/firestore-service';
+import { getAllUsers, updateUserProfile, addToWhitelist, getKioscos, getUserAllJourneyProgress, resetUserJourneyProgress, getWhitelistEntries, deleteWhitelistEntry } from '@/lib/firestore-service';
+import { Timestamp } from 'firebase/firestore';
 import { Combobox } from '@/components/ui/combobox';
 import type { Kiosko } from '@/lib/types-scalable';
 import { toast } from '@/hooks/use-toast';
@@ -31,7 +32,7 @@ import {
   Upload, FileSpreadsheet, AlertCircle, ArrowRight, X, Mail, RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { UserProfile, UserRole, UserJourneyProgress } from '@/lib/types-scalable';
+import type { UserProfile, UserRole, UserJourneyProgress, WhitelistEntry } from '@/lib/types-scalable';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -67,6 +68,10 @@ type CsvRow = {
 
 export default function UsersPage() {
   const { profile: currentUser } = useAuth();
+  // Solo un super_admin crea o administra super_admins (las reglas lo exigen).
+  const isSuperAdmin = currentUser?.rol === 'super_admin';
+  const assignableRoles = (Object.keys(ROLE_LABELS) as UserRole[]).filter(r => r !== 'super_admin' || isSuperAdmin);
+  const canManage = (u: UserProfile) => isSuperAdmin || u.rol !== 'super_admin';
   const { products } = useProducts();
   const [kioscos, setKioscos] = useState<Kiosko[]>([]);
 
@@ -102,7 +107,8 @@ export default function UsersPage() {
 
   // Invite user
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ email: '', rol: 'seller' as UserRole, assignedKiosko: '', producto: '' });
+  const [inviteForm, setInviteForm] = useState({ email: '', rol: 'seller' as UserRole, assignedKiosko: '', producto: '', expiresAt: '' });
+  const [invites, setInvites] = useState<WhitelistEntry[]>([]);
   const [inviting, setInviting] = useState(false);
 
   // CSV import
@@ -113,12 +119,17 @@ export default function UsersPage() {
 
   // ── Data loading ─────────────────────────────────────────────────────────
 
+  const registeredEmails = new Set(users.map(u => u.email?.toLowerCase()));
+  // Invitaciones de correos que todavía no inician sesión.
+  const pendingInvites = invites.filter(i => !i.used && !registeredEmails.has(i.email.toLowerCase()));
+
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [usersData, kioscosData] = await Promise.all([getAllUsers(), getKioscos()]);
+      const [usersData, kioscosData, invitesData] = await Promise.all([getAllUsers(), getKioscos(), getWhitelistEntries().catch(() => [])]);
       setUsers(usersData);
       setKioscos(kioscosData);
+      setInvites(invitesData);
     } catch (err: unknown) {
       toast({ title: 'Error al cargar datos', description: err instanceof Error ? err.message : 'Error desconocido', variant: 'destructive' });
     } finally {
@@ -233,7 +244,7 @@ export default function UsersPage() {
   }, [bulkEmailsInput, activeUsers]);
 
   const handleBulkDeactivate = async () => {
-    const toDeactivate = bulkMatchedUsers.filter(m => m.user);
+    const toDeactivate = bulkMatchedUsers.filter(m => m.user && canManage(m.user));
     if (toDeactivate.length === 0) return;
     setDeactivating(true);
     try {
@@ -283,11 +294,15 @@ export default function UsersPage() {
         assignedKiosko: inviteForm.assignedKiosko || undefined,
         assignedProductId: prod?.id || undefined,
         addedBy: currentUser?.uid || '',
-        expiresAt: undefined,
+        // Vence al final del día elegido; sin fecha, no vence.
+        expiresAt: inviteForm.expiresAt
+          ? Timestamp.fromDate(new Date(`${inviteForm.expiresAt}T23:59:59`))
+          : undefined,
       } as never);
       toast({ title: 'Usuario invitado', description: `${inviteForm.email} fue agregado a la whitelist.` });
+      setInvites(await getWhitelistEntries().catch(() => invites));
       setInviteOpen(false);
-      setInviteForm({ email: '', rol: 'seller', assignedKiosko: '', producto: '' });
+      setInviteForm({ email: '', rol: 'seller', assignedKiosko: '', producto: '', expiresAt: '' });
     } catch (err: unknown) {
       toast({ title: 'Error al invitar', description: err instanceof Error ? err.message : 'Error', variant: 'destructive' });
     } finally {
@@ -382,12 +397,12 @@ export default function UsersPage() {
         try {
           if (row._status === 'update') {
             const user = users.find(u => u.email.toLowerCase() === row.email);
-            if (!user) { errors++; continue; }
+            if (!user || !canManage(user)) { errors++; continue; }
             const trainer = row.capacitador_email ? users.find(u => u.email.toLowerCase() === row.capacitador_email!.toLowerCase()) : null;
             const prod = row.producto ? products.find(p => p.name.toLowerCase() === row.producto!.toLowerCase() || p.id === row.producto) : null;
             await updateUserProfile(user.uid, {
               ...(row.nombre ? { nombre: row.nombre } : {}),
-              ...(row.rol && ['seller','trainer','admin','super_admin'].includes(row.rol) ? { rol: row.rol as UserRole } : {}),
+              ...(row.rol && assignableRoles.includes(row.rol as UserRole) ? { rol: row.rol as UserRole } : {}),
               ...(row.kiosko ? { assignedKiosko: row.kiosko } : {}),
               ...(prod ? { producto: prod.id } : {}),
               ...(row.fecha_ingreso ? { fechaIngreso: row.fecha_ingreso } : {}),
@@ -399,7 +414,7 @@ export default function UsersPage() {
             await addToWhitelist({
               organizationId: 'aviva-credito',
               email: row.email,
-              role: (row.rol && ['seller','trainer','admin','super_admin'].includes(row.rol) ? row.rol : 'seller') as UserRole,
+              role: (row.rol && assignableRoles.includes(row.rol as UserRole) ? row.rol : 'seller') as UserRole,
               assignedKiosko: row.kiosko || undefined,
               assignedProductId: prod?.id || undefined,
               addedBy: currentUser?.uid || '',
@@ -452,7 +467,7 @@ export default function UsersPage() {
             <Button
               variant="outline" size="sm"
               onClick={() => openEdit(user)}
-              disabled={user.uid === currentUser?.uid}
+              disabled={user.uid === currentUser?.uid || !canManage(user)}
               className="gap-1 shrink-0"
             >
               <UserCog className="h-3.5 w-3.5" /> Editar
@@ -504,10 +519,49 @@ export default function UsersPage() {
           <TabsTrigger value="inactive" className="gap-1.5">
             <UserX className="h-4 w-4" /> Inactivos ({inactiveUsers.length})
           </TabsTrigger>
+          <TabsTrigger value="invites" className="gap-1.5">
+            <Mail className="h-4 w-4" /> Invitaciones ({pendingInvites.length})
+          </TabsTrigger>
           <TabsTrigger value="import" className="gap-1.5">
             <FileSpreadsheet className="h-4 w-4" /> Importar
           </TabsTrigger>
         </TabsList>
+
+        {/* ── Invitaciones pendientes ───────────────────────────────────── */}
+        <TabsContent value="invites" className="space-y-2 mt-4">
+          {pendingInvites.length === 0 ? (
+            <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No hay invitaciones pendientes.</CardContent></Card>
+          ) : pendingInvites.map(inv => {
+            const expires = inv.expiresAt?.toDate?.();
+            const expired = !!expires && expires.getTime() < Date.now();
+            return (
+              <Card key={inv.id}>
+                <CardContent className="py-3 px-4 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{inv.email}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {ROLE_LABELS[inv.role]}
+                      {inv.assignedProductId && ` · ${getProductName(inv.assignedProductId)}`}
+                      {inv.assignedKiosko && ` · ${inv.assignedKiosko}`}
+                      {expires && <span className={expired ? 'text-destructive' : ''}> · {expired ? 'venció' : 'vence'} el {expires.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}</span>}
+                    </p>
+                  </div>
+                  {(isSuperAdmin || inv.role !== 'super_admin') && (
+                    <Button size="sm" variant="ghost" className="text-destructive" onClick={async () => {
+                      try {
+                        await deleteWhitelistEntry(inv.id);
+                        setInvites(prev => prev.filter(i => i.id !== inv.id));
+                        toast({ title: 'Invitación eliminada' });
+                      } catch {
+                        toast({ title: 'No se pudo eliminar', variant: 'destructive' });
+                      }
+                    }}>Quitar</Button>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TabsContent>
 
         {/* ── Active users ───────────────────────────────────────────── */}
         <TabsContent value="active" className="space-y-4 mt-4">
@@ -700,7 +754,7 @@ export default function UsersPage() {
                 <Select value={editForm.rol} onValueChange={v => setEditForm(f => ({ ...f, rol: v as UserRole }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                    {assignableRoles.map(r => (
                       <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
                     ))}
                   </SelectContent>
@@ -887,7 +941,7 @@ export default function UsersPage() {
       </Dialog>
 
       {/* ── Invite user dialog ────────────────────────────────────────────── */}
-      <Dialog open={inviteOpen} onOpenChange={v => { setInviteOpen(v); if (!v) setInviteForm({ email: '', rol: 'seller', assignedKiosko: '', producto: '' }); }}>
+      <Dialog open={inviteOpen} onOpenChange={v => { setInviteOpen(v); if (!v) setInviteForm({ email: '', rol: 'seller', assignedKiosko: '', producto: '', expiresAt: '' }); }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Mail className="h-5 w-5 text-primary" /> Invitar usuario</DialogTitle>
@@ -910,7 +964,7 @@ export default function UsersPage() {
               <Select value={inviteForm.rol} onValueChange={v => setInviteForm(f => ({ ...f, rol: v as UserRole }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {(Object.keys(ROLE_LABELS) as UserRole[]).map(r => (
+                  {assignableRoles.map(r => (
                     <SelectItem key={r} value={r}>{ROLE_LABELS[r]}</SelectItem>
                   ))}
                 </SelectContent>
@@ -936,6 +990,11 @@ export default function UsersPage() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>La invitación vence el <span className="text-xs text-muted-foreground">(opcional)</span></Label>
+              <Input type="date" value={inviteForm.expiresAt} onChange={e => setInviteForm(f => ({ ...f, expiresAt: e.target.value }))} />
+              <p className="text-[11px] text-muted-foreground">Después de esa fecha, la invitación ya no da el rol ni el producto.</p>
             </div>
             {(() => {
               const productKioscos = kioscos.filter(k => k.active && (inviteForm.producto ? k.productIds?.includes(inviteForm.producto) : false));

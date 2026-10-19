@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { PushPrompt } from '@/components/PushToggle';
 import { useAuth } from '@/context/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
@@ -49,6 +50,7 @@ import {
   ChevronDown, ChevronUp, PlayCircle, Sparkles, Target, ListChecks,
   Radio, Clock, FlaskConical, X, CalendarDays, Compass, Flag, TrendingUp,
   AlertTriangle, Eye,
+  MousePointerClick,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -85,6 +87,7 @@ const STEP_META: Record<string, {
   certificate:{ icon: Award,       label: 'Certificado',          color: 'text-amber-500',  actionLabel: 'Obtener certificado', href: (id) => `/${id}/certificate`,                                   briefing: '¡Descarga tu certificado oficial Aviva!' },
   badge:      { icon: Medal,       label: 'Insignia',             color: 'text-yellow-500', actionLabel: 'Reclamar insignia',   href: () => '/perfil',                                                briefing: 'Has ganado una insignia por tu dedicación.' },
   checklist:  { icon: ListChecks,  label: 'Lista de verificación',color: 'text-teal-500',   actionLabel: 'Completar lista',     href: () => '#',                                                      briefing: 'Confirma los puntos necesarios para avanzar.' },
+  simulation: { icon: MousePointerClick, label: 'Simulación',     color: 'text-fuchsia-500',actionLabel: 'Practicar simulación', href: (_, cfg) => cfg?.simModuleId ? `/simulations/${cfg.simModuleId}` : '/simulations', briefing: 'Practica el flujo de la herramienta como si fuera real.' },
 };
 
 // ─── Stage color palette ──────────────────────────────────────────────────────
@@ -1399,6 +1402,8 @@ function JourneyDashboard({ userId, profile, productId, testStageId, isTestMode,
           </Button>
         </div>
       )}
+
+      {!isExploring && <PushPrompt />}
 
       {!isExploring && <PulseTodayCard userId={userId} />}
 

@@ -24,6 +24,9 @@ import {
 import { cn } from '@/lib/utils';
 import type { Mission, QuizDifficulty, Question, AssessmentConfig, FeedbackMode, QuestionType } from '@/lib/types-scalable';
 import { DEFAULT_ASSESSMENT_CONFIG } from '@/lib/types-scalable';
+import type { GamificationConfig } from '@/lib/types-scalable';
+import { DEFAULT_GAMIFICATION_CONFIG } from '@/lib/quiz-scoring';
+import { QuizGamificationCard } from '@/components/admin/QuizGamificationCard';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import Link from 'next/link';
 
@@ -420,6 +423,8 @@ export default function EditQuizPage() {
   const [loadingQuiz, setLoadingQuiz] = useState(true);
   const [saving, setSaving] = useState(false);
   const [assessmentConfig, setAssessmentConfig] = useState<AssessmentConfig>({ ...DEFAULT_ASSESSMENT_CONFIG });
+  const [gamification, setGamification] = useState<GamificationConfig>({ ...DEFAULT_GAMIFICATION_CONFIG });
+  const [prerequisites, setPrerequisites] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     productId: '',
     title: '',
@@ -456,6 +461,8 @@ export default function EditQuizPage() {
       if (quiz.assessmentConfig) {
         setAssessmentConfig(quiz.assessmentConfig);
       }
+      setGamification({ ...DEFAULT_GAMIFICATION_CONFIG, ...quiz.gamificationConfig });
+      setPrerequisites(quiz.prerequisites ?? []);
       if (quiz.missions && quiz.missions.length > 0) {
         setMissions(quiz.missions.map(m => ({
           id: m.id,
@@ -477,6 +484,8 @@ export default function EditQuizPage() {
   const editableSignature = JSON.stringify({
     formData: { ...formData, tagsInput: '' },
     assessmentConfig,
+    gamification,
+    prerequisites,
     missions: missions.map(({ expanded: _expanded, ...m }) => m),
   });
   // Se captura una sola vez, cuando la carga terminó y el estado ya refleja
@@ -580,6 +589,8 @@ export default function EditQuizPage() {
         totalQuestions,
         tags: formData.tags,
         assessmentConfig,
+        gamificationConfig: { ...gamification, timeBonus: gamification.timeBonus && assessmentConfig.timeLimit > 0 },
+        prerequisites,
       });
 
       toast({ title: 'Evaluación actualizada' });
@@ -849,6 +860,17 @@ export default function EditQuizPage() {
           </div>
         </CardContent>
       </Card>
+
+      <QuizGamificationCard
+        quizId={quizId}
+        gamification={gamification}
+        onGamificationChange={setGamification}
+        requirePass={!!assessmentConfig.requirePassToAdvance}
+        onRequirePassChange={v => setAssessmentConfig(prev => ({ ...prev, requirePassToAdvance: v }))}
+        prerequisites={prerequisites}
+        onPrerequisitesChange={setPrerequisites}
+        hasTimeLimit={assessmentConfig.timeLimit > 0}
+      />
 
       {/* Stats bar */}
       <div className="flex gap-6 text-sm">

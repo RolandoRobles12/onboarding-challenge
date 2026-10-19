@@ -59,11 +59,15 @@ export interface Course {
   durationDays?: number;        // Días máximos para completar
   expiresAt?: Timestamp;
 
-  // Audiencia
+  // Audiencia (vacío = todos)
   targetRoles: string[];
+  /** Nombres de kioscos (como se guardan en `users.assignedKiosko`). */
   branchIds: string[];
+  /** Productos a los que va dirigido. */
+  productIds?: string[];
 
   // Certificación
+  /** 'default' = al completar el curso se emite un certificado del curso. */
   certificateTemplate?: string;
   passingScore?: number;        // % mínimo para aprobar
 
@@ -150,6 +154,10 @@ export interface LessonContent {
   audioDuration?: number;
 
   // SCORM
+  /**
+   * URL de inicio del paquete. Los paquetes que se suben desde el panel se
+   * descomprimen y se sirven desde la propia app: `/scorm/<ruta en Storage>`.
+   */
   scormPackageUrl?: string;
   scormVersion?: '1.2' | '2004';
 
@@ -225,6 +233,9 @@ export interface LessonProgress {
   progressPercentage: number;
 
   lastPosition?: number;        // Para video/audio (segundos)
+
+  /** Datos que guarda un paquete SCORM (cmi.*) para retomarlo donde se quedó. */
+  scormData?: Record<string, string>;
 
   startedAt?: Timestamp;
   completedAt?: Timestamp;

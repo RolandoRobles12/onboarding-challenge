@@ -1,256 +1,113 @@
 # 🔥 Configuración de Firebase
 
-## 📋 Pasos para Configurar la Base de Datos
+## 🔒 Seguridad: cómo está armada
 
-### 1️⃣ Configurar Reglas de Firestore
+- **Reglas de Firestore** (`firestore.rules`) y de **Storage** (`storage.rules`):
+  solo entran cuentas `@avivacredito.com` (con el correo verificado) que tengan
+  perfil activo. El contenido lo administra el staff (`super_admin`, `admin`,
+  `trainer`); el vendedor solo lee el contenido y escribe su propio progreso.
+  Usuarios, invitaciones y tokens son solo de admins, y únicamente un
+  `super_admin` crea o modifica otros `super_admin`.
+- **Rutas de `/api`**: usan el Firebase Admin SDK (`src/lib/server/`) y piden el
+  ID token de la sesión (`Authorization: Bearer …`). `send-slack` y
+  `seed-questions` exigen rol de staff; `auto-create`, una sesión válida;
+  `cron`, el secreto que genera la función programada.
+- **Perfiles**: los crea el servidor en el primer inicio de sesión
+  (`POST /api/auth/profile`). El rol sale de la whitelist; si el correo no
+  está ahí, de `SUPER_ADMIN_EMAILS`; si tampoco, es vendedor. El navegador no
+  puede escribir su propio rol.
 
-Para permitir que los scripts funcionen, necesitas actualizar las reglas de Firestore temporalmente:
-
-1. Ve a [Firebase Console](https://console.firebase.google.com/)
-2. Selecciona tu proyecto
-3. Ve a **Firestore Database** → **Reglas**
-4. Actualiza las reglas a:
-
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // TEMPORAL PARA DESARROLLO - Permite lectura/escritura
-    match /{document=**} {
-      allow read, write: if true;
-    }
-  }
-}
-```
-
-**⚠️ IMPORTANTE**: Estas reglas son para desarrollo. Ver sección de seguridad al final.
-
-### 2️⃣ Crear Whitelist Manualmente
-
-En la [Firebase Console](https://console.firebase.google.com/), ve a Firestore Database y crea estos documentos:
-
-#### Colección: `whitelist`
-
-**Documento 1: `rolando_9834_at_gmail_com`**
-```json
-{
-  "organizationId": "aviva-credito",
-  "email": "rolando.9834@gmail.com",
-  "role": "super_admin",
-  "addedBy": "manual-setup",
-  "addedAt": [timestamp actual],
-  "used": false
-}
-```
-
-**Documento 2: `admin_at_avivacredito_com`**
-```json
-{
-  "organizationId": "aviva-credito",
-  "email": "admin@avivacredito.com",
-  "role": "super_admin",
-  "addedBy": "manual-setup",
-  "addedAt": [timestamp actual],
-  "used": false
-}
-```
-
-**Documento 3-6**: Crea documentos similares para los demás usuarios:
-- `capacitador1_at_avivacredito_com` - role: "trainer", assignedKiosko: "ba-product"
-- `capacitador2_at_avivacredito_com` - role: "trainer", assignedKiosko: "atn-product"
-- `vendedor1_at_avivacredito_com` - role: "seller", assignedKiosko: "ba-product"
-- `vendedor2_at_avivacredito_com` - role: "seller", assignedKiosko: "atn-product"
-
-### 3️⃣ Ejecutar Script de Migración de Datos
-
-Una vez que las reglas permitan escritura:
+## 🚀 Desplegar
 
 ```bash
-npx tsx scripts/migrate-to-firestore.ts
+# Reglas, índices y reglas de Storage
+firebase deploy --only firestore:rules,firestore:indexes,storage
 ```
 
-Este script creará:
-- Organización
-- 2 Productos (BA y ATN)
-- ~100 Preguntas
-- Quizzes
-- 4 Achievements
+- La primera vez que se despliegan las reglas de Storage, la CLI pide permiso
+  para que Storage lea Firestore (las reglas revisan el rol del usuario):
+  acéptalo.
+- Si la consola tiene índices creados a mano que no están en
+  `firestore.indexes.json`, la CLI pregunta si borrarlos: responde que no.
+- La cuenta de servicio del backend de App Hosting necesita acceso a Firestore
+  (rol **Cloud Datastore User** o **Firebase Admin**). Si las rutas de `/api`
+  responden "Error interno" con `PERMISSION_DENIED` en los logs, falta ese rol.
+  También necesita leer Storage (rol **Storage Object Viewer**): los paquetes
+  SCORM se sirven desde la misma app por `/scorm/...`.
+- Orden recomendado: primero la app (App Hosting) y después reglas e índices.
+  Las reglas nuevas ya no dejan que el navegador escriba intentos, puntajes ni
+  el Pulso; si se despliegan antes que la app, la versión vieja deja de guardar.
 
-### 4️⃣ Probar la Aplicación
+### Variables de entorno (opcionales)
 
-1. Inicia la app: `npm run dev`
-2. Ve a `http://localhost:9002/login`
-3. Inicia sesión con `rolando.9834@gmail.com`
-4. El sistema debería:
-   - Encontrar tu email en la whitelist
-   - Crear tu perfil en la colección `users`
-   - Asignarte el rol `super_admin`
-   - Darte acceso al panel admin en `/admin`
+| Variable | Para qué |
+|---|---|
+| `SUPER_ADMIN_EMAILS` | Correos, separados por comas, que reciben `super_admin` en su primer inicio de sesión si no están en la whitelist. Por defecto, los que ya tenía la app. |
+| `PULSE_CRON_SECRET` | Secreto alterno para `/api/pulse/cron` (la función programada genera uno solo). |
+| `SLACK_BOT_TOKEN` | Respaldo del token del bot si no está en Admin → Tokens. |
+| `APP_URL` | URL pública de la app para los enlaces de los avisos, si no está en la configuración de Slack. |
+| `ANTHROPIC_API_KEY` | Respaldo de la API key de Claude si no está en Admin → Tokens (`anthropic_api_key`). Activa el mensaje con IA en los resultados de los desafíos; sin llave, se muestran las frases fijas. |
 
----
+## 🔔 Avisos (Slack y push)
 
-## 🔒 Reglas de Seguridad para Producción
+Los avisos salen por **mensaje directo de Slack** y **notificación push** (no
+hay correo). Se configuran en **Admin → Notificaciones**: cada regla se puede
+apagar, elegir canal y ajustar los días de anticipación; el botón "Enviarme una
+prueba" manda un aviso al admin para revisar ambos canales.
 
-Una vez que todo funcione, actualiza las reglas a:
+- **Slack**: usa el token del bot (Admin → Tokens) y el **Slack ID** del perfil
+  de cada persona. Sin Slack ID, ese aviso solo llega por push. El bot necesita
+  el permiso `chat:write`.
+- **Push**: cada embajador lo activa desde su perfil o el aviso de la pantalla
+  de inicio. Las llaves VAPID se generan solas la primera vez y se guardan en
+  `server_secrets`. En iPhone, el push solo funciona con la app instalada en la
+  pantalla de inicio (iOS 16.4 o posterior).
+- Los avisos de plazos, re-certificación e inactividad los corre la función
+  programada del Pulso una vez al día. Cada aviso se manda una sola vez
+  (`notification_log`).
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
+## 👥 Invitar usuarios
 
-    // Helper function para obtener el rol del usuario
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rol;
-    }
+Desde **Admin → Usuarios → Invitar** (o importando un CSV). La invitación
+guarda el rol, el producto y el kiosko; se aplican cuando la persona inicia
+sesión por primera vez.
 
-    function isAdmin() {
-      return getUserRole() in ['super_admin', 'admin'];
-    }
+### Reparar perfiles creados antes de la corrección de invitaciones
 
-    function isTrainer() {
-      return getUserRole() in ['super_admin', 'admin', 'trainer'];
-    }
+Las invitaciones guardaban el kiosko en el campo `producto`. Para corregir los
+perfiles afectados:
 
-    // Usuarios - solo pueden leer su propio perfil
-    match /users/{userId} {
-      allow read: if request.auth != null &&
-                     (request.auth.uid == userId || isAdmin());
-      allow create: if request.auth != null && request.auth.uid == userId;
-      allow update, delete: if isAdmin();
-    }
-
-    // Whitelist - solo admins
-    match /whitelist/{entry} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Organizaciones - solo lectura para autenticados
-    match /organizations/{orgId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Productos - lectura para todos, escritura solo admins
-    match /products/{productId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Preguntas - lectura para todos, escritura solo admins
-    match /questions/{questionId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Quizzes - lectura para todos, escritura solo admins
-    match /quizzes/{quizId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Attempts - usuarios pueden crear sus propios attempts
-    match /attempts/{attemptId} {
-      allow read: if request.auth != null &&
-                     (request.auth.uid == resource.data.userId || isTrainer());
-      allow create: if request.auth != null &&
-                       request.auth.uid == request.resource.data.userId;
-      allow update, delete: if false; // No se pueden modificar
-    }
-
-    // Leaderboard - todos pueden leer, usuarios pueden crear
-    match /leaderboards/{entryId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null &&
-                       request.auth.uid == request.resource.data.userId;
-      allow update, delete: if false;
-    }
-
-    // Achievements - lectura para todos, escritura solo admins
-    match /achievements/{achievementId} {
-      allow read: if request.auth != null;
-      allow write: if isAdmin();
-    }
-
-    // Analytics - solo trainers y admins
-    match /analytics/{docId} {
-      allow read: if isTrainer();
-      allow write: if isAdmin();
-    }
-  }
-}
+```bash
+DRY_RUN=true node scripts/repair-whitelist-profiles.mjs   # muestra los cambios
+node scripts/repair-whitelist-profiles.mjs                # los aplica
 ```
 
----
+## 🧪 Desarrollo local con emuladores
 
-## 🎯 Flujo de Autenticación Completo
+Con un proyecto `demo-*` la app (cliente y servidor) se conecta sola a los
+emuladores:
 
-```mermaid
-graph TD
-    A[Usuario hace Login con Google] --> B{Email en whitelist?}
-    B -->|Sí| C[Obtener rol de whitelist]
-    B -->|No| D[Acceso Denegado]
-    C --> E{Perfil existe en users?}
-    E -->|Sí| F[Cargar perfil existente]
-    E -->|No| G[Crear perfil con UID real]
-    G --> H[Usar rol de whitelist]
-    H --> I[Marcar whitelist como usada]
-    I --> F
-    F --> J[Usuario accede según rol]
+```bash
+firebase emulators:start --only auth,firestore,storage --project demo-aviva
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-aviva NEXT_PUBLIC_FIREBASE_API_KEY=fake \
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-aviva.firebaseapp.com npm run dev
 ```
 
----
+## 📞 Problemas comunes
 
-## ⚡ Alternativa: Usar Firebase Admin SDK
+### "Missing or insufficient permissions"
+- Revisa que el usuario tenga perfil en `users` y que no esté desactivado.
+- Para editar contenido se necesita rol de staff; para usuarios y tokens, admin.
 
-Si los scripts siguen sin funcionar, puedes usar el Firebase Admin SDK que tiene permisos completos:
+### El usuario no puede entrar después del login
+1. Su correo debe ser `@avivacredito.com` (o estar en la lista de `src/lib/auth-utils.ts`).
+2. Revisa en los logs del backend la respuesta de `/api/auth/profile`.
 
-1. Ve a Firebase Console → Configuración del Proyecto → Cuentas de Servicio
-2. Genera una nueva clave privada (archivo JSON)
-3. Guárdala como `serviceAccountKey.json` en la raíz del proyecto
-4. Actualiza el script para usar Admin SDK:
-
-```typescript
-import * as admin from 'firebase-admin';
-import serviceAccount from '../serviceAccountKey.json';
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount as any)
-});
-
-const db = admin.firestore();
-// ... resto del código
-```
-
-**⚠️ NUNCA COMMITEES** `serviceAccountKey.json` a git!
-
----
-
-## 📞 Troubleshooting
-
-### Error: "Permission denied"
-- Verifica que las reglas de Firestore permitan escritura
-- En desarrollo, usa `allow read, write: if true;`
-
-### Error: "Invalid resource field value"
-- Asegúrate de que no haya campos `undefined` en los objetos
-- Firestore no acepta valores `null` o `undefined` en algunos campos
-
-### El usuario no puede acceder después de login
-1. Verifica que el email esté en la whitelist
-2. Verifica que el perfil se creó en la colección `users`
-3. Revisa la consola del navegador para errores
-
-### Script se cuelga o no responde
-- Verifica las credenciales de Firebase en `.env.local`
-- Asegúrate de que el proyecto de Firebase tenga Firestore habilitado
-- Verifica que las reglas de Firestore permitan escritura
-
----
-
-## 📚 Recursos
-
-- [Firebase Console](https://console.firebase.google.com/)
-- [Documentación de Firestore](https://firebase.google.com/docs/firestore)
-- [Reglas de Seguridad](https://firebase.google.com/docs/firestore/security/get-started)
-- [Firebase Admin SDK](https://firebase.google.com/docs/admin/setup)
+### Los scripts de `scripts/` fallan con "Permission denied"
+- `migrate-attempts-org-id.mjs` y `repair-whitelist-profiles.mjs` usan el Admin
+  SDK: necesitan credenciales de Google Cloud (`gcloud auth application-default login`).
+- `init-users.ts`, `migrate-to-firestore.ts`, `seed-pulse-questions.ts` y
+  `test-firebase.ts` usan el SDK de cliente sin sesión, así que con las reglas
+  actuales ya no pueden escribir en producción. Córrelos contra los emuladores
+  o pásalos al Admin SDK. Para las preguntas base del Pulso, usa el botón de
+  Admin → Categorías del Pulso.

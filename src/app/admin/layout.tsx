@@ -33,12 +33,14 @@ import {
   ImageIcon,
   Search,
   MousePointerClick,
+  Lock,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useState, useEffect } from 'react';
 import { AvivaLogo } from '@/components/AvivaLogo';
 import { getRolePermissions } from '@/lib/firestore-service';
+import { canAccessAdminPath } from '@/lib/admin-access';
 
 type NavItem = { name: string; href: string; icon: React.ComponentType<{ className?: string }> };
 type NavSection = { section: string; items: NavItem[] };
@@ -99,28 +101,32 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { profile, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // null = sin configuración para el rol (todas las secciones que puede tener).
   const [allowedPaths, setAllowedPaths] = useState<Set<string> | null>(null);
+  const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [navSearch, setNavSearch] = useState('');
 
   useEffect(() => {
     if (!profile) return;
     if (profile.rol === 'super_admin') {
-      setAllowedPaths(null); // null = all access
+      setAllowedPaths(null);
+      setPermissionsLoaded(true);
       return;
     }
-    getRolePermissions(profile.rol).then(paths => {
-      setAllowedPaths(paths.length > 0 ? new Set(paths) : null);
-    });
+    getRolePermissions(profile.rol)
+      .then(paths => setAllowedPaths(paths.length > 0 ? new Set(paths) : null))
+      .catch(() => setAllowedPaths(null))
+      .finally(() => setPermissionsLoaded(true));
   }, [profile]);
 
-  // Filter nav based on permissions (super_admin always sees everything)
+  const canAccess = (href: string) => canAccessAdminPath(profile?.rol, href, allowedPaths);
+  // El permiso se revisa en la URL, no solo en el menú: entrar escribiendo la
+  // dirección de una sección no permitida muestra "Sin acceso".
+  const pageAllowed = permissionsLoaded && canAccess(pathname);
+
   const filteredNavigation = navigation.map(entry => {
-    if (allowedPaths === null) return entry; // super_admin or no config = show all
     if ('section' in entry) {
-      return {
-        ...entry,
-        items: entry.items.filter(item => allowedPaths.has(item.href)),
-      };
+      return { ...entry, items: entry.items.filter(item => canAccess(item.href)) };
     }
     return entry;
   }).filter(entry => {
@@ -349,7 +355,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {/* Page Content */}
           <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-            {children}
+            {!permissionsLoaded ? null : pageAllowed ? children : (
+              <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
+                <Lock className="h-12 w-12 text-muted-foreground" />
+                <h2 className="text-xl font-bold">Sin acceso a esta sección</h2>
+                <p className="text-muted-foreground text-sm">Tu rol no tiene permiso para abrirla. Si lo necesitas, pídeselo a un Super Admin.</p>
+                <Button asChild variant="outline"><Link href="/admin">Ir al Dashboard</Link></Button>
+              </div>
+            )}
           </main>
         </div>
       </div>

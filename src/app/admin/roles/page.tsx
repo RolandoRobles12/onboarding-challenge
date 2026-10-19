@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ShieldCheck, Loader2, Save, Lock, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isAssignableToRole } from '@/lib/admin-access';
+import type { UserRole } from '@/lib/types-scalable';
 
 // Lista completa de secciones/rutas del panel de admin
 const NAV_SECTIONS = [
@@ -20,6 +22,7 @@ const NAV_SECTIONS = [
       { label: 'Evaluaciones y Desafíos', path: '/admin/quizzes' },
       { label: 'Preguntas', path: '/admin/questions' },
       { label: 'Importar Preguntas', path: '/admin/import' },
+      { label: 'Simulaciones', path: '/admin/simulations' },
     ],
   },
   {
@@ -62,6 +65,9 @@ const NAV_SECTIONS = [
 
 const ALL_PATHS = NAV_SECTIONS.flatMap(s => s.items.map(i => i.path));
 
+/** Secciones que el rol puede tener (usuarios, tokens y roles nunca bajan de admin). */
+const assignablePaths = (role: string) => ALL_PATHS.filter(p => isAssignableToRole(role as UserRole, p));
+
 const CONFIGURABLE_ROLES = [
   { key: 'admin', label: 'Admin', color: 'bg-purple-100 text-purple-700 border-purple-200' },
   { key: 'trainer', label: 'Capacitador', color: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -72,8 +78,8 @@ export default function RolesPage() {
   const isSuperAdmin = profile?.rol === 'super_admin';
 
   const [permissions, setPermissions] = useState<Record<string, Set<string>>>({
-    admin: new Set(ALL_PATHS),
-    trainer: new Set(ALL_PATHS),
+    admin: new Set(assignablePaths('admin')),
+    trainer: new Set(assignablePaths('trainer')),
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -81,12 +87,12 @@ export default function RolesPage() {
   useEffect(() => {
     getAllRolePermissions().then(data => {
       const next: Record<string, Set<string>> = {
-        admin: new Set(ALL_PATHS),
-        trainer: new Set(ALL_PATHS),
+        admin: new Set(assignablePaths('admin')),
+        trainer: new Set(assignablePaths('trainer')),
       };
       for (const role of ['admin', 'trainer']) {
         if (data[role] && data[role].length > 0) {
-          next[role] = new Set(data[role]);
+          next[role] = new Set(data[role].filter(p => isAssignableToRole(role as UserRole, p)));
         }
       }
       setPermissions(next);
@@ -94,7 +100,7 @@ export default function RolesPage() {
   }, []);
 
   const toggle = (role: string, path: string) => {
-    if (!isSuperAdmin) return;
+    if (!isSuperAdmin || !isAssignableToRole(role as UserRole, path)) return;
     setPermissions(prev => {
       const set = new Set(prev[role]);
       if (set.has(path)) set.delete(path);
@@ -107,7 +113,7 @@ export default function RolesPage() {
     if (!isSuperAdmin) return;
     setPermissions(prev => {
       const set = new Set(prev[role]);
-      paths.forEach(p => allChecked ? set.delete(p) : set.add(p));
+      paths.filter(p => isAssignableToRole(role as UserRole, p)).forEach(p => allChecked ? set.delete(p) : set.add(p));
       return { ...prev, [role]: set };
     });
   };
@@ -174,7 +180,7 @@ export default function RolesPage() {
                       Permisos de acceso
                     </CardTitle>
                     <CardDescription className="text-xs mt-1">
-                      {permissions[role].size} de {ALL_PATHS.length} secciones habilitadas
+                      {permissions[role].size} de {assignablePaths(role).length} secciones habilitadas
                     </CardDescription>
                   </div>
                   <Button
@@ -192,7 +198,7 @@ export default function RolesPage() {
               </CardHeader>
               <CardContent className="pt-0 space-y-4">
                 {NAV_SECTIONS.map(section => {
-                  const paths = section.items.map(i => i.path);
+                  const paths = section.items.map(i => i.path).filter(p => isAssignableToRole(role as UserRole, p));
                   const allChecked = paths.every(p => permissions[role].has(p));
                   const someChecked = paths.some(p => permissions[role].has(p));
 
@@ -219,6 +225,17 @@ export default function RolesPage() {
                       <div className="space-y-1 pl-1">
                         {section.items.map(item => {
                           const checked = permissions[role].has(item.path);
+                          if (!isAssignableToRole(role as UserRole, item.path)) {
+                            return (
+                              <div key={item.path} className="flex items-center gap-2.5 px-2 py-1.5 text-muted-foreground">
+                                <Lock className="h-3.5 w-3.5" />
+                                <span className="text-sm">{item.label}</span>
+                                <span className="text-xs ml-auto">
+                                  {item.path === '/admin/roles' ? 'Solo Super Admin' : 'Solo Admin'}
+                                </span>
+                              </div>
+                            );
+                          }
                           return (
                             <label
                               key={item.path}

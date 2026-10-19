@@ -1,6 +1,6 @@
 'use client'
 
-import { Suspense, useEffect, useState, useRef } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams, useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,60 +17,9 @@ import {
   ProgressRing,
 } from '@/components/GamificationEffects';
 import { cn } from '@/lib/utils';
-import {
-  markJourneyStepComplete,
-  getJourneyByProduct,
-  createQuizAttempt,
-  getQuiz,
-} from '@/lib/firestore-service';
-import type { GamificationConfig } from '@/lib/types-scalable';
-import { Timestamp } from 'firebase/firestore';
-
-// Usados cuando el quiz no tiene gamificationConfig propio (quizzes legacy)
-const DEFAULT_GAMIFICATION_CONFIG: GamificationConfig = {
-  enableLives: true,
-  maxLives: 3,
-  enableBonusLives: true,
-  pointsPerCorrectAnswer: 10,
-  pointsPerTrickyQuestion: 20,
-  penaltyPerError: 0,
-  timeBonus: false,
-  enableBadges: true,
-  badgeIds: [],
-};
-
-/** Calcula el XP real usando la configuración de gamificación del quiz en vez
- * de un porcentaje redondeado — así lo que el admin configura (puntos por
- * acierto, bonus por pregunta trampa, penalización por error) sí llega al
- * vendedor. */
-function calcGamifiedXp(
-  gc: GamificationConfig,
-  score: number,
-  totalQuestions: number,
-  questionResults: { isCorrect: boolean; isTricky: boolean }[],
-): number {
-  const incorrectCount = Math.max(0, totalQuestions - score);
-  if (questionResults.length > 0) {
-    const trickyCorrect = questionResults.filter(r => r.isTricky && r.isCorrect).length;
-    const normalCorrect = Math.max(0, score - trickyCorrect);
-    return Math.max(0, Math.round(
-      normalCorrect * gc.pointsPerCorrectAnswer +
-      trickyCorrect * gc.pointsPerTrickyQuestion -
-      incorrectCount * gc.penaltyPerError
-    ));
-  }
-  // Sin desglose por pregunta disponible (p.ej. tiempo agotado): se aproxima
-  // con el conteo total de aciertos/errores.
-  return Math.max(0, Math.round(score * gc.pointsPerCorrectAnswer - incorrectCount * gc.penaltyPerError));
-}
-
-function getLevel(score: number, total: number): { name: string; description: string } {
-  const percentage = total > 0 ? (score / total) * 100 : 0;
-  if (percentage >= 90) return { name: 'Maestro Aviva', description: '¡Dominas el conocimiento a la perfección!' };
-  if (percentage >= 75) return { name: 'Promotor en Ascenso', description: '¡Excelente trabajo! Estás muy bien preparado.' };
-  if (percentage >= 60) return { name: 'Aprendiz Prometedor', description: '¡Buen esfuerzo! Sigue repasando y serás un experto.' };
-  return { name: 'Explorador Novato', description: 'Has completado el primer paso. ¡El conocimiento es tu próxima conquista!' };
-}
+import { getAttemptDetails, getQuiz, getQuizAttempt } from '@/lib/firestore-service';
+import { getQuizLevel } from '@/lib/quiz-scoring';
+import type { QuizQuestionResult } from '@/lib/types-scalable';
 
 function getFeedbackMessage(percentage: number): string {
   if (percentage === 100) return '¡Perfecto! Demostraste un dominio absoluto del tema. ¡Eres un referente para tu equipo!';
@@ -80,182 +29,99 @@ function getFeedbackMessage(percentage: number): string {
   return '¡No te rindas! El aprendizaje es un proceso. Revisa el contenido y vuelve a intentarlo con más confianza.';
 }
 
+/** Solo rutas internas: `returnTo` viene en la URL. */
+function safeReturnTo(value: string | null): string {
+  return value && value.startsWith('/') && !value.startsWith('//') ? value : '/';
+}
+
+interface ResultData {
+  score: number;
+  totalQuestions: number;
+  timeTaken: number | null;
+  xp: number;
+  showFeedback: string;
+  questionResults: QuizQuestionResult[];
+  badges: string[];
+  aiFeedback?: string;
+}
+
+/**
+ * Pantalla de resultados de un desafío. No guarda nada: el quiz registra el
+ * intento al terminar y aquí se lee por su id (recargar no lo duplica).
+ */
 function ResultsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { fire: fireConfetti } = useConfetti();
-  const savedRef = useRef(false);
 
   const routeParams = useParams<{ quizType: string }>();
   const productId = routeParams.quizType || searchParams.get('quizType') || '';
 
   const quizTitle = searchParams.get('quizTitle') || 'Quiz';
-  const scoreStr = searchParams.get('score');
-  const totalQuestionsStr = searchParams.get('totalQuestions');
   const avatarKey = searchParams.get('avatar');
-  const startTimeStr = searchParams.get('startTime');
   const quizId = searchParams.get('quizId') || '';
-  const showFeedback = searchParams.get('showFeedback') || 'after_attempt';
-  const returnTo = searchParams.get('returnTo') || '/';
+  const attemptId = searchParams.get('attemptId');
+  const returnTo = safeReturnTo(searchParams.get('returnTo'));
 
+  const [data, setData] = useState<ResultData | null>(null);
   const [showLevelUp, setShowLevelUp] = useState(false);
   const [animationReady, setAnimationReady] = useState(false);
-  const [timeTaken, setTimeTaken] = useState<number | null>(null);
-  const [questionResults, setQuestionResults] = useState<{ text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[]>([]);
   const [showDetail, setShowDetail] = useState(false);
-  const [quizGamificationConfig, setQuizGamificationConfig] = useState<GamificationConfig | null>(null);
   const [quizPassingScore, setQuizPassingScore] = useState<number | null>(null);
 
-  // Config del quiz para mostrar el XP real y el estado de aprobado/reprobado
-  // (independiente del guardado del intento, que corre una sola vez más abajo).
   useEffect(() => {
-    if (!quizId) return;
-    getQuiz(quizId).then(q => {
-      setQuizGamificationConfig(q?.gamificationConfig ?? null);
-      const ps = q?.assessmentConfig?.passingScore;
-      setQuizPassingScore(ps && ps > 0 ? ps : null);
-    }).catch(() => {});
-  }, [quizId]);
+    if (!productId || !user) return;
+    let cancelled = false;
 
-  useEffect(() => {
-    if (!productId || !scoreStr || !totalQuestionsStr) {
-      router.push('/');
-      return;
-    }
+    (async () => {
+      const quiz = quizId ? await getQuiz(quizId).catch(() => null) : null;
+      const ps = quiz?.assessmentConfig?.passingScore;
+      if (!cancelled) setQuizPassingScore(ps && ps > 0 ? ps : null);
 
-    const score = parseInt(scoreStr, 10);
-    const totalQuestions = parseInt(totalQuestionsStr, 10);
-    const percentage = totalQuestions > 0 ? (score / totalQuestions) * 100 : 0;
-    const level = getLevel(score, totalQuestions);
-
-    let duration = 0;
-    if (startTimeStr) {
-      duration = Math.round((Date.now() - parseInt(startTimeStr, 10)) / 1000);
-      setTimeTaken(duration);
-    }
-
-    // Load per-question results from sessionStorage — always parsed (needed to
-    // compute gamified XP below), but only *shown* in the UI when showFeedback
-    // allows it (see the "Detalle de respuestas" section further down).
-    let parsedResults: { text: string; isCorrect: boolean; userAnswer: string; correctAnswer: string; isTricky: boolean }[] = [];
-    try {
-      const raw = sessionStorage.getItem(`quiz_results_${productId}`);
-      if (raw) {
-        parsedResults = JSON.parse(raw);
-        sessionStorage.removeItem(`quiz_results_${productId}`);
+      let result: ResultData | null = null;
+      const attempt = attemptId ? await getQuizAttempt(attemptId).catch(() => null) : null;
+      if (attempt && attempt.userId === user.uid) {
+        const details = await getAttemptDetails(attempt.id).catch(() => null);
+        result = {
+          score: attempt.score,
+          totalQuestions: attempt.maxScore,
+          timeTaken: attempt.timeTaken ?? null,
+          xp: attempt.xpEarned ?? 0,
+          showFeedback: details?.showFeedback ?? attempt.showFeedback ?? 'after_attempt',
+          questionResults: details?.questionResults ?? [],
+          badges: attempt.badgesEarned ?? [],
+          aiFeedback: attempt.aiFeedback,
+        };
       }
-    } catch { /* ignore */ }
-    setQuestionResults(parsedResults);
 
-    // Animations
-    setTimeout(() => setAnimationReady(true), 300);
-    setTimeout(() => setShowLevelUp(true), 800);
-    setTimeout(() => {
-      fireConfetti({ intensity: percentage >= 75 ? 'high' : 'medium' });
-    }, 1600);
+      if (cancelled) return;
+      if (!result) {
+        router.replace('/');
+        return;
+      }
+      setData(result);
+      const pct = result.totalQuestions > 0 ? (result.score / result.totalQuestions) * 100 : 0;
+      setTimeout(() => setAnimationReady(true), 300);
+      setTimeout(() => setShowLevelUp(true), 800);
+      setTimeout(() => fireConfetti({ intensity: pct >= 75 ? 'high' : 'medium' }), 1600);
+    })();
 
-    // Save attempt + mark journey steps — runs only once, only when profile is ready
-    if (!savedRef.current && user?.uid && profile) {
-      savedRef.current = true;
-
-      const userId = user.uid;
-
-      // Best-effort name: onboarding data field with "nombre"/"name" in key,
-      // then profile.nombre, then Firebase Auth displayName
-      const onboardingData = (profile as any).onboardingData as Record<string, string> | undefined;
-      const nameFromOnboarding = onboardingData
-        ? Object.entries(onboardingData).find(([k]) => /nombre|name|nombres/i.test(k))?.[1]
-        : undefined;
-      const resolvedName = (nameFromOnboarding || profile.nombre || user.displayName || '').trim();
-
-      // Kiosk: may be in profile.onboardingData or directly on the profile
-      const kioskFromOnboarding = onboardingData
-        ? Object.entries(onboardingData).find(([k]) => /kiosk|kiosco|kiosko/i.test(k))?.[1]
-        : undefined;
-      const resolvedKiosk = (kioskFromOnboarding || (profile as any).assignedKiosko || (profile as any).kiosco_asignado || '').trim();
-
-      (async () => {
-        try {
-          // 1. Save quiz attempt to Firestore
-          if (quizId) {
-            // El XP real sale de la configuración de gamificación del quiz
-            // (puntos por acierto, bonus por pregunta trampa, penalización por
-            // error) en vez de un porcentaje redondeado sin relación con ella.
-            const quizDoc = await getQuiz(quizId).catch(() => null);
-            const gc = quizDoc?.gamificationConfig ?? DEFAULT_GAMIFICATION_CONFIG;
-            const xpEarned = calcGamifiedXp(gc, score, totalQuestions, parsedResults);
-
-            await createQuizAttempt({
-              organizationId: 'aviva-credito',
-              userId,
-              quizId,
-              productId,
-              startedAt: startTimeStr
-                ? Timestamp.fromMillis(parseInt(startTimeStr, 10))
-                : Timestamp.now(),
-              completedAt: Timestamp.now(),
-              status: 'completed',
-              score,
-              maxScore: totalQuestions,
-              percentage,
-              timeTaken: duration,
-              livesRemaining: parseInt(searchParams.get('bonusLives') || '0', 10),
-              missionResults: [],
-              answers: [],
-              levelAchieved: level.name,
-              badgesEarned: [],
-              xpEarned,
-              trainerName: resolvedName,
-              assignedKiosko: resolvedKiosk,
-            });
-          }
-
-          // 2. Mark quiz/challenge step and results step complete in the journey
-          const journey = await getJourneyByProduct(productId).catch(() => null);
-          if (!journey) return;
-
-          const allSteps = journey.stages?.length
-            ? journey.stages.flatMap(s => s.actions ?? [])
-            : journey.steps ?? [];
-
-          const markPromises: Promise<void>[] = [];
-          allSteps.forEach(step => {
-            if (step.type === 'results') {
-              // Mark results-summary steps whenever a quiz is completed
-              markPromises.push(
-                markJourneyStepComplete(userId, journey.id, productId, step.id).catch(console.error)
-              );
-            } else if ((step.type === 'quiz' || step.type === 'challenge') && quizId && step.config?.quizId === quizId) {
-              // Only mark the specific step whose assigned quizId matches the completed quiz
-              markPromises.push(
-                markJourneyStepComplete(userId, journey.id, productId, step.id).catch(console.error)
-              );
-            }
-          });
-          await Promise.all(markPromises);
-        } catch (err) {
-          console.error('Error saving results:', err);
-        }
-      })();
-    }
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productId, scoreStr, totalQuestionsStr, user?.uid, profile]);
+  }, [productId, attemptId, quizId, user?.uid]);
 
-  if (!productId || !scoreStr || !totalQuestionsStr) return null;
+  if (!data) return null;
 
-  const score = parseInt(scoreStr, 10);
-  const totalQuestions = parseInt(totalQuestionsStr, 10);
+  const { score, totalQuestions, questionResults, showFeedback } = data;
   const percentage = totalQuestions > 0 ? (score / totalQuestions) * 100 : 0;
-  const level = getLevel(score, totalQuestions);
+  const level = getQuizLevel(score, totalQuestions);
   const Avatar = getAvatarComponent(avatarKey);
-  const displayXp = quizGamificationConfig
-    ? calcGamifiedXp(quizGamificationConfig, score, totalQuestions, questionResults)
-    : Math.round(percentage);
+  const displayXp = data.xp;
   const passed = quizPassingScore != null ? percentage >= quizPassingScore : null;
 
-  const timeFormatted = timeTaken !== null
-    ? `${Math.floor(timeTaken / 60)}m ${(timeTaken % 60).toString().padStart(2, '0')}s`
+  const timeFormatted = data.timeTaken !== null
+    ? `${Math.floor(data.timeTaken / 60)}m ${(data.timeTaken % 60).toString().padStart(2, '0')}s`
     : '—';
 
   const getLevelGradient = () => {
@@ -358,6 +224,17 @@ function ResultsContent() {
               </motion.div>
             </motion.div>
 
+            {data.badges.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.8 }}
+                className="rounded-xl px-5 py-3 border bg-yellow-50 border-yellow-200 text-yellow-800 text-sm font-semibold text-center"
+              >
+                🏅 ¡Ganaste {data.badges.length === 1 ? 'la insignia' : 'las insignias'} {data.badges.map(b => `«${b}»`).join(', ')}!
+              </motion.div>
+            )}
+
             {passed !== null && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -385,7 +262,7 @@ function ResultsContent() {
               className="text-center p-5 border rounded-xl bg-white/60 border-white/80"
             >
               <blockquote className="text-lg italic text-foreground leading-relaxed">
-                "{getFeedbackMessage(percentage)}"
+                "{data.aiFeedback || getFeedbackMessage(percentage)}"
               </blockquote>
             </motion.div>
 
@@ -438,12 +315,7 @@ function ResultsContent() {
               transition={{ delay: 1.1 }}
             >
               <Button asChild size="lg" className="w-full rounded-xl shadow-md font-semibold">
-                {/* Cuando el quiz se lanzó desde una lección/módulo de curso
-                    (returnTo apunta a /courses/...), se anexa el puntaje para
-                    que el curso pueda registrarlo contra su passingScore. */}
-                <Link href={returnTo.includes('/courses/')
-                  ? `${returnTo}${returnTo.includes('?') ? '&' : '?'}assessmentScore=${Math.round(percentage)}`
-                  : returnTo}>
+                <Link href={returnTo}>
                   Finalizar y volver al inicio
                 </Link>
               </Button>

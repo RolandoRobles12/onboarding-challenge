@@ -1,303 +1,249 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+import { getAllUsers, getNotificationConfig, getRecentNotifications, saveNotificationConfig } from '@/lib/firestore-service';
+import { authFetch } from '@/lib/api-client';
 import {
-  BellRing,
-  Mail,
-  Clock,
-  Award,
-  BookOpen,
-  Swords,
-  RefreshCw,
-  Save,
-  Info,
-  AlertCircle,
-  CheckCircle2,
+  NOTIFICATION_RULES,
+  type NotificationConfig,
+  type NotificationLogEntry,
+  type NotificationRuleConfig,
+  type NotificationType,
+} from '@/lib/notifications';
+import type { UserProfile } from '@/lib/types-scalable';
+import {
+  BellRing, Save, Info, Send, Loader2, MessageSquare, Smartphone, Users, CheckCircle2, XCircle,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+type Rules = NotificationConfig['rules'];
 
-interface NotificationRule {
-  id: string;
-  label: string;
-  description: string;
-  icon: React.ElementType;
-  color: string;
-  enabled: boolean;
-  daysBefore?: number;       // Para recordatorios previos a vencimiento
-  daysAfter?: number;        // Para recordatorios de inactividad
-  channel: 'email' | 'push' | 'both';
+interface TestResult {
+  slack?: { ok: boolean; error?: string };
+  push?: { sent: number; failed: number; error?: string };
+  error?: string;
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+function formatWhen(entry: NotificationLogEntry): string {
+  const d = entry.createdAt?.toDate?.();
+  return d ? d.toLocaleString('es-MX', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+}
 
+/**
+ * Avisos automáticos a los embajadores por Slack (mensaje directo del bot) y
+ * push (notificación de la app). Las reglas se guardan en notification_config
+ * y el servidor las aplica en cada evento y en la revisión diaria.
+ */
 export default function NotificationsPage() {
   const { toast } = useToast();
+  const { profile } = useAuth();
 
+  const [rules, setRules] = useState<Rules | null>(null);
+  const [savedRules, setSavedRules] = useState<Rules | null>(null);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [log, setLog] = useState<NotificationLogEntry[]>([]);
   const [saving, setSaving] = useState(false);
-  const [rules, setRules] = useState<NotificationRule[]>([
-    {
-      id: 'course_assigned',
-      label: 'Nuevo curso asignado',
-      description: 'Se envía cuando el admin inscribe a un usuario en un curso',
-      icon: BookOpen,
-      color: 'text-emerald-600',
-      enabled: true,
-      channel: 'email',
-    },
-    {
-      id: 'certificate_expiry_warning',
-      label: 'Recordatorio de vencimiento de certificado',
-      description: 'Avisa antes de que expire un certificado (cumplimiento)',
-      icon: Award,
-      color: 'text-amber-600',
-      enabled: true,
-      daysBefore: 30,
-      channel: 'email',
-    },
-    {
-      id: 'course_due_warning',
-      label: 'Recordatorio de fecha límite del curso',
-      description: 'Avisa cuando se acerca la fecha límite de completar un curso',
-      icon: Clock,
-      color: 'text-orange-600',
-      enabled: true,
-      daysBefore: 7,
-      channel: 'email',
-    },
-    {
-      id: 'challenge_available',
-      label: 'Nuevo desafío disponible',
-      description: 'Notifica cuando se publica un desafío asignado al usuario',
-      icon: Swords,
-      color: 'text-purple-600',
-      enabled: true,
-      channel: 'push',
-    },
-    {
-      id: 'inactivity_reminder',
-      label: 'Recordatorio de inactividad',
-      description: 'Recuerda al vendedor continuar su ruta si lleva días sin actividad',
-      icon: AlertCircle,
-      color: 'text-red-600',
-      enabled: false,
-      daysAfter: 3,
-      channel: 'email',
-    },
-    {
-      id: 'course_completed',
-      label: 'Curso completado',
-      description: 'Confirmación al vendedor cuando completa un curso exitosamente',
-      icon: CheckCircle2,
-      color: 'text-teal-600',
-      enabled: true,
-      channel: 'email',
-    },
-    {
-      id: 'certificate_issued',
-      label: 'Certificado emitido',
-      description: 'Notifica cuando se genera un certificado tras completar una ruta',
-      icon: Award,
-      color: 'text-amber-500',
-      enabled: true,
-      channel: 'email',
-    },
-    {
-      id: 'recertification_due',
-      label: 'Ciclo de re-certificación',
-      description: 'Avisa cuando es momento de renovar una certificación obligatoria',
-      icon: RefreshCw,
-      color: 'text-blue-600',
-      enabled: true,
-      daysBefore: 14,
-      channel: 'both',
-    },
-  ]);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
-  const [adminEmail, setAdminEmail] = useState('');
+  useEffect(() => {
+    getNotificationConfig().then(cfg => { setRules(cfg.rules); setSavedRules(cfg.rules); })
+      .catch(() => toast({ variant: 'destructive', title: 'No se pudo cargar la configuración' }));
+    getAllUsers().then(setUsers).catch(() => setUsers([]));
+    getRecentNotifications().then(setLog).catch(() => setLog([]));
+  }, [toast]);
 
-  const toggleRule = (id: string) => {
-    setRules(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
-  };
+  const dirty = !!rules && JSON.stringify(rules) !== JSON.stringify(savedRules);
+  useUnsavedChanges(dirty);
 
-  const updateDays = (id: string, field: 'daysBefore' | 'daysAfter', value: string) => {
-    const num = parseInt(value);
-    if (isNaN(num) || num < 1) return;
-    setRules(prev => prev.map(r => r.id === id ? { ...r, [field]: num } : r));
-  };
+  const reach = useMemo(() => {
+    const sellers = users.filter(u => u.rol === 'seller' && u.active !== false);
+    return {
+      total: sellers.length,
+      slack: sellers.filter(u => u.slackId?.trim()).length,
+      push: sellers.filter(u => u.pushEnabled).length,
+    };
+  }, [users]);
 
-  const updateChannel = (id: string, channel: NotificationRule['channel']) => {
-    setRules(prev => prev.map(r => r.id === id ? { ...r, channel } : r));
+  const update = (id: NotificationType, patch: Partial<NotificationRuleConfig>) => {
+    setRules(prev => prev ? { ...prev, [id]: { ...prev[id], ...patch } } : prev);
   };
 
   const handleSave = async () => {
+    if (!rules || !profile) return;
+    const noChannel = NOTIFICATION_RULES.find(m => rules[m.id].enabled && !rules[m.id].slack && !rules[m.id].push);
+    if (noChannel) {
+      toast({ variant: 'destructive', title: 'Falta el canal', description: `Elige Slack o push para «${noChannel.label}», o apágalo.` });
+      return;
+    }
     setSaving(true);
-    // Simulate save — in production this would write to Firestore
-    await new Promise(r => setTimeout(r, 800));
-    setSaving(false);
-    toast({ title: 'Configuración guardada', description: 'Las reglas de notificación se aplicarán en el próximo ciclo.' });
+    try {
+      await saveNotificationConfig(rules, profile.uid);
+      setSavedRules(rules);
+      toast({ title: 'Avisos guardados' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo guardar' });
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const enabledCount = rules.filter(r => r.enabled).length;
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await authFetch('/api/notifications/test', { method: 'POST' });
+      setTestResult(await res.json() as TestResult);
+    } catch {
+      setTestResult({ error: 'No se pudo contactar a la app.' });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-6 max-w-4xl">
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <BellRing className="h-6 w-6" /> Notificaciones
           </h1>
           <p className="text-muted-foreground">
-            Configura cuándo y cómo se comunica el sistema con los vendedores
+            Avisos automáticos a los embajadores por Slack y por notificación push de la app
           </p>
         </div>
-        <Button onClick={handleSave} disabled={saving} className="gap-2">
+        <Button onClick={handleSave} disabled={saving || !dirty} className="gap-2">
           <Save className="h-4 w-4" />
           {saving ? 'Guardando...' : 'Guardar cambios'}
         </Button>
       </div>
 
-      {/* Info banner */}
+      {/* Alcance */}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Card><CardContent className="py-4 flex items-center gap-3">
+          <Users className="h-5 w-5 text-muted-foreground" />
+          <div><p className="text-2xl font-bold">{reach.total}</p><p className="text-xs text-muted-foreground">embajadores activos</p></div>
+        </CardContent></Card>
+        <Card><CardContent className="py-4 flex items-center gap-3">
+          <MessageSquare className="h-5 w-5 text-muted-foreground" />
+          <div><p className="text-2xl font-bold">{reach.slack}</p><p className="text-xs text-muted-foreground">con Slack ID (reciben Slack)</p></div>
+        </CardContent></Card>
+        <Card><CardContent className="py-4 flex items-center gap-3">
+          <Smartphone className="h-5 w-5 text-muted-foreground" />
+          <div><p className="text-2xl font-bold">{reach.push}</p><p className="text-xs text-muted-foreground">con notificaciones activadas</p></div>
+        </CardContent></Card>
+      </div>
+
       <Card className="border-blue-200 bg-blue-50/40">
         <CardContent className="py-3 flex gap-3 items-start">
           <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
           <div className="text-xs text-blue-700 space-y-1">
             <p>
-              Las notificaciones se envían automáticamente basadas en los eventos del LMS.
-              Actualmente se soporta <strong>correo electrónico</strong>. Las notificaciones push
-              requieren integrar un servicio como Firebase Cloud Messaging (FCM).
+              <strong>Slack</strong> usa el bot del Pulso (<Link href="/admin/tokens" className="underline">Tokens</Link>) y el Slack ID de cada
+              embajador (<Link href="/admin/knowledge-pulse?tab=slack" className="underline">Gestión del Pulso → Slack</Link>).
+              <strong> Push</strong> le llega a quien activó las notificaciones en <em>Mi Perfil</em> (en iPhone, con la app instalada).
             </p>
             <p>
-              <strong>{enabledCount} de {rules.length}</strong> reglas activas.
+              Los avisos de eventos salen al momento. Los de plazos, re-certificación e inactividad se revisan una vez al día,
+              a la hora de envío del Pulso. Cada aviso se manda una sola vez.
             </p>
           </div>
         </CardContent>
       </Card>
 
-      {/* Admin email */}
+      {/* Prueba */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Mail className="h-4 w-4" /> Correo del administrador
-          </CardTitle>
-          <CardDescription>
-            Recibe una copia de todas las notificaciones críticas del sistema
-          </CardDescription>
+          <CardTitle className="text-base">Probar los avisos</CardTitle>
+          <CardDescription>Te manda un aviso de prueba a ti, por Slack y push, para revisar que todo esté conectado.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex gap-3 items-end max-w-sm">
-            <div className="flex-1 space-y-1.5">
-              <Label>Email</Label>
-              <Input
-                type="email"
-                value={adminEmail}
-                onChange={e => setAdminEmail(e.target.value)}
-                placeholder="admin@avivafinanciera.com"
-              />
+        <CardContent className="space-y-3">
+          <Button variant="outline" onClick={handleTest} disabled={testing} className="gap-2">
+            {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Enviarme una prueba
+          </Button>
+          {testResult && (
+            <div className="text-sm space-y-1">
+              {testResult.error && <p className="text-destructive">{testResult.error}</p>}
+              {testResult.slack && (
+                <p className={cn('flex items-center gap-1.5', testResult.slack.ok ? 'text-green-700' : 'text-destructive')}>
+                  {testResult.slack.ok ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                  Slack: {testResult.slack.ok ? 'enviado' : testResult.slack.error}
+                </p>
+              )}
+              {testResult.push && (
+                <p className={cn('flex items-center gap-1.5', testResult.push.sent > 0 ? 'text-green-700' : 'text-destructive')}>
+                  {testResult.push.sent > 0 ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                  Push: {testResult.push.sent > 0
+                    ? `enviado a ${testResult.push.sent} dispositivo${testResult.push.sent !== 1 ? 's' : ''}`
+                    : testResult.push.error ?? 'no se envió'}
+                </p>
+              )}
             </div>
-          </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Notification rules */}
+      {/* Reglas */}
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-          Reglas de notificación
-        </h2>
-
-        {rules.map(rule => {
-          const Icon = rule.icon;
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Avisos</h2>
+        {!rules ? (
+          <div className="space-y-3">{[0, 1, 2].map(i => <Skeleton key={i} className="h-24 rounded-xl" />)}</div>
+        ) : NOTIFICATION_RULES.map(meta => {
+          const rule = rules[meta.id];
           return (
-            <Card key={rule.id} className={rule.enabled ? '' : 'opacity-60'}>
+            <Card key={meta.id} className={rule.enabled ? '' : 'opacity-60'}>
               <CardContent className="py-4">
                 <div className="flex items-start gap-4">
-                  {/* Icon */}
-                  <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                    <Icon className={`h-5 w-5 ${rule.color}`} />
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                      <p className="font-medium text-sm">{rule.label}</p>
-                      <Badge
-                        variant={rule.channel === 'email' ? 'secondary' : rule.channel === 'push' ? 'outline' : 'default'}
-                        className="text-xs"
-                      >
-                        {rule.channel === 'email' ? '📧 Email' : rule.channel === 'push' ? '📱 Push' : '📧📱 Ambos'}
-                      </Badge>
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div>
+                      <p className="font-medium text-sm">{meta.label}</p>
+                      <p className="text-xs text-muted-foreground">{meta.description}</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">{rule.description}</p>
-
-                    {/* Days config */}
-                    {rule.enabled && (rule.daysBefore !== undefined || rule.daysAfter !== undefined) && (
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        {rule.daysBefore !== undefined && (
-                          <div className="flex items-center gap-1.5">
-                            <Label className="text-xs whitespace-nowrap">Avisar con</Label>
+                    {rule.enabled && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Label className="text-xs">Canales:</Label>
+                        {([['slack', 'Slack', MessageSquare], ['push', 'Push', Smartphone]] as const).map(([key, label, Icon]) => (
+                          <button
+                            key={key}
+                            onClick={() => update(meta.id, { [key]: !rule[key] })}
+                            className={cn(
+                              'text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1',
+                              rule[key]
+                                ? 'border-primary bg-primary text-primary-foreground'
+                                : 'border-muted-foreground/30 hover:border-primary/50',
+                            )}
+                          >
+                            <Icon className="h-3 w-3" /> {label}
+                          </button>
+                        ))}
+                        {meta.daysLabel && (
+                          <span className="flex items-center gap-1.5 ml-2">
                             <Input
                               type="number"
                               min={1}
                               max={90}
-                              value={rule.daysBefore}
-                              onChange={e => updateDays(rule.id, 'daysBefore', e.target.value)}
+                              value={rule.days ?? meta.defaults.days ?? 1}
+                              onChange={e => update(meta.id, { days: Math.max(1, Math.min(90, parseInt(e.target.value, 10) || 1)) })}
                               className="h-7 w-16 text-sm text-center"
                             />
-                            <Label className="text-xs whitespace-nowrap">días de antelación</Label>
-                          </div>
+                            <Label className="text-xs whitespace-nowrap">{meta.daysLabel}</Label>
+                          </span>
                         )}
-                        {rule.daysAfter !== undefined && (
-                          <div className="flex items-center gap-1.5">
-                            <Label className="text-xs whitespace-nowrap">Después de</Label>
-                            <Input
-                              type="number"
-                              min={1}
-                              max={30}
-                              value={rule.daysAfter}
-                              onChange={e => updateDays(rule.id, 'daysAfter', e.target.value)}
-                              className="h-7 w-16 text-sm text-center"
-                            />
-                            <Label className="text-xs whitespace-nowrap">días de inactividad</Label>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Channel selector */}
-                    {rule.enabled && (
-                      <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <Label className="text-xs">Canal:</Label>
-                        {(['email', 'push', 'both'] as const).map(ch => (
-                          <button
-                            key={ch}
-                            onClick={() => updateChannel(rule.id, ch)}
-                            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                              rule.channel === ch
-                                ? 'border-primary bg-primary text-primary-foreground'
-                                : 'border-muted-foreground/30 hover:border-primary/50'
-                            }`}
-                          >
-                            {ch === 'email' ? 'Email' : ch === 'push' ? 'Push' : 'Ambos'}
-                          </button>
-                        ))}
                       </div>
                     )}
                   </div>
-
-                  {/* Toggle */}
-                  <Switch
-                    checked={rule.enabled}
-                    onCheckedChange={() => toggleRule(rule.id)}
-                    className="shrink-0"
-                  />
+                  <Switch checked={rule.enabled} onCheckedChange={v => update(meta.id, { enabled: v })} className="shrink-0" />
                 </div>
               </CardContent>
             </Card>
@@ -305,34 +251,31 @@ export default function NotificationsPage() {
         })}
       </div>
 
-      {/* Compliance cycle summary */}
-      <Card className="border-amber-200 bg-amber-50/30">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base flex items-center gap-2">
-            <RefreshCw className="h-4 w-4 text-amber-600" /> Ciclo de compliance
-          </CardTitle>
-          <CardDescription>
-            Para certificaciones con re-certificación automática, el sistema enviará notificaciones
-            en cascada conforme se acerquen las fechas de renovación.
-          </CardDescription>
+      {/* Historial */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Últimos avisos enviados</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-2 text-xs">
-            {[
-              { days: 30, label: 'Primer aviso' },
-              { days: 14, label: 'Segundo aviso' },
-              { days: 7, label: 'Aviso urgente' },
-              { days: 0, label: 'Vencimiento' },
-              { days: -7, label: 'Certificado expirado' },
-            ].map(({ days, label }) => (
-              <div key={days} className="flex items-center gap-1.5 bg-background rounded-lg px-3 py-1.5 border">
-                <span className={`font-mono font-bold ${days < 0 ? 'text-red-600' : days === 0 ? 'text-amber-600' : 'text-blue-600'}`}>
-                  {days === 0 ? 'Día 0' : days > 0 ? `-${days}d` : `+${Math.abs(days)}d`}
-                </span>
-                <span className="text-muted-foreground">{label}</span>
-              </div>
-            ))}
-          </div>
+          {log.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Todavía no se ha enviado ningún aviso.</p>
+          ) : (
+            <div className="divide-y">
+              {log.map(entry => (
+                <div key={entry.id} className="py-2 text-sm flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{entry.title} <span className="text-muted-foreground font-normal">· {entry.userName || entry.userId}</span></p>
+                    <p className="text-xs text-muted-foreground truncate">{entry.body}</p>
+                  </div>
+                  <div className="text-xs text-right shrink-0 space-y-0.5">
+                    <p className="text-muted-foreground">{formatWhen(entry)}</p>
+                    {entry.slack && <p className={entry.slack.ok ? 'text-green-700' : 'text-destructive'} title={entry.slack.error}>Slack {entry.slack.ok ? '✓' : '✗'}</p>}
+                    {entry.push && <p className={entry.push.sent > 0 ? 'text-green-700' : 'text-muted-foreground'} title={entry.push.error}>Push {entry.push.sent > 0 ? '✓' : '—'}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

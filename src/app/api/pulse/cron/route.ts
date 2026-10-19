@@ -6,14 +6,18 @@
  *
  *  1. Una vez al día: cierra pulsos de días anteriores que quedaron abiertos
  *     y marca como 'expired' los intentos que quedaron a medias.
+ *  1b. Una vez al día: avisos a embajadores de plazos por vencer,
+ *     re-certificación e inactividad (Admin → Notificaciones).
  *  2. Crea el pulso de hoy si "Pulso automático diario" está activo.
  *  3. Envía el aviso de Slack a partir de la hora de envío (una sola vez).
- *  4. Cierra el pulso de hoy al llegar la hora de cierre.
+ *  4. Cierra el pulso de hoy si ya pasó la hora de cierre (solo ocurre si la
+ *     hora de envío quedó después del cierre; normalmente el pulso de hoy se
+ *     cierra en la limpieza del día siguiente y la app calcula la fase sola).
  *
  * Quién lo llama: la función programada `pulsoAvisoDiario` (functions/). No
  * requiere configuración de admins.
  *
- * Autenticación: header `Authorization: Bearer <secreto>` (o `?key=<secreto>`).
+ * Autenticación: header `Authorization: Bearer <secreto>`.
  * El secreto lo genera la función programada y lo guarda en `org_tokens`
  * (`pulse_cron_secret`); opcionalmente puede definirse PULSE_CRON_SECRET.
  */
@@ -26,7 +30,7 @@ import {
   expireStalePulseAttempts,
   getDailyPulse,
   getDailyPulses,
-  getOrgToken,
+  getOrgTokenValue,
   getPulseConfig,
   getPulseCronStatus,
   getSlackConfig,
@@ -34,9 +38,10 @@ import {
   savePulseCronStatus,
   scheduleAutoPulse,
   updatePulseStatus,
-} from '@/lib/firestore-service';
+} from '@/lib/server/pulse-store';
 import { addDaysStr, hhmmToMinutes, pulseDateStr, pulseMinutesNow } from '@/lib/pulse-utils';
-import { sendPulseSlack, summarizeSlackResults } from '@/lib/pulse-slack';
+import { sendPulseSlack, summarizeSlackResults } from '@/lib/server/pulse-slack';
+import { runDailyNotifications } from '@/lib/server/daily-jobs';
 
 const LOOKBACK_DAYS = 7;
 
@@ -47,13 +52,12 @@ function safeEqual(a: string, b: string) {
 }
 
 async function isAuthorized(req: NextRequest): Promise<boolean | 'unconfigured'> {
-  const stored = await getOrgToken('pulse_cron_secret');
-  const secrets = [process.env.PULSE_CRON_SECRET, stored?.value].filter((s): s is string => !!s);
+  const stored = await getOrgTokenValue('pulse_cron_secret');
+  const secrets = [process.env.PULSE_CRON_SECRET, stored].filter((s): s is string => !!s);
   if (secrets.length === 0) return 'unconfigured';
+  // Solo por header: un secreto en la URL queda en los logs.
   const header = req.headers.get('authorization') ?? '';
-  const provided = header.startsWith('Bearer ')
-    ? header.slice(7).trim()
-    : (req.nextUrl.searchParams.get('key') ?? '');
+  const provided = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
   return !!provided && secrets.some(secret => safeEqual(provided, secret));
 }
 
@@ -72,11 +76,13 @@ async function run(req: NextRequest) {
   const minutes = pulseMinutesNow(now);
   const actions: string[] = [];
   let maintenanceDate: string | undefined;
+  let notificationsDate: string | undefined;
 
   try {
     const [cfg, slackCfg, cronStatus] = await Promise.all([getPulseConfig(), getSlackConfig(), getPulseCronStatus()]);
     const closeMinutes = hhmmToMinutes(cfg.closeAt);
     maintenanceDate = cronStatus?.maintenanceDate;
+    notificationsDate = cronStatus?.notificationsDate;
 
     // 1. Días anteriores: basta una vez al día (lee todos los intentos de la
     //    semana, así que no conviene repetirlo en cada vuelta).
@@ -93,10 +99,22 @@ async function run(req: NextRequest) {
       maintenanceDate = today;
     }
 
+    // 1b. Avisos diarios a embajadores (plazos, re-certificación, inactividad).
+    //     Un error aquí no debe impedir el pulso del día.
+    if (notificationsDate !== today) {
+      try {
+        actions.push(...await runDailyNotifications(today));
+        notificationsDate = today;
+      } catch (err) {
+        console.error('[pulse-cron] avisos diarios:', err);
+        actions.push(`Error en los avisos diarios: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     // 2. Crear el pulso de hoy
     let pulse = await getDailyPulse(today);
     if (!pulse && cfg.autoDailyPulse && minutes < closeMinutes) {
-      const ids = await scheduleAutoPulse(undefined, today);
+      const ids = await scheduleAutoPulse(today);
       if (ids.length === 0) {
         actions.push('No se pudo crear el pulso: no hay preguntas activas en los módulos seleccionados');
       } else if (await createDailyPulseIfMissing(today, ids, 'auto')) {
@@ -133,12 +151,12 @@ async function run(req: NextRequest) {
       actions.push('Pulso de hoy cerrado');
     }
 
-    await savePulseCronStatus({ lastActions: actions, maintenanceDate });
+    await savePulseCronStatus({ lastActions: actions, maintenanceDate, notificationsDate });
     return NextResponse.json({ ok: true, date: today, actions });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[pulse-cron] Error:', err);
-    await savePulseCronStatus({ lastActions: actions, lastError: message, maintenanceDate }).catch(() => {});
+    await savePulseCronStatus({ lastActions: actions, lastError: message, maintenanceDate, notificationsDate }).catch(() => {});
     return NextResponse.json({ ok: false, error: message, actions }, { status: 500 });
   }
 }

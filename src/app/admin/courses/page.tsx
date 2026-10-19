@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge as UiBadge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -78,6 +79,8 @@ import {
 } from 'lucide-react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
+import { CourseRulesCard, courseRulesFromCourse, courseRulesToUpdate, DEFAULT_COURSE_RULES, type CourseRulesForm } from '@/components/admin/CourseRulesCard';
+import { uploadScormPackage } from '@/lib/scorm-upload';
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -132,6 +135,8 @@ interface LessonForm {
   htmlContent: string;
   description: string;
   assessmentQuizId: string; // quiz al finalizar esta lección (ID o '' para ninguno)
+  isRequired: boolean;      // false = no cuenta para completar el curso
+  scormVersion?: '1.2' | '2004';
 }
 
 const DEFAULT_COURSE_FORM: CourseForm = {
@@ -150,6 +155,7 @@ const DEFAULT_LESSON_FORM: LessonForm = {
   htmlContent: '',
   description: '',
   assessmentQuizId: '',
+  isRequired: true,
 };
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -160,6 +166,7 @@ export default function AdminCoursesPage() {
 
   // ── Datos ──
   const [courses, setCourses] = useState<Course[]>([]);
+  const [courseRules, setCourseRules] = useState<CourseRulesForm>(DEFAULT_COURSE_RULES);
   const [loading, setLoading] = useState(true);
   const [availableQuizzes, setAvailableQuizzes] = useState<Quiz[]>([]);
 
@@ -270,6 +277,7 @@ export default function AdminCoursesPage() {
       navigation: course.navigation,
       passingScore: String(course.passingScore ?? 80),
     });
+    setCourseRules(courseRulesFromCourse(course));
     setModules(course.modules ?? []);
     setExpandedModuleId(null);
     setEditingModuleId(null);
@@ -300,6 +308,7 @@ export default function AdminCoursesPage() {
         navigation: courseForm.navigation,
         passingScore: Number(courseForm.passingScore) || 80,
         modules,
+        ...courseRulesToUpdate(courseRules),
       });
       toast({ title: 'Curso guardado correctamente' });
       setEditingCourse(prev => prev ? { ...prev, modules } : prev);
@@ -412,6 +421,8 @@ export default function AdminCoursesPage() {
       htmlContent: lesson.content.htmlContent ?? '',
       description: lesson.description ?? '',
       assessmentQuizId: lesson.assessmentQuizId ?? '',
+      isRequired: lesson.isRequired !== false,
+      scormVersion: lesson.content.scormVersion,
     } : DEFAULT_LESSON_FORM);
   }
 
@@ -431,6 +442,7 @@ export default function AdminCoursesPage() {
         description: lessonForm.description.trim() || undefined,
         content,
         assessmentQuizId: lessonForm.assessmentQuizId || undefined,
+        isRequired: lessonForm.isRequired,
         updatedAt: now,
       };
       setModules(prev => prev.map(m => m.id === moduleId
@@ -449,7 +461,7 @@ export default function AdminCoursesPage() {
         description: lessonForm.description.trim() || undefined,
         content,
         assessmentQuizId: lessonForm.assessmentQuizId || undefined,
-        isRequired: true,
+        isRequired: lessonForm.isRequired,
         isFreePreview: false,
         createdAt: now,
         updatedAt: now,
@@ -501,6 +513,10 @@ export default function AdminCoursesPage() {
 
   if (view === 'editor' && editingCourse) {
     return <CourseEditor
+      courseRules={courseRules}
+      setCourseRules={setCourseRules}
+      allCourses={courses}
+      onUpdateModule={(modId, patch) => setModules(prev => prev.map(m => m.id === modId ? { ...m, ...patch } : m))}
       course={editingCourse}
       courseForm={courseForm}
       setCourseForm={setCourseForm}
@@ -743,6 +759,10 @@ export default function AdminCoursesPage() {
 
 interface EditorProps {
   course: Course;
+  courseRules: CourseRulesForm;
+  setCourseRules: (f: CourseRulesForm) => void;
+  allCourses: Course[];
+  onUpdateModule: (modId: string, patch: Partial<CourseModule>) => void;
   courseForm: CourseForm;
   setCourseForm: React.Dispatch<React.SetStateAction<CourseForm>>;
   modules: CourseModule[];
@@ -778,7 +798,8 @@ interface EditorProps {
 }
 
 function CourseEditor({
-  course, courseForm, setCourseForm, modules, availableQuizzes,
+  course, courseRules, setCourseRules, allCourses, onUpdateModule,
+  courseForm, setCourseForm, modules, availableQuizzes,
   expandedModuleId, setExpandedModuleId,
   editingModuleId, moduleTitle, setModuleTitle, moduleDesc, setModuleDesc,
   lessonDialog, lessonForm, setLessonForm,
@@ -888,6 +909,8 @@ function CourseEditor({
             </CardContent>
           </Card>
 
+          <CourseRulesCard courseId={course.id} allCourses={allCourses} form={courseRules} onChange={setCourseRules} />
+
           {/* Resumen */}
           <Card className="bg-sky-50/50 border-sky-100">
             <CardContent className="py-4">
@@ -995,6 +1018,35 @@ function CourseEditor({
                     ) : mod.description ? (
                       <p className="text-xs text-muted-foreground mt-2 mb-3">{mod.description}</p>
                     ) : null}
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-2 text-xs">
+                      <label className="flex items-center gap-1.5">
+                        <Switch checked={!!mod.isOptional} onCheckedChange={v => onUpdateModule(mod.id, { isOptional: v })} />
+                        Opcional (no cuenta para completar)
+                      </label>
+                      {modules.filter(m => m.id !== mod.id).length > 0 && (
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-muted-foreground">Requiere terminar:</span>
+                          {modules.filter(m => m.id !== mod.id).map(other => {
+                            const on = (mod.prerequisiteModuleIds ?? []).includes(other.id);
+                            return (
+                              <button
+                                key={other.id}
+                                type="button"
+                                onClick={() => onUpdateModule(mod.id, {
+                                  prerequisiteModuleIds: on
+                                    ? (mod.prerequisiteModuleIds ?? []).filter(id => id !== other.id)
+                                    : [...(mod.prerequisiteModuleIds ?? []), other.id],
+                                })}
+                                className={`px-2 py-0.5 rounded-full border ${on ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/30'}`}
+                              >
+                                {other.title}
+                              </button>
+                            );
+                          })}
+                        </span>
+                      )}
+                    </div>
 
                     {mod.lessons.length === 0 ? (
                       <p className="text-xs text-muted-foreground py-3 text-center">
@@ -1153,6 +1205,20 @@ function LessonFormFields({
     if (!file || !storage) return;
     setUploadError(null);
     setUploadProgress(0);
+
+    // SCORM: se descomprime y cada archivo se sube a Storage para servirlo desde la app.
+    if (form.type === 'scorm') {
+      try {
+        const { launchUrl, version } = await uploadScormPackage(file, courseId, setUploadProgress);
+        setForm(p => ({ ...p, contentUrl: launchUrl, scormVersion: version }));
+        setInputMode('url');
+      } catch (err) {
+        setUploadError(err instanceof Error ? err.message : 'No se pudo subir el paquete SCORM.');
+      } finally {
+        setUploadProgress(null);
+      }
+      return;
+    }
 
     const safeId = courseId || 'draft';
     const timestamp = Date.now();
@@ -1412,6 +1478,11 @@ function LessonFormFields({
         />
       </div>
 
+      <label className="flex items-center gap-2 text-sm">
+        <Switch checked={form.isRequired} onCheckedChange={v => setForm(p => ({ ...p, isRequired: v }))} />
+        Obligatoria para completar el curso
+      </label>
+
       {/* Quiz/evaluación al finalizar la lección */}
       <div className="space-y-1.5 pt-1 border-t">
         <Label className="flex items-center gap-1.5 text-sm">
@@ -1476,7 +1547,7 @@ function buildLessonContent(form: LessonForm) {
     case 'html':     return { htmlContent: form.htmlContent || undefined };
     case 'embedded': return { embedUrl: url ? toFigmaEmbedUrl(url) : undefined };
     case 'audio':    return { audioUrl: url || undefined };
-    case 'scorm':    return { scormPackageUrl: url || undefined };
+    case 'scorm':    return { scormPackageUrl: url || undefined, scormVersion: form.scormVersion };
     default:         return {};
   }
 }

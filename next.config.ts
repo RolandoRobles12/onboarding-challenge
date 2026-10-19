@@ -3,7 +3,8 @@ import type {NextConfig} from 'next';
 const nextConfig: NextConfig = {
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    // El proyecto compila sin errores de tipos: que el build lo siga exigiendo.
+    ignoreBuildErrors: false,
   },
   eslint: {
     ignoreDuringBuilds: true,

@@ -1,39 +1,37 @@
 rules_version = '2';
+
+// Lectura: cuentas permitidas (mismo criterio que firestore.rules).
+// Escritura: solo staff (super_admin, admin, trainer); todas las subidas salen
+// del panel de administración.
 service firebase.storage {
   match /b/{bucket}/o {
-    // Archivos de cursos (módulos y lecciones)
-    match /courses/{courseId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+
+    function allowedAccount() {
+      return request.auth != null
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email.lower().matches('.*@avivacredito[.]com')
+            || request.auth.token.email.lower() in ['rolando.9834@gmail.com']);
     }
 
-    // Videos del feed (solo admins/trainers pueden subir, todos los autenticados pueden leer)
-    match /videos/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+    function profile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
     }
 
-    // Archivos de certificados y logos
-    match /certificates/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+    function isStaff() {
+      return allowedAccount()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && profile().get('active', true) != false
+        && profile().get('rol', '') in ['super_admin', 'admin', 'trainer'];
     }
 
-    // Logo de marca (Admin > Marca)
-    match /branding/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    // Capturas de pantalla del prototipo de simulaciones por nodos
-    match /simulations/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    // Regla por defecto: denegar todo lo demás
-    match /{allPaths=**} {
-      allow read, write: if false;
+    // Archivos de cursos, videos del feed, certificados, logo de marca y
+    // capturas de las simulaciones.
+    match /{folder}/{allPaths=**} {
+      allow read: if folder in ['courses', 'videos', 'certificates', 'branding', 'simulations']
+        && allowedAccount();
+      allow write: if folder in ['courses', 'videos', 'certificates', 'branding', 'simulations']
+        && isStaff();
     }
   }
 }

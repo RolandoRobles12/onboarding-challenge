@@ -41,6 +41,7 @@ import { cn } from '@/lib/utils';
 import type { Course } from '@/lib/types-lms';
 import type { CourseEnrollment, EnrollmentStatus } from '@/lib/types-lms';
 import type { UserProfile, Journey, UserJourneyProgress, JourneyStep } from '@/lib/types-scalable';
+import { postEvent } from '@/lib/api-client';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -139,8 +140,13 @@ export default function EnrollmentsPage() {
     if (!enrollUserId || !selectedCourseId || !profile?.uid) return;
     setEnrolling(true);
     try {
-      await adminEnrollUserInCourse(enrollUserId, selectedCourseId, profile.uid);
-      toast({ title: 'Usuario inscrito', description: 'La inscripción se registró correctamente.' });
+      const { created } = await adminEnrollUserInCourse(enrollUserId, selectedCourseId, profile.uid);
+      if (created) {
+        postEvent({ type: 'course_assigned', userId: enrollUserId, courseId: selectedCourseId });
+        toast({ title: 'Usuario inscrito', description: 'La inscripción se registró y se le avisó por Slack/push.' });
+      } else {
+        toast({ title: 'Ya estaba inscrito', description: 'Ese usuario ya tenía este curso asignado.' });
+      }
       setEnrollDialogOpen(false);
       setEnrollUserId('');
       await loadEnrollments();

@@ -21,6 +21,7 @@ import {
   rememberAppUrl,
   requestPulseScheduleSync,
 } from '@/lib/firestore-service';
+import { authFetch } from '@/lib/api-client';
 import type {
   DailyPulse,
   PulseAttempt,
@@ -360,9 +361,8 @@ export default function KnowledgePulsePage() {
     if (resend && !window.confirm('El aviso de hoy ya se envió. ¿Enviarlo otra vez a todo el equipo?')) return;
     setActioning(true);
     try {
-      const res = await fetch('/api/pulse/send-slack', {
+      const res = await authFetch('/api/pulse/send-slack', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ date }),
       });
       const data = await res.json() as SlackSendResponse;
@@ -445,10 +445,9 @@ export default function KnowledgePulsePage() {
   const handleSendTestSlack = async () => {
     setSendingTest(true);
     try {
-      const res = await fetch('/api/pulse/send-slack', {
+      const res = await authFetch('/api/pulse/send-slack', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: today, test: true, testSlackId: mySlackId }),
+        body: JSON.stringify({ date: today, test: true }),
       });
       const data = await res.json() as SlackSendResponse;
       const failed = (data.results ?? []).filter(r => !r.ok);

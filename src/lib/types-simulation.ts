@@ -196,6 +196,14 @@ export interface SimAttempt {
   textAnswers?: Record<string, string>;
   /** true si algún campo de texto era abierto y necesita revisión humana. */
   needsManualReview?: boolean;
+  /** Revisión del capacitador de las respuestas abiertas (Admin → Simulaciones). */
+  review?: {
+    status: 'approved' | 'rejected';
+    reviewedBy: string;
+    reviewerName?: string;
+    reviewedAt: Timestamp | FieldValue;
+    note?: string;
+  };
 }
 
 /** Errores permitidos por defecto antes de reprobar un intento. */

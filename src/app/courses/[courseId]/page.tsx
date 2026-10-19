@@ -16,6 +16,8 @@ import {
   getUserEnrollments,
   enrollUserInCourse,
   updateEnrollmentProgress,
+  getUserAttempts,
+  getCourses,
 } from '@/lib/firestore-service';
 import type { Course, Lesson, CourseEnrollment } from '@/lib/types-lms';
 import {
@@ -41,9 +43,21 @@ import {
   ExternalLink,
   Maximize2,
   Minimize2,
+  Award,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { postEvent } from '@/lib/api-client';
+import {
+  assessmentQuizIds,
+  courseAudienceMatches,
+  courseDueDate,
+  isCourseClosed,
+  isCourseComplete,
+  isModuleUnlocked,
+  missingPrerequisites,
+} from '@/lib/course-access';
+import { ScormPlayer } from '@/components/ScormPlayer';
 
 // ─── Lesson type icon ────────────────────────────────────────────────────────
 
@@ -197,18 +211,22 @@ function Sidebar({
   course,
   selectedLessonId,
   completedLessonIds,
+  completedModuleIds,
   navigation,
   onSelect,
 }: {
   course: Course;
   selectedLessonId: string | null;
   completedLessonIds: Set<string>;
+  completedModuleIds: Set<string>;
   navigation: Course['navigation'];
   onSelect: (lesson: Lesson) => void;
 }) {
   const allLessons = course.modules.flatMap(m => m.lessons);
 
   const isLessonUnlocked = (moduleIdx: number, lessonIdx: number) => {
+    // Módulos con requisitos: se abren al completar los módulos previos indicados.
+    if (!isModuleUnlocked(course.modules[moduleIdx], completedModuleIds)) return false;
     if (navigation === 'free') return true;
     const flatIdx = course.modules
       .slice(0, moduleIdx)
@@ -248,6 +266,7 @@ function Sidebar({
                     : <span className="text-[9px] font-bold text-muted-foreground">{modIdx + 1}</span>}
                 </div>
                 <p className="text-xs font-semibold truncate">{mod.title}</p>
+                {mod.isOptional && <span className="text-[9px] uppercase tracking-wide text-muted-foreground shrink-0">Opcional</span>}
               </div>
 
               {mod.lessons.map((lesson, lessonIdx) => {
@@ -298,10 +317,13 @@ function LessonViewer({
   lesson,
   isCompleted,
   onComplete,
+  scorm,
 }: {
   lesson: Lesson;
   isCompleted: boolean;
   onComplete: () => void;
+  /** Datos para que un paquete SCORM guarde su avance. */
+  scorm?: { userId: string; userName: string; courseId: string; enrollmentId: string };
 }) {
   const { content } = lesson;
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -489,8 +511,23 @@ function LessonViewer({
           );
         })()}
 
-        {/* SCORM — auto-complete via timer */}
-        {lesson.type === 'scorm' && content.scormPackageUrl && (
+        {/* SCORM subido desde el panel: API SCORM real (se completa cuando el paquete lo reporta) */}
+        {lesson.type === 'scorm' && content.scormPackageUrl?.startsWith('/scorm/') && scorm && (
+          <ScormPlayer
+            key={lesson.id}
+            src={content.scormPackageUrl}
+            version={content.scormVersion ?? '1.2'}
+            title={lesson.title}
+            lessonId={lesson.id}
+            isCompleted={isCompleted}
+            onComplete={onComplete}
+            style={iframeStyle}
+            {...scorm}
+          />
+        )}
+
+        {/* SCORM antiguo (URL externa): se completa por tiempo */}
+        {lesson.type === 'scorm' && content.scormPackageUrl && !content.scormPackageUrl.startsWith('/scorm/') && (
           <>
             <ExpandableIframe src={content.scormPackageUrl} title={lesson.title} style={iframeStyle} />
             <TimerAutoComplete
@@ -547,7 +584,8 @@ export default function CourseDetailPage() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [unavailable, setUnavailable] = useState(false);
+  /** Motivo por el que el embajador no puede abrir el curso (null = puede). */
+  const [blocked, setBlocked] = useState<{ title: string; text: string } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -565,10 +603,30 @@ export default function CourseDetailPage() {
       if (!data) { setNotFound(true); return; }
       // Un curso no publicado no debe quedar accesible ni inscribible para el
       // vendedor solo por conocer la URL — los admins sí pueden previsualizarlo.
-      if (data.status !== 'published' && !isAdmin) { setUnavailable(true); return; }
+      if (data.status !== 'published' && !isAdmin) {
+        setBlocked({ title: 'Este curso aún no está disponible', text: 'Todavía no ha sido publicado por tu equipo de capacitación.' });
+        return;
+      }
+      let enr = enrollments.find(e => e.courseId === courseId) ?? null;
+      if (!isAdmin && !enr) {
+        if (!courseAudienceMatches(data, profile)) {
+          setBlocked({ title: 'Este curso no es para tu perfil', text: 'Está dirigido a otro rol, producto o kiosko. Si crees que es un error, avísale a tu capacitador.' });
+          return;
+        }
+        if (isCourseClosed(data)) {
+          setBlocked({ title: 'Este curso ya cerró', text: 'La fecha para inscribirse terminó.' });
+          return;
+        }
+      }
+      if (!isAdmin && enr?.status !== 'completed' && (data.prerequisiteCourseIds ?? []).length > 0) {
+        const missing = missingPrerequisites(data, await getCourses().catch(() => []), enrollments);
+        if (missing.length > 0) {
+          setBlocked({ title: 'Primero termina los cursos previos', text: `Para abrir este curso necesitas completar: ${missing.map(c => c.title).join(', ')}.` });
+          return;
+        }
+      }
       setCourse(data);
 
-      let enr = enrollments.find(e => e.courseId === courseId) ?? null;
       if (!enr) {
         const enrolledAt = new Date() as unknown as import('firebase/firestore').Timestamp;
         const id = await enrollUserInCourse({
@@ -594,18 +652,25 @@ export default function CourseDetailPage() {
           updatedAt: enrolledAt,
         };
       }
-      // Si venimos de una evaluación de lección/módulo, registrar el mejor
-      // puntaje obtenido — es lo que Course.passingScore evalúa.
-      const assessmentScoreParam = searchParams?.get('assessmentScore');
-      if (assessmentScoreParam) {
-        const newScore = parseInt(assessmentScoreParam, 10);
-        if (!Number.isNaN(newScore)) {
-          const bestScore = Math.max(enr.overallScore ?? 0, newScore);
-          if (bestScore !== enr.overallScore) {
-            await updateEnrollmentProgress(enr.id, { overallScore: bestScore }).catch(console.error);
-            enr = { ...enr, overallScore: bestScore };
-          }
+      // Mejor puntaje en las evaluaciones del curso: es lo que Course.passingScore
+      // evalúa. Se toma de los intentos guardados, no de la URL.
+      const quizIds = assessmentQuizIds(data);
+      if (quizIds.length > 0) {
+        const attempts = await getUserAttempts(profile.uid).catch(() => []);
+        const scores = attempts.filter(a => quizIds.includes(a.quizId)).map(a => Math.round(a.percentage));
+        const bestScore = scores.length > 0 ? Math.max(...scores) : undefined;
+        if (bestScore !== undefined && bestScore !== enr.overallScore) {
+          await updateEnrollmentProgress(enr.id, { overallScore: bestScore }).catch(console.error);
+          enr = { ...enr, overallScore: bestScore };
         }
+      }
+      // Lecciones ya terminadas que esperaban la calificación mínima.
+      if (enr.status !== 'completed' && isCourseComplete(data, new Set(enr.completedLessonIds), enr.overallScore)) {
+        await updateEnrollmentProgress(enr.id, {
+          status: 'completed',
+          completedAt: new Date() as unknown as import('firebase/firestore').Timestamp,
+        }).then(() => postEvent({ type: 'course_completed', courseId })).catch(console.error);
+        enr = { ...enr, status: 'completed' };
       }
 
       setEnrollment(enr);
@@ -654,6 +719,8 @@ export default function CourseDetailPage() {
     return `/${profile.producto}/quiz?${params.toString()}`;
   };
 
+  const dueDate = course ? courseDueDate(course, enrollment) : null;
+
   const pct = allLessons.length > 0
     ? Math.round((completedLessonIds.size / allLessons.length) * 100)
     : 0;
@@ -669,7 +736,8 @@ export default function CourseDetailPage() {
     if (mod && mod.lessons.every(l => newLessonIds.includes(l.id))) {
       newModuleIds.push(mod.id);
     }
-    const allComplete = newLessonIds.length === allLessons.length;
+    // Por ids y no por cantidad: una lección borrada del curso no debe contar.
+    const allComplete = isCourseComplete(course, new Set(newLessonIds), enrollment.overallScore);
 
     // Update state immediately for snappy UI
     setCompletedLessonIds(new Set(newLessonIds));
@@ -681,7 +749,7 @@ export default function CourseDetailPage() {
       completedModuleIds: newModuleIds,
       status: allComplete ? 'completed' : 'in_progress',
       ...(allComplete ? { completedAt: new Date() as unknown as import('firebase/firestore').Timestamp } : {}),
-    }).catch(console.error);
+    }).then(() => { if (allComplete) postEvent({ type: 'course_completed', courseId: course.id }); }).catch(console.error);
   }, [enrollment, selectedLesson, course, completedLessonIds, completedModuleIds, allLessons.length]);
 
   return (
@@ -762,13 +830,11 @@ export default function CourseDetailPage() {
                 <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver al inicio</Link>
               </Button>
             </div>
-          ) : unavailable ? (
+          ) : blocked ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-4">
               <AlertCircle className="h-12 w-12 text-muted-foreground" />
-              <p className="font-semibold text-lg">Este curso aún no está disponible</p>
-              <p className="text-muted-foreground text-sm max-w-xs">
-                Todavía no ha sido publicado por tu equipo de capacitación.
-              </p>
+              <p className="font-semibold text-lg">{blocked.title}</p>
+              <p className="text-muted-foreground text-sm max-w-xs">{blocked.text}</p>
               <Button asChild variant="outline">
                 <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver al inicio</Link>
               </Button>
@@ -799,6 +865,12 @@ export default function CourseDetailPage() {
                     {course.description && (
                       <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{course.description}</p>
                     )}
+                    {dueDate && enrollment?.status !== 'completed' && (
+                      <p className={cn('text-[11px] mt-1 font-medium', dueDate.getTime() < Date.now() ? 'text-destructive' : 'text-orange-600')}>
+                        {dueDate.getTime() < Date.now() ? 'Venció el ' : 'Termínalo antes del '}
+                        {dueDate.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' })}
+                      </p>
+                    )}
                   </div>
                   <button
                     className="shrink-0 lg:hidden text-muted-foreground hover:text-foreground mt-0.5"
@@ -811,6 +883,7 @@ export default function CourseDetailPage() {
                   course={course}
                   selectedLessonId={selectedLesson?.id ?? null}
                   completedLessonIds={completedLessonIds}
+                  completedModuleIds={completedModuleIds}
                   navigation={course.navigation}
                   onSelect={(lesson) => {
                     setSelectedLesson(lesson);
@@ -830,6 +903,12 @@ export default function CourseDetailPage() {
                         lesson={selectedLesson}
                         isCompleted={isDone}
                         onComplete={handleAutoComplete}
+                        scorm={profile && enrollment ? {
+                          userId: profile.uid,
+                          userName: profile.nombre,
+                          courseId: course.id,
+                          enrollmentId: enrollment.id,
+                        } : undefined}
                       />
                     </div>
 
@@ -943,6 +1022,11 @@ export default function CourseDetailPage() {
                               ? ' · Aprobado'
                               : ` · mínimo requerido ${course.passingScore}%`}
                           </Badge>
+                        )}
+                        {course.certificateTemplate && enrollment?.status === 'completed' && (
+                          <Button asChild className="mt-2 gap-2">
+                            <Link href={`/courses/${course.id}/certificate`}><Award className="h-4 w-4" />Ver mi certificado</Link>
+                          </Button>
                         )}
                         <Button asChild variant="outline" className="mt-2">
                           <Link href="/"><ChevronLeft className="mr-2 h-4 w-4" />Volver a mi ruta</Link>

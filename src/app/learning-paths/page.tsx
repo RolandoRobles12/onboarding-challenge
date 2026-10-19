@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 import {
   Route, ChevronLeft, ChevronRight, LogOut, ShieldCheck, Compass,
   BookOpen, Swords, Award, ListChecks, FileText, HelpCircle, BarChart2, Medal,
-  CalendarDays, Search, AlertCircle,
+  CalendarDays, Search, AlertCircle, MousePointerClick,
 } from 'lucide-react';
 
 const TYPE_META: Record<JourneyStepType, { label: string; icon: React.ElementType; color: string }> = {
@@ -29,6 +29,7 @@ const TYPE_META: Record<JourneyStepType, { label: string; icon: React.ElementTyp
   certificate: { label: 'certificados', icon: Award,      color: 'text-amber-500' },
   badge:       { label: 'insignias',    icon: Medal,      color: 'text-yellow-500' },
   checklist:   { label: 'listas',       icon: ListChecks, color: 'text-teal-500' },
+  simulation:  { label: 'simulaciones', icon: MousePointerClick, color: 'text-fuchsia-500' },
 };
 
 interface RouteCard {

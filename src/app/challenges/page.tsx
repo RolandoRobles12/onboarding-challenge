@@ -5,7 +5,7 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
-import { LogOut, Trophy, ShieldCheck, Swords, Play, Medal, Clock } from 'lucide-react';
+import { LogOut, Trophy, ShieldCheck, Swords, Play, Medal, Clock, MousePointerClick, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -181,7 +181,7 @@ function ProductSection({ productId, productColor, productName, currentUserId }:
                     <span className="text-[10px] text-muted-foreground">{q.totalQuestions} preguntas</span>
                   </div>
                 </div>
-                <Link href={`/${productId}/quiz?quizId=${q.id}`}>
+                <Link href={`/${productId}/quiz?quizId=${q.id}&practice=1`}>
                   <Button size="sm" className="shrink-0 gap-1.5 rounded-lg h-8 px-3">
                     <Play className="h-3 w-3" /> Practicar
                   </Button>
@@ -272,6 +272,17 @@ export default function ChallengesPage() {
                 <Medal className="h-5 w-5 text-orange-500" />
                 <h1 className="text-lg font-bold">Prácticas y Rankings</h1>
               </div>
+
+              <Link href="/simulations" className="flex items-center gap-3 rounded-2xl border bg-card px-4 py-3 hover:bg-muted/40 transition-colors">
+                <div className="h-9 w-9 rounded-lg bg-fuchsia-500/10 flex items-center justify-center shrink-0">
+                  <MousePointerClick className="h-4 w-4 text-fuchsia-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">Simulaciones de la herramienta</p>
+                  <p className="text-xs text-muted-foreground">Practica el flujo paso a paso, como con un cliente real.</p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
 
               {loadingProducts ? (
                 <BoardSkeleton />

@@ -13,8 +13,11 @@ import {
   getExplorableJourneys,
   getUserJourneyProgress,
   getProducts,
+  getCourses,
+  getUserEnrollments,
 } from '@/lib/firestore-service';
 import type { Journey, JourneyStep, Product } from '@/lib/types-scalable';
+import type { Course, CourseEnrollment } from '@/lib/types-lms';
 import {
   Award,
   ChevronLeft,
@@ -33,6 +36,8 @@ interface EarnedCertificate {
 export default function CertificationsPage() {
   const { user, profile, logout } = useAuth();
   const [certificates, setCertificates] = useState<EarnedCertificate[]>([]);
+  // Cursos terminados que emiten certificado.
+  const [courseCerts, setCourseCerts] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,10 +46,14 @@ export default function CertificationsPage() {
 
     (async () => {
       try {
-        const [journeys, products] = await Promise.all([
+        const [journeys, products, courses, enrollments] = await Promise.all([
           getExplorableJourneys().catch(() => [] as Journey[]),
           getProducts().catch(() => [] as Product[]),
+          getCourses().catch(() => [] as Course[]),
+          getUserEnrollments(user.uid).catch(() => [] as CourseEnrollment[]),
         ]);
+        const completedCourses = new Set(enrollments.filter(e => e.status === 'completed').map(e => e.courseId));
+        if (!cancelled) setCourseCerts(courses.filter(c => c.certificateTemplate && completedCourses.has(c.id)));
         const productMap = new Map(products.map(p => [p.id, p]));
 
         const results = await Promise.all(
@@ -128,9 +137,9 @@ export default function CertificationsPage() {
               </div>
               <div className="flex items-center gap-3 mt-2">
                 <h1 className="text-3xl sm:text-4xl font-bold font-headline">Mis Certificados</h1>
-                {!loading && certificates.length > 0 && (
+                {!loading && certificates.length + courseCerts.length > 0 && (
                   <Badge className="bg-white/15 text-accent-foreground border-white/20 text-xs">
-                    {certificates.length}
+                    {certificates.length + courseCerts.length}
                   </Badge>
                 )}
               </div>
@@ -147,7 +156,7 @@ export default function CertificationsPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[1, 2].map(i => <Skeleton key={i} className="h-32 rounded-2xl" />)}
                 </div>
-              ) : certificates.length === 0 ? (
+              ) : certificates.length + courseCerts.length === 0 ? (
                 <div className="text-center py-16 space-y-4">
                   <div className="h-20 w-20 mx-auto rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-xl">
                     <Award className="h-10 w-10 text-white" />
@@ -188,6 +197,29 @@ export default function CertificationsPage() {
                         </Badge>
                         <Button asChild size="sm" className="w-full gap-1.5">
                           <Link href={certificateHref(c)}>
+                            Ver certificado <ChevronRight className="h-3.5 w-3.5" />
+                          </Link>
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {courseCerts.map(course => (
+                    <Card key={course.id} className="overflow-hidden border-sky-200/60">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start gap-3">
+                          <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 flex items-center justify-center shrink-0">
+                            <Award className="h-5 w-5 text-white" />
+                          </div>
+                          <div className="min-w-0">
+                            <CardTitle className="text-base leading-tight truncate">{course.title}</CardTitle>
+                            <CardDescription className="text-xs mt-0.5">Certificado del curso</CardDescription>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-0 space-y-3">
+                        <Badge className="bg-green-100 text-green-800 border-green-200 text-xs">Curso completado</Badge>
+                        <Button asChild size="sm" className="w-full gap-1.5">
+                          <Link href={`/courses/${course.id}/certificate`}>
                             Ver certificado <ChevronRight className="h-3.5 w-3.5" />
                           </Link>
                         </Button>

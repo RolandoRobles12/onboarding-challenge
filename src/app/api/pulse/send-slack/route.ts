@@ -2,9 +2,11 @@
  * POST /api/pulse/send-slack
  * Envía el aviso del Pulso de Conocimiento por Slack desde el panel de admin.
  *
- * Body: { date: "YYYY-MM-DD", test?: boolean, testSlackId?: string }
- *  - test=true: solo al admin que la pide (testSlackId) o a los destinatarios
- *    directos. No cambia el estado del pulso.
+ * Requiere sesión de admin o capacitador (header `Authorization: Bearer <ID token>`).
+ *
+ * Body: { date: "YYYY-MM-DD", test?: boolean }
+ *  - test=true: solo a quien la pide (el Slack ID de su perfil) o, si no
+ *    tiene, a los destinatarios directos. No cambia el estado del pulso.
  *  - test=false: envío real a canales, vendedores y destinatarios directos,
  *    aunque el envío automático esté apagado. Marca el pulso como "aviso
  *    enviado" y guarda el resultado (también si falla).
@@ -13,13 +15,19 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { claimPulseSlackSend, getDailyPulse, recordPulseSlackResult } from '@/lib/firestore-service';
-import { checkSlackConnection, sendPulseSlack, summarizeSlackResults, PulseSlackError } from '@/lib/pulse-slack';
+import { claimPulseSlackSend, getDailyPulse, recordPulseSlackResult } from '@/lib/server/pulse-store';
+import { checkSlackConnection, sendPulseSlack, summarizeSlackResults, PulseSlackError } from '@/lib/server/pulse-slack';
+import { authErrorResponse, requireUser, STAFF_ROLES } from '@/lib/server/auth';
 
 export async function POST(req: NextRequest) {
   try {
-    const { date, test = false, testSlackId } = await req.json() as { date: string; test?: boolean; testSlackId?: string };
-    if (!date) return NextResponse.json({ error: 'Falta la fecha del pulso' }, { status: 400 });
+    const { profile } = await requireUser(req, STAFF_ROLES);
+    const { date, test = false } = await req.json() as { date: string; test?: boolean };
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return NextResponse.json({ error: 'Falta la fecha del pulso' }, { status: 400 });
+    }
+    // La prueba solo va a quien la pide: nunca a un Slack ID arbitrario.
+    const testSlackId = test ? profile.slackId : undefined;
 
     const proto = req.headers.get('x-forwarded-proto') || 'https';
     const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || '';
@@ -80,6 +88,8 @@ export async function POST(req: NextRequest) {
       connection,
     });
   } catch (err: unknown) {
+    const authError = authErrorResponse(err);
+    if (authError) return authError;
     if (err instanceof PulseSlackError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }
