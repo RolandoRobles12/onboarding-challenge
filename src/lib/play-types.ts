@@ -18,6 +18,8 @@ export interface PlayQuestion {
   type: QuestionType;
   module?: KnowledgeModule;
   isTricky: boolean;
+  /** Solo en preguntas capciosas: pista que se muestra antes de responder. */
+  hint?: string;
   isMultiSelect: boolean;
   isOpenText: boolean;
   isFillInBlank: boolean;

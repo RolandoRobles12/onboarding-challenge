@@ -353,43 +353,10 @@ Trainer:
 
 ## 📦 Migración de Datos
 
-### Script de Migración
-
-Ubicación: `/scripts/migrate-to-firestore.ts`
-
-**Ejecutar migración:**
-```bash
-# Instalar tsx si no lo tienes
-npm install -g tsx
-
-# Configurar variables de entorno
-cp .env.example .env
-# Editar .env con credenciales de Firebase
-
-# Ejecutar migración
-npx tsx scripts/migrate-to-firestore.ts
-```
-
-**El script migra:**
-1. ✅ Organización Aviva Crédito
-2. ✅ Productos BA y ATN
-3. ✅ ~43 preguntas de BA
-4. ✅ ~56 preguntas de ATN (actualizar script con datos completos)
-5. ✅ Quiz de certificación BA
-6. ✅ 4 Achievements iniciales
-
-**Estructura migrada:**
-```
-Organización: aviva-credito
-├── Producto: Aviva Tu Compra (BA)
-│   ├── 43 preguntas
-│   └── Quiz: Certificación Promotores BA
-│       ├── Misión 1: Fundamentos y Plataformas
-│       └── Misión 2: Proceso y Operación
-│
-└── Producto: Aviva Tu Negocio/Contigo (ATN)
-    └── 56 preguntas (pendiente quiz)
-```
+La migración inicial de los datos fijos a Firestore se hacía con un script que
+escribía con el SDK del navegador sin sesión; las reglas actuales ya no lo
+permiten y se retiró. El contenido se administra desde el panel (Preguntas,
+Importar Preguntas).
 
 ---
 
@@ -628,7 +595,6 @@ function ProductList() {
 │   └── /[quizType]              # Quiz dinámico
 │
 └── /scripts
-    └── migrate-to-firestore.ts   # Script migración
 ```
 
 ---

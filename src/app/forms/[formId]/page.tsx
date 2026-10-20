@@ -260,6 +260,8 @@ function FormContent() {
   const stepId = searchParams.get('stepId') ?? '';
   const journeyId = searchParams.get('journeyId') ?? '';
   const productId = searchParams.get('productId') ?? '';
+  // Desde "Mi Equipo" el capacitador llega con el vendedor ya elegido.
+  const presetSubjectId = searchParams.get('subjectId') ?? '';
 
   const [form, setForm] = useState<JourneyForm | null>(null);
   const [loading, setLoading] = useState(true);
@@ -271,8 +273,9 @@ function FormContent() {
   const [trainers, setTrainers] = useState<UserProfile[]>([]);
   const [kioscos, setKioscos] = useState<Kiosko[]>([]);
   const [sellers, setSellers] = useState<UserProfile[]>([]);
-  const [subjectId, setSubjectId] = useState('');
+  const [subjectId, setSubjectId] = useState(presetSubjectId);
   const [subjectError, setSubjectError] = useState('');
+  const [submitError, setSubmitError] = useState('');
 
   // Formularios que NO responde el propio vendedor (p.ej. un capacitador o
   // gerente evaluando a un vendedor específico) necesitan capturar sobre quién
@@ -332,6 +335,7 @@ function FormContent() {
     e.preventDefault();
     if (blockedForRole || !validate() || !form || !profile) return;
     setSubmitting(true);
+    setSubmitError('');
     try {
       const formAnswers: FormAnswer[] = form.fields
         .filter(f => f.type !== 'section_header')
@@ -347,16 +351,18 @@ function FormContent() {
         answers: formAnswers,
       });
 
-      // Mark journey step complete if context was provided
+      // El paso se completa en la ruta de quien es evaluado: el propio vendedor,
+      // o el vendedor elegido cuando lo llena su capacitador.
       if (stepId && journeyId && productId) {
-        await markJourneyStepComplete(profile.uid, journeyId, productId, stepId);
+        await markJourneyStepComplete(needsSubject ? subjectId : profile.uid, journeyId, productId, stepId);
       }
 
       setSubmitted(true);
       // Return to main page after a brief moment
-      setTimeout(() => router.push('/'), 1500);
+      setTimeout(() => router.push(needsSubject ? '/admin/team' : '/'), 1500);
     } catch (err) {
       console.error(err);
+      setSubmitError('No se pudo enviar el formulario. Revisa tu conexión e inténtalo de nuevo.');
     } finally {
       setSubmitting(false);
     }
@@ -386,7 +392,7 @@ function FormContent() {
     <div className="flex flex-col items-center justify-center gap-4 text-center py-20 px-4">
       <div className="text-5xl">✅</div>
       <h2 className="text-xl font-bold">¡Formulario enviado!</h2>
-      <p className="text-muted-foreground text-sm">Regresando a tu ruta…</p>
+      <p className="text-muted-foreground text-sm">{needsSubject ? 'Regresando a tu equipo…' : 'Regresando a tu ruta…'}</p>
     </div>
   );
 
@@ -465,6 +471,10 @@ function FormContent() {
           <Send className="h-4 w-4" />
           {submitting ? 'Enviando…' : 'Enviar formulario'}
         </Button>
+
+        {submitError && (
+          <p className="text-sm text-center text-destructive font-medium" role="alert">{submitError}</p>
+        )}
 
         {!filledRequired && (
           <p className="text-xs text-center text-muted-foreground">

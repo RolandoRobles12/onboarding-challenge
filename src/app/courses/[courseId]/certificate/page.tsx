@@ -60,7 +60,12 @@ export default function CourseCertificatePage() {
         date: new Date(issued),
         lessons: course.modules.reduce((n, m) => n + m.lessons.length, 0),
       });
-      setSigners(allSigners.slice(0, 2).map(s => ({ name: s.name, position: s.position, signatureUrl: s.signatureUrl })));
+      // Firmantes elegidos en el curso; si no hay, los dos primeros activos.
+      const chosen = (course.certificateSignerIds ?? [])
+        .map(id => allSigners.find(s => s.id === id))
+        .filter((s): s is typeof allSigners[0] => !!s);
+      setSigners((chosen.length > 0 ? chosen : allSigners.slice(0, 2))
+        .map(s => ({ name: s.name, position: s.position, signatureUrl: s.signatureUrl })));
       if (cfg) {
         const { organizationId: _o, updatedAt: _u, ...rest } = cfg;
         setConfig(rest);

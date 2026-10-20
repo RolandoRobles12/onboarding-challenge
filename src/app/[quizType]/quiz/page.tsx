@@ -7,7 +7,7 @@ import { FloatingParticles, StreakCounter, MissionCompleteBanner } from '@/compo
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, VolumeX, Timer } from 'lucide-react';
+import { CheckCircle, XCircle, ArrowRight, BookOpen, ShieldAlert, Heart, Check, Music, VolumeX, Timer, Lightbulb } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   AlertDialog,
@@ -798,6 +798,12 @@ function QuizComponent() {
                 />
               )}
               <CardDescription>{currentMission.title}</CardDescription>
+              {currentQuestion.hint && !gameState.isAnswered && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 mt-2">
+                  <Lightbulb className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
+                  <span><strong>Pista:</strong> {currentQuestion.hint}</span>
+                </div>
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
               {currentQuestion.isFillInBlank ? (

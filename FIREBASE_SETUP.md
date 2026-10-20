@@ -106,8 +106,4 @@ NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-aviva.firebaseapp.com npm run dev
 ### Los scripts de `scripts/` fallan con "Permission denied"
 - `migrate-attempts-org-id.mjs` y `repair-whitelist-profiles.mjs` usan el Admin
   SDK: necesitan credenciales de Google Cloud (`gcloud auth application-default login`).
-- `init-users.ts`, `migrate-to-firestore.ts`, `seed-pulse-questions.ts` y
-  `test-firebase.ts` usan el SDK de cliente sin sesión, así que con las reglas
-  actuales ya no pueden escribir en producción. Córrelos contra los emuladores
-  o pásalos al Admin SDK. Para las preguntas base del Pulso, usa el botón de
-  Admin → Categorías del Pulso.
+- Para las preguntas base del Pulso, usa el botón de Admin → Categorías del Pulso.

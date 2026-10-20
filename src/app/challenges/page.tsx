@@ -5,7 +5,7 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SellerOnboardingGate from '@/components/SellerOnboardingGate';
 import { useAuth } from '@/context/AuthContext';
-import { LogOut, Trophy, ShieldCheck, Swords, Play, Medal, Clock, MousePointerClick, ChevronRight } from 'lucide-react';
+import { LogOut, Trophy, ShieldCheck, Swords, Play, Medal, Clock, MousePointerClick, ChevronRight, BookOpen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -154,7 +154,7 @@ function ProductSection({ productId, productColor, productName, currentUserId }:
           <div className="flex items-center gap-2 px-1 mb-2">
             <Swords className="h-4 w-4 text-orange-500" />
             <h3 className="text-sm font-bold">Practica tus desafíos</h3>
-            <Badge variant="secondary" className="text-[10px] h-4 px-1.5">no afecta el ranking</Badge>
+            <Badge variant="secondary" className="text-[10px] h-4 px-1.5">practicar no afecta el ranking</Badge>
           </div>
           <div className="space-y-2">
             {quizzes.map(q => (
@@ -181,11 +181,22 @@ function ProductSection({ productId, productColor, productName, currentUserId }:
                     <span className="text-[10px] text-muted-foreground">{q.totalQuestions} preguntas</span>
                   </div>
                 </div>
-                <Link href={`/${productId}/quiz?quizId=${q.id}&practice=1`}>
-                  <Button size="sm" className="shrink-0 gap-1.5 rounded-lg h-8 px-3">
-                    <Play className="h-3 w-3" /> Practicar
-                  </Button>
-                </Link>
+                <div className="flex flex-col gap-1.5 shrink-0">
+                  {/* "Examen independiente": se juega en serio desde aquí, sin
+                      depender de un paso de la ruta, y entra al ranking. */}
+                  {q.assessmentConfig?.isStandalone && (
+                    <Link href={`/${productId}/quiz?quizId=${q.id}&returnTo=/challenges`}>
+                      <Button size="sm" className="w-full gap-1.5 rounded-lg h-8 px-3">
+                        <Trophy className="h-3 w-3" /> Jugar
+                      </Button>
+                    </Link>
+                  )}
+                  <Link href={`/${productId}/quiz?quizId=${q.id}&practice=1`}>
+                    <Button size="sm" variant={q.assessmentConfig?.isStandalone ? 'outline' : 'default'} className="w-full gap-1.5 rounded-lg h-8 px-3">
+                      <Play className="h-3 w-3" /> Practicar
+                    </Button>
+                  </Link>
+                </div>
               </div>
             ))}
           </div>
@@ -280,6 +291,17 @@ export default function ChallengesPage() {
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-sm">Simulaciones de la herramienta</p>
                   <p className="text-xs text-muted-foreground">Practica el flujo paso a paso, como con un cliente real.</p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
+
+              <Link href="/courses" className="flex items-center gap-3 rounded-2xl border bg-card px-4 py-3 hover:bg-muted/40 transition-colors">
+                <div className="h-9 w-9 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                  <BookOpen className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">Cursos</p>
+                  <p className="text-xs text-muted-foreground">Los cursos que tienes asignados y el catálogo disponible.</p>
                 </div>
                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </Link>

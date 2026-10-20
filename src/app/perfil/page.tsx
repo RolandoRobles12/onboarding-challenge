@@ -22,7 +22,7 @@ import {
 } from '@/lib/firestore-service';
 import type { UserBadge, QuizAttempt, JourneyStep } from '@/lib/types-scalable';
 import {
-  LogOut, Zap, Star, Medal, Award, CheckCircle2, Swords, TrendingUp,
+  LogOut, Zap, Star, Medal, Award, CheckCircle2, Swords, TrendingUp, BookOpen, GraduationCap, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -264,6 +264,19 @@ export default function PerfilPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="rounded-2xl border bg-card divide-y overflow-hidden">
+              <Link href="/certifications" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+                <GraduationCap className="h-4 w-4 text-primary" />
+                <span className="flex-1 text-sm font-semibold">Mis certificados</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
+              <Link href="/courses" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+                <BookOpen className="h-4 w-4 text-emerald-600" />
+                <span className="flex-1 text-sm font-semibold">Mis cursos</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
             </div>
 
             <PushToggle />

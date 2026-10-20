@@ -18,6 +18,8 @@ import {
   updateEnrollmentProgress,
   getUserAttempts,
   getCourses,
+  getLessonProgress,
+  upsertLessonProgress,
 } from '@/lib/firestore-service';
 import type { Course, Lesson, CourseEnrollment } from '@/lib/types-lms';
 import {
@@ -313,21 +315,72 @@ function Sidebar({
 
 // ─── Lesson content renderer ──────────────────────────────────────────────────
 
+type LessonTracking = { userId: string; userName: string; courseId: string; enrollmentId: string };
+
+/**
+ * Video y audio retoman donde se quedó el vendedor: el punto se guarda en
+ * lesson_progress.lastPosition cada pocos segundos y al pausar.
+ */
+function useMediaResume(lessonId: string, tracking: LessonTracking | undefined, isCompleted: boolean) {
+  const resumeAt = useRef<number | null>(null);
+  const lastSaved = useRef(0);
+
+  useEffect(() => {
+    resumeAt.current = null;
+    if (!tracking) return;
+    let cancelled = false;
+    getLessonProgress(tracking.userId, lessonId).then(p => {
+      if (!cancelled && p?.lastPosition && p.lastPosition > 5) resumeAt.current = p.lastPosition;
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessonId, tracking?.userId]);
+
+  const save = (el: HTMLMediaElement, position: number) => {
+    if (!tracking || !Number.isFinite(el.duration) || el.duration <= 0) return;
+    lastSaved.current = Date.now();
+    upsertLessonProgress({
+      userId: tracking.userId,
+      lessonId,
+      courseId: tracking.courseId,
+      enrollmentId: tracking.enrollmentId,
+      status: isCompleted ? 'completed' : 'in_progress',
+      progressPercentage: Math.min(100, Math.round((position / el.duration) * 100)),
+      lastPosition: Math.floor(position),
+    }).catch(err => console.error('[lesson] no se pudo guardar el avance:', err));
+  };
+
+  return {
+    onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
+      const el = e.currentTarget;
+      const at = resumeAt.current;
+      // Si quedó casi al final, empieza desde el principio.
+      if (at && at < el.duration - 5) el.currentTime = at;
+    },
+    onTimeUpdate: (e: React.SyntheticEvent<HTMLMediaElement>) => {
+      if (Date.now() - lastSaved.current > 10_000) save(e.currentTarget, e.currentTarget.currentTime);
+    },
+    onPause: (e: React.SyntheticEvent<HTMLMediaElement>) => save(e.currentTarget, e.currentTarget.currentTime),
+    onEndedSave: (el: HTMLMediaElement) => save(el, 0),
+  };
+}
+
 function LessonViewer({
   lesson,
   isCompleted,
   onComplete,
-  scorm,
+  tracking,
 }: {
   lesson: Lesson;
   isCompleted: boolean;
   onComplete: () => void;
-  /** Datos para que un paquete SCORM guarde su avance. */
-  scorm?: { userId: string; userName: string; courseId: string; enrollmentId: string };
+  /** Datos para guardar el avance (SCORM, video y audio). */
+  tracking?: LessonTracking;
 }) {
   const { content } = lesson;
   const sentinelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const media = useMediaResume(lesson.id, tracking, isCompleted);
 
   // HTML: auto-complete when the user scrolls to the bottom (sentinel visible)
   useEffect(() => {
@@ -380,7 +433,10 @@ function LessonViewer({
               controls
               playsInline
               src={content.videoUrl}
-              onEnded={() => { if (!isCompleted) onComplete(); }}
+              onLoadedMetadata={media.onLoadedMetadata}
+              onTimeUpdate={media.onTimeUpdate}
+              onPause={media.onPause}
+              onEnded={e => { media.onEndedSave(e.currentTarget); if (!isCompleted) onComplete(); }}
             />
           </div>
         )}
@@ -397,7 +453,10 @@ function LessonViewer({
               controls
               className="w-full max-w-md"
               src={content.audioUrl}
-              onEnded={() => { if (!isCompleted) onComplete(); }}
+              onLoadedMetadata={media.onLoadedMetadata}
+              onTimeUpdate={media.onTimeUpdate}
+              onPause={media.onPause}
+              onEnded={e => { media.onEndedSave(e.currentTarget); if (!isCompleted) onComplete(); }}
             />
           </div>
         )}
@@ -427,10 +486,36 @@ function LessonViewer({
           </>
         )}
 
-        {/* SLIDES — auto-complete via timer */}
-        {lesson.type === 'slides' && content.slidesUrl && (
+        {/* SLIDES — auto-complete via timer. El navegador no abre PPT/PPTX/KEY
+            dentro de un iframe: PowerPoint se ve con el visor de Office y
+            Keynote se descarga. PDF y enlaces (Google Slides, Canva) van directo. */}
+        {lesson.type === 'slides' && content.slidesUrl && (() => {
+          const url = content.slidesUrl;
+          const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? '';
+          const isPowerPoint = ext === 'ppt' || ext === 'pptx';
+          const isKeynote = ext === 'key';
+          const viewerUrl = isPowerPoint ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}` : url;
+          return (
           <>
-            <ExpandableIframe src={content.slidesUrl} title={lesson.title} style={iframeStyle} />
+            {isKeynote ? (
+              <div className="rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-background to-primary/[0.03] p-6 sm:p-10 flex flex-col items-center text-center gap-4">
+                <FileText className="h-10 w-10 text-primary" />
+                <p className="font-bold">{lesson.title}</p>
+                <p className="text-sm text-muted-foreground max-w-xs">Presentación de Keynote: descárgala para verla en tu dispositivo.</p>
+                <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-xl bg-primary text-primary-foreground px-6 py-3 text-sm font-semibold">
+                  <Download className="h-4 w-4" /> Descargar presentación
+                </a>
+              </div>
+            ) : (
+              <>
+                <ExpandableIframe src={viewerUrl} title={lesson.title} style={iframeStyle} />
+                {isPowerPoint && (
+                  <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-primary hover:underline">
+                    <Download className="h-4 w-4" /> Descargar presentación
+                  </a>
+                )}
+              </>
+            )}
             <TimerAutoComplete
               key={lesson.id}
               seconds={timerSeconds}
@@ -438,7 +523,8 @@ function LessonViewer({
               onComplete={onComplete}
             />
           </>
-        )}
+          );
+        })()}
 
         {/* DOCUMENT — smart viewer: inline PDF on desktop, card CTA everywhere else */}
         {lesson.type === 'document' && content.documentUrl && (() => {
@@ -512,7 +598,7 @@ function LessonViewer({
         })()}
 
         {/* SCORM subido desde el panel: API SCORM real (se completa cuando el paquete lo reporta) */}
-        {lesson.type === 'scorm' && content.scormPackageUrl?.startsWith('/scorm/') && scorm && (
+        {lesson.type === 'scorm' && content.scormPackageUrl?.startsWith('/scorm/') && tracking && (
           <ScormPlayer
             key={lesson.id}
             src={content.scormPackageUrl}
@@ -522,7 +608,7 @@ function LessonViewer({
             isCompleted={isCompleted}
             onComplete={onComplete}
             style={iframeStyle}
-            {...scorm}
+            {...tracking}
           />
         )}
 
@@ -903,7 +989,7 @@ export default function CourseDetailPage() {
                         lesson={selectedLesson}
                         isCompleted={isDone}
                         onComplete={handleAutoComplete}
-                        scorm={profile && enrollment ? {
+                        tracking={profile && enrollment ? {
                           userId: profile.uid,
                           userName: profile.nombre,
                           courseId: course.id,

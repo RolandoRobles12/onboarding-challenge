@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Star, Zap, Trophy, Award, Flame, Heart, Shield, Target } from 'lucide-react';
+import { Star, Trophy, Flame, Shield, Target } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { cn } from '@/lib/utils';
 
@@ -79,28 +79,6 @@ export function FloatingParticles({ trigger, type }: { trigger: boolean; type: '
         ))}
       </AnimatePresence>
     </div>
-  );
-}
-
-// ============================================================================
-// XP COUNTER ANIMATION
-// ============================================================================
-export function XPCounter({ xp, show }: { xp: number; show: boolean }) {
-  return (
-    <AnimatePresence>
-      {show && (
-        <motion.div
-          initial={{ opacity: 0, y: 20, scale: 0.8 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: -20 }}
-          transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-          className="flex items-center gap-2 bg-yellow-400 text-yellow-900 px-4 py-2 rounded-full font-bold text-lg shadow-lg"
-        >
-          <Zap className="h-5 w-5" />
-          +{xp} XP
-        </motion.div>
-      )}
-    </AnimatePresence>
   );
 }
 
@@ -182,53 +160,6 @@ export function LevelUpOverlay({ show, levelName, percentage, onDismiss }: Level
         </motion.div>
       )}
     </AnimatePresence>
-  );
-}
-
-// ============================================================================
-// ACHIEVEMENT BADGE POPUP
-// ============================================================================
-interface BadgeNotificationProps {
-  badges: Array<{ name: string; icon: string; xp: number }>;
-  show: boolean;
-}
-
-export function BadgeNotifications({ badges, show }: BadgeNotificationProps) {
-  const BADGE_ICONS: Record<string, JSX.Element> = {
-    trophy: <Trophy className="h-6 w-6" />,
-    star: <Star className="h-6 w-6" />,
-    flame: <Flame className="h-6 w-6" />,
-    award: <Award className="h-6 w-6" />,
-    heart: <Heart className="h-6 w-6" />,
-    zap: <Zap className="h-6 w-6" />,
-    shield: <Shield className="h-6 w-6" />,
-  };
-
-  return (
-    <div className="fixed bottom-4 right-4 z-50 space-y-2">
-      <AnimatePresence>
-        {show && badges.map((badge, index) => (
-          <motion.div
-            key={badge.name}
-            initial={{ opacity: 0, x: 100, scale: 0.8 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 100 }}
-            transition={{ delay: index * 0.2, type: 'spring', stiffness: 300 }}
-            className="flex items-center gap-3 bg-yellow-400 text-yellow-900 rounded-xl px-4 py-3 shadow-xl border-2 border-yellow-500"
-          >
-            <div className="h-10 w-10 rounded-full bg-yellow-300 flex items-center justify-center flex-shrink-0">
-              {BADGE_ICONS[badge.icon] || <Award className="h-6 w-6" />}
-            </div>
-            <div>
-              <p className="font-bold text-sm">{badge.name}</p>
-              <p className="text-xs text-yellow-700 flex items-center gap-1">
-                <Zap className="h-3 w-3" /> +{badge.xp} XP
-              </p>
-            </div>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-    </div>
   );
 }
 
@@ -317,25 +248,6 @@ export function ProgressRing({ percentage }: { percentage: number }) {
         </span>
       </div>
     </div>
-  );
-}
-
-// ============================================================================
-// CORRECT/WRONG ANSWER ANIMATION WRAPPER
-// ============================================================================
-export function AnswerFeedback({ correct, children }: { correct: boolean | null; children: React.ReactNode }) {
-  return (
-    <motion.div
-      animate={
-        correct === null
-          ? {}
-          : correct
-          ? { scale: [1, 1.02, 1], transition: { duration: 0.3 } }
-          : { x: [0, -8, 8, -8, 8, 0], transition: { duration: 0.4 } }
-      }
-    >
-      {children}
-    </motion.div>
   );
 }
 
