@@ -4,6 +4,9 @@ import { Toaster } from "@/components/ui/toaster"
 import { AuthProvider } from '@/context/AuthContext';
 import { BrandingProvider } from '@/context/BrandingContext';
 import { PwaProvider } from '@/components/PwaProvider';
+import { connection } from 'next/server';
+import { getServerBranding } from '@/lib/server/branding';
+import { brandCssVars } from '@/lib/branding';
 
 export const metadata: Metadata = {
   title: 'Aviva LMS',
@@ -37,21 +40,28 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // La marca se lee en cada solicitud (con caché de 60 s) y viaja en el HTML:
+  // logos y colores aparecen desde el primer pintado.
+  await connection();
+  const branding = await getServerBranding();
+  const brandImages = [...new Set([branding?.logoUrl, branding?.iconUrl].filter((u): u is string => !!u))];
+
   return (
-    <html lang="es-MX" suppressHydrationWarning>
+    <html lang="es-MX" suppressHydrationWarning style={branding ? brandCssVars(branding) as React.CSSProperties : undefined}>
       <head>
+        {brandImages.map(url => <link key={url} rel="preload" as="image" href={url} fetchPriority="high" />)}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link href="https://fonts.googleapis.com/css2?family=Fustat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
       <body className="font-body antialiased">
         <AuthProvider>
-          <BrandingProvider>
+          <BrandingProvider initial={branding}>
             {children}
             <Toaster />
             <PwaProvider />

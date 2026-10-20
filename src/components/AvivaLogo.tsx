@@ -54,7 +54,7 @@ export function AvivaLogo({ variant = 'full', className }: AvivaLogoProps) {
 
   if (uploadedUrl) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={uploadedUrl} alt="Aviva" className={cn('object-contain', className)} />;
+    return <img src={uploadedUrl} alt="Aviva" fetchPriority="high" className={cn('object-contain', className)} />;
   }
 
   return variant === 'icon'
