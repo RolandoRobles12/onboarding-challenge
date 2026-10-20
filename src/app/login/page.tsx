@@ -90,7 +90,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md shadow-lg rounded-lg border-primary/20">
         <CardHeader className="text-center items-center">
-          <AvivaLogo className="h-12 w-auto mb-4" />
+          {/* El logo es la versión para fondo oscuro: va sobre una placa del color de acento. */}
+          <div className="mb-4 rounded-2xl bg-accent px-5 py-3">
+            <AvivaLogo className="h-10 w-auto" />
+          </div>
           <CardTitle className="text-3xl font-headline text-accent">Desafío Aviva</CardTitle>
           <CardDescription>
             Por favor, inicia sesión con tu cuenta de Google de Aviva para continuar.

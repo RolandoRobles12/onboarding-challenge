@@ -15,7 +15,7 @@ import { toast } from '@/hooks/use-toast';
 import { useConfirm } from '@/components/ConfirmDialog';
 import {
   ClipboardList, Plus, Pencil, Trash2, GripVertical,
-  ChevronUp, ChevronDown, Upload, X, Check
+  ChevronUp, ChevronDown, Upload, X, Check, RotateCcw
 } from 'lucide-react';
 import type { OnboardingField, OnboardingFieldType, FieldOption } from '@/lib/types-scalable';
 
@@ -166,7 +166,8 @@ export default function OnboardingFieldsPage() {
         required: form.required,
         options: form.fieldType === 'select' ? form.options : undefined,
         order: editingField ? editingField.order : fields.length,
-        active: true,
+        // Editar no reactiva un campo desactivado: eso se hace con "Reactivar".
+        active: editingField ? editingField.active !== false : true,
       };
 
       if (editingField) {
@@ -183,6 +184,16 @@ export default function OnboardingFieldsPage() {
       toast({ variant: 'destructive', title: 'Error', description: 'No se pudo guardar el campo.' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRestore = async (field: OnboardingField) => {
+    try {
+      await updateOnboardingField(field.id, { active: true });
+      toast({ title: 'Campo reactivado' });
+      loadFields();
+    } catch {
+      toast({ variant: 'destructive', title: 'Error', description: 'No se pudo reactivar el campo.' });
     }
   };
 
@@ -278,6 +289,9 @@ export default function OnboardingFieldsPage() {
                     {field.required && (
                       <span className="text-xs text-destructive font-medium">* Requerido</span>
                     )}
+                    {!field.active && (
+                      <span className="text-xs font-medium text-muted-foreground border rounded px-1.5">Desactivado</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 mt-0.5">
                     {field.fieldType === 'select' && field.options && (
@@ -295,9 +309,15 @@ export default function OnboardingFieldsPage() {
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openDialog(field)}>
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDelete(field)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {field.active ? (
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => handleDelete(field)} aria-label="Eliminar">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : (
+                    <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs" onClick={() => handleRestore(field)}>
+                      <RotateCcw className="h-3.5 w-3.5" /> Reactivar
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>

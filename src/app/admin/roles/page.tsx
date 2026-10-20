@@ -46,6 +46,7 @@ const NAV_SECTIONS = [
     items: [
       { label: 'Productos', path: '/admin/products' },
       { label: 'Kioscos', path: '/admin/kioscos' },
+      { label: 'Campos de Ingreso', path: '/admin/onboarding-fields' },
       { label: 'Niveles XP', path: '/admin/levels' },
       { label: 'Marca', path: '/admin/branding' },
       { label: 'Inscripciones', path: '/admin/enrollments' },

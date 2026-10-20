@@ -69,6 +69,8 @@ export interface Course {
   // Certificación
   /** 'default' = al completar el curso se emite un certificado del curso. */
   certificateTemplate?: string;
+  /** Firmantes del certificado del curso (ids de certificate_signers). Vacío = los dos primeros activos. */
+  certificateSignerIds?: string[];
   passingScore?: number;        // % mínimo para aprobar
 
   // Re-certificación

@@ -1,7 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { getBrandingConfig, type BrandingConfig } from '@/lib/firestore-service';
+import { getBrandingConfig } from '@/lib/firestore-service';
+import { authFetch } from '@/lib/api-client';
+import { brandCssVars, DEFAULT_BRANDING, type BrandingConfig } from '@/lib/branding';
 
 interface BrandingContextType {
   logoUrl: string | null;
@@ -9,7 +11,8 @@ interface BrandingContextType {
   primaryColor: string | null;
   accentColor: string | null;
   loading: boolean;
-  refreshBranding: () => Promise<void>;
+  /** Vuelve a leer la marca; con `publish`, también invalida la copia del servidor. */
+  refreshBranding: (opts?: { publish?: boolean }) => Promise<void>;
 }
 
 const BrandingContext = React.createContext<BrandingContextType>({
@@ -21,58 +24,41 @@ const BrandingContext = React.createContext<BrandingContextType>({
   refreshBranding: async () => {},
 });
 
-/** Convierte un hex ("#16B877") al triplete "H S% L%" que esperan las
- * variables CSS del tema (usadas como hsl(var(--primary)) en Tailwind). */
-function hexToHslTriplet(hex: string): string | null {
-  const clean = hex.replace('#', '');
-  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return null;
-  const r = parseInt(clean.slice(0, 2), 16) / 255;
-  const g = parseInt(clean.slice(2, 4), 16) / 255;
-  const b = parseInt(clean.slice(4, 6), 16) / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      case b: h = (r - g) / d + 4; break;
-    }
-    h /= 6;
-  }
-  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
-}
-
-function applyBrandColors(primaryColor: string | null, accentColor: string | null) {
+function applyBrandColors(config: BrandingConfig) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement.style;
-  const primaryHsl = primaryColor ? hexToHslTriplet(primaryColor) : null;
-  const accentHsl = accentColor ? hexToHslTriplet(accentColor) : null;
-  if (primaryHsl) root.setProperty('--primary', primaryHsl);
-  else root.removeProperty('--primary');
-  if (accentHsl) root.setProperty('--accent', accentHsl);
-  else root.removeProperty('--accent');
+  const vars = brandCssVars(config);
+  for (const name of ['--primary', '--accent']) {
+    if (vars[name]) root.setProperty(name, vars[name]);
+    else root.removeProperty(name);
+  }
 }
 
-export const BrandingProvider = ({ children }: { children: React.ReactNode }) => {
-  const [branding, setBranding] = React.useState<BrandingConfig>({
-    logoUrl: null, iconUrl: null, primaryColor: null, accentColor: null,
-  });
-  const [loading, setLoading] = React.useState(true);
+/**
+ * `initial` llega del layout raíz (render del servidor): con ella los logos y
+ * colores aparecen desde el primer pintado. Si el servidor no pudo leerla, se
+ * consulta desde el navegador como antes.
+ */
+export const BrandingProvider = ({ children, initial }: { children: React.ReactNode; initial?: BrandingConfig | null }) => {
+  const [branding, setBranding] = React.useState<BrandingConfig>(initial ?? DEFAULT_BRANDING);
+  const [loading, setLoading] = React.useState(!initial);
 
-  const refreshBranding = React.useCallback(async () => {
+  const refreshBranding = React.useCallback(async (opts?: { publish?: boolean }) => {
     try {
       const config = await getBrandingConfig();
       setBranding(config);
-      applyBrandColors(config.primaryColor ?? null, config.accentColor ?? null);
+      applyBrandColors(config);
+      if (opts?.publish) {
+        await authFetch('/api/branding/refresh', { method: 'POST' }).catch(err => console.error('[branding]', err));
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
-  React.useEffect(() => { refreshBranding(); }, [refreshBranding]);
+  React.useEffect(() => {
+    if (!initial) refreshBranding();
+  }, [initial, refreshBranding]);
 
   return (
     <BrandingContext.Provider value={{

@@ -367,6 +367,8 @@ export interface QuizAttempt {
   showFeedback?: string;
   /** El tiempo límite se agotó antes de terminar. */
   timeExpired?: boolean;
+  /** Intento de práctica: cuenta para el historial, no para el ranking. */
+  practice?: boolean;
 
   // Feedback
   aiFeedback?: string;

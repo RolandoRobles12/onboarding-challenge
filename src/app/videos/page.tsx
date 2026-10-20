@@ -515,6 +515,7 @@ function VideoFeed() {
   const [viewsMap, setViewsMap] = useState<Record<string, VideoView>>({});
   const [loading, setLoading] = useState(true);
   const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = todos
+  const [activeTag, setActiveTag] = useState<string | null>(null);       // etiqueta elegida (null = todas)
 
   const productId = profile?.producto;
 
@@ -567,10 +568,15 @@ function VideoFeed() {
   const watched = Object.values(viewsMap).filter(v => v.completed).length;
   const total = videos.length;
 
-  // Videos filtrados según carpeta activa
-  const filteredVideos = activeFolder === null
-    ? videos
-    : videos.filter(v => v.folderId === activeFolder);
+  // Etiquetas que usan los videos visibles (las que pone el admin al subirlos).
+  const allTags = [...new Set(videos.flatMap(v => v.tags ?? []).map(t => t.trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'es'));
+  const isFiltered = activeFolder !== null || activeTag !== null;
+
+  // Videos filtrados según carpeta y etiqueta activas
+  const filteredVideos = videos.filter(v =>
+    (activeFolder === null || v.folderId === activeFolder) &&
+    (activeTag === null || (v.tags ?? []).some(t => t.trim() === activeTag)));
 
   // Recientes no vistos (sin folderId o feed principal, sin completar), máx 5
   const unwatchedVideos = videos.filter(v => !viewsMap[v.id]?.completed).slice(0, 5);
@@ -681,8 +687,30 @@ function VideoFeed() {
                 </div>
               )}
 
+              {/* Etiquetas */}
+              {allTags.length > 0 && (
+                <div className="overflow-x-auto -mx-4 px-4">
+                  <div className="flex gap-1.5 w-max pb-1">
+                    {allTags.map(tag => (
+                      <button
+                        key={tag}
+                        onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                        className={cn(
+                          'px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap border transition-colors',
+                          activeTag === tag
+                            ? 'bg-accent text-accent-foreground border-accent'
+                            : 'bg-background text-muted-foreground hover:bg-muted'
+                        )}
+                      >
+                        #{tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Section: Por ver (solo cuando se muestra "Todos") */}
-              {activeFolder === null && unwatchedVideos.length > 0 && (
+              {!isFiltered && unwatchedVideos.length > 0 && (
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-primary">Por ver</span>
@@ -713,9 +741,9 @@ function VideoFeed() {
 
               {/* Feed filtrado */}
               <div className="space-y-5">
-                {(activeFolder === null ? videos : filteredVideos).map(v => (
-                  // Si activeFolder es null, saltamos los que ya aparecen en "Por ver"
-                  (activeFolder === null && !viewsMap[v.id]?.completed && unwatchedVideos.find(u => u.id === v.id)) ? null : (
+                {(isFiltered ? filteredVideos : videos).map(v => (
+                  // Sin filtros, saltamos los que ya aparecen en "Por ver"
+                  (!isFiltered && !viewsMap[v.id]?.completed && unwatchedVideos.find(u => u.id === v.id)) ? null : (
                     <VideoCard
                       key={v.id}
                       video={v}
@@ -729,10 +757,10 @@ function VideoFeed() {
                     />
                   )
                 ))}
-                {activeFolder !== null && filteredVideos.length === 0 && (
+                {isFiltered && filteredVideos.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-16 text-center">
                     <Clapperboard className="h-10 w-10 text-muted-foreground opacity-30 mb-2" />
-                    <p className="text-muted-foreground text-sm">Esta carpeta no tiene videos todavía.</p>
+                    <p className="text-muted-foreground text-sm">{activeTag ? 'No hay videos con esta etiqueta aquí.' : 'Esta carpeta no tiene videos todavía.'}</p>
                   </div>
                 )}
               </div>

@@ -2,6 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { prepareLogo } from '@/lib/logo-processing';
+import { DEFAULT_ACCENT, DEFAULT_PRIMARY } from '@/lib/branding';
 import { storage } from '@/lib/firebase';
 import { saveBrandingConfig } from '@/lib/firestore-service';
 import { useBranding } from '@/context/BrandingContext';
@@ -9,11 +11,9 @@ import { AvivaLogo } from '@/components/AvivaLogo';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Upload, Trash2, Image as ImageIcon, CheckCircle2, Palette, RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const DEFAULT_PRIMARY = '#16B877';
-const DEFAULT_ACCENT = '#074739';
 
 function ColorPicker({ label, description, value, defaultValue, onChange, onReset, saving }: {
   label: string;
@@ -51,44 +51,71 @@ function ColorPicker({ label, description, value, defaultValue, onChange, onRese
 
 type SlotKey = 'logoUrl' | 'iconUrl';
 
-const SLOTS: { key: SlotKey; title: string; description: string; storageFolder: string }[] = [
+const SLOTS: { key: SlotKey; title: string; description: string; storageFolder: string; maxSize: number }[] = [
   {
     key: 'logoUrl',
     title: 'Logo completo (ícono + wordmark)',
-    description: 'Se usa en pantallas grandes: login, encabezados de página, certificados. Preferible en SVG o PNG con fondo transparente.',
+    description: 'Se usa en el login y en los encabezados de página. Sube la versión para fondo oscuro (letras claras): se muestra sobre el color de acento.',
     storageFolder: 'full',
+    maxSize: 1200,
   },
   {
     key: 'iconUrl',
     title: 'Ícono / símbolo únicamente',
-    description: 'Se usa en espacios reducidos, como el panel de administración. Preferible en SVG o PNG cuadrado con fondo transparente.',
+    description: 'Se usa en espacios reducidos, como el panel de administración. Mejor si es cuadrado.',
     storageFolder: 'icon',
+    maxSize: 512,
   },
 ];
 
-function UploadSlot({ slotKey, title, description, storageFolder, currentUrl, onUploaded }: {
+/** Los archivos se suben con nombre único, así que se pueden cachear sin vencimiento. */
+const LOGO_CACHE_CONTROL = 'public, max-age=31536000, immutable';
+
+function UploadSlot({ slotKey, title, description, storageFolder, maxSize, currentUrl, accentColor, onUploaded }: {
   slotKey: SlotKey;
   title: string;
   description: string;
   storageFolder: string;
+  maxSize: number;
   currentUrl: string | null;
+  accentColor: string;
   onUploaded: (key: SlotKey, url: string | null) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [removeBackground, setRemoveBackground] = useState(true);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file || !storage) return;
     setError(null);
+    setNotice(null);
     setProgress(0);
 
+    // Se quita el fondo sólido, se recorta y se reduce antes de subir.
+    let upload: Blob = file;
+    let name = file.name;
+    try {
+      const prepared = await prepareLogo(file, { maxSize, removeSolidBackground: removeBackground });
+      if (prepared) {
+        upload = prepared.blob;
+        name = `${file.name.replace(/\.[^.]+$/, '')}.png`;
+        if (prepared.removedBackground) setNotice('Se quitó el fondo sólido de la imagen para que combine con los colores de la plataforma.');
+      }
+    } catch (err) {
+      console.error('No se pudo procesar el logo, se sube tal cual:', err);
+    }
+
     const timestamp = Date.now();
-    const storagePath = `branding/${storageFolder}/${timestamp}_${file.name}`;
+    const storagePath = `branding/${storageFolder}/${timestamp}_${name}`;
     const storageRef = ref(storage, storagePath);
-    const task = uploadBytesResumable(storageRef, file);
+    const task = uploadBytesResumable(storageRef, upload, {
+      contentType: upload.type || file.type,
+      cacheControl: LOGO_CACHE_CONTROL,
+    });
 
     task.on(
       'state_changed',
@@ -137,29 +164,46 @@ function UploadSlot({ slotKey, title, description, storageFolder, currentUrl, on
         <CardDescription className="text-xs">{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Preview en fondo claro y oscuro, según reglas de contraste de la guía */}
+        {/* Vista previa tal como se muestra: sobre el color de acento (encabezados)
+            y en el login, donde va dentro de una placa del color de acento. */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-lg border bg-white flex items-center justify-center h-20 p-3">
-            {currentUrl
-              ? <img src={currentUrl} alt={title} className="max-h-full max-w-full object-contain" />
-              : <span className="text-xs text-muted-foreground">Sin logo — fondo claro</span>}
+          <div className="space-y-1">
+            <div className="rounded-lg border flex items-center justify-center h-20 p-3" style={{ backgroundColor: accentColor }}>
+              {currentUrl
+                ? <img src={currentUrl} alt={title} className="max-h-full max-w-full object-contain" />
+                : <span className="text-xs text-white/70">Sin logo</span>}
+            </div>
+            <p className="text-[11px] text-muted-foreground text-center">Encabezados</p>
           </div>
-          <div className="rounded-lg border flex items-center justify-center h-20 p-3" style={{ backgroundColor: '#074739' }}>
-            {currentUrl
-              ? <img src={currentUrl} alt={title} className="max-h-full max-w-full object-contain" />
-              : <span className="text-xs text-white/70">Sin logo — fondo oscuro</span>}
+          <div className="space-y-1">
+            <div className="rounded-lg border bg-background flex items-center justify-center h-20 p-2">
+              {currentUrl
+                ? (
+                  <div className="rounded-lg h-full flex items-center px-3 py-2" style={{ backgroundColor: accentColor }}>
+                    <img src={currentUrl} alt={title} className="max-h-full max-w-full object-contain" />
+                  </div>
+                )
+                : <span className="text-xs text-muted-foreground">Sin logo</span>}
+            </div>
+            <p className="text-[11px] text-muted-foreground text-center">Login (fondo claro)</p>
           </div>
         </div>
+
+        <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+          <Checkbox checked={removeBackground} onCheckedChange={v => setRemoveBackground(v === true)} disabled={busy} className="mt-0.5" />
+          Quitar el fondo sólido al subir (recomendado si el archivo trae un recuadro de color)
+        </label>
 
         {busy && progress !== null && <Progress value={progress} className="h-1.5" />}
         {saving && progress === null && <p className="text-xs text-muted-foreground">Guardando…</p>}
         {error && <p className="text-xs text-destructive font-medium">{error}</p>}
+        {notice && !error && <p className="text-xs text-emerald-700">{notice}</p>}
 
         <div className="flex items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/svg+xml,image/png,image/webp"
+            accept="image/svg+xml,image/png,image/webp,image/jpeg"
             className="hidden"
             onChange={handleFileChange}
             disabled={busy}
@@ -201,15 +245,16 @@ export default function BrandingSettingsPage() {
   const urls = localUrls ?? { logoUrl, iconUrl };
 
   function handleUploaded(key: SlotKey, url: string | null) {
-    setLocalUrls({ ...urls, [key]: url });
-    refreshBranding();
+    // Actualización funcional: dos subidas seguidas no deben pisarse.
+    setLocalUrls(prev => ({ ...(prev ?? { logoUrl, iconUrl }), [key]: url }));
+    refreshBranding({ publish: true });
   }
 
   async function handleColorChange(key: 'primaryColor' | 'accentColor', hex: string | null) {
     setSavingColors(true);
     try {
       await saveBrandingConfig({ [key]: hex });
-      await refreshBranding();
+      await refreshBranding({ publish: true });
     } finally {
       setSavingColors(false);
     }
@@ -238,7 +283,9 @@ export default function BrandingSettingsPage() {
               title={slot.title}
               description={slot.description}
               storageFolder={slot.storageFolder}
+              maxSize={slot.maxSize}
               currentUrl={urls[slot.key]}
+              accentColor={accentColor || DEFAULT_ACCENT}
               onUploaded={handleUploaded}
             />
           ))}

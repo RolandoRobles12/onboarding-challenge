@@ -17,7 +17,7 @@ import {
   ProgressRing,
 } from '@/components/GamificationEffects';
 import { cn } from '@/lib/utils';
-import { getAttemptDetails, getQuiz, getQuizAttempt } from '@/lib/firestore-service';
+import { getAttemptDetails, getQuiz, getQuizAttempt, getUserAttempts } from '@/lib/firestore-service';
 import { getQuizLevel } from '@/lib/quiz-scoring';
 import type { QuizQuestionResult } from '@/lib/types-scalable';
 
@@ -58,7 +58,7 @@ function ResultsContent() {
   const routeParams = useParams<{ quizType: string }>();
   const productId = routeParams.quizType || searchParams.get('quizType') || '';
 
-  const quizTitle = searchParams.get('quizTitle') || 'Quiz';
+  const titleParam = searchParams.get('quizTitle');
   const avatarKey = searchParams.get('avatar');
   const quizId = searchParams.get('quizId') || '';
   const attemptId = searchParams.get('attemptId');
@@ -69,18 +69,30 @@ function ResultsContent() {
   const [animationReady, setAnimationReady] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [quizPassingScore, setQuizPassingScore] = useState<number | null>(null);
+  const [quizTitle, setQuizTitle] = useState(titleParam || 'Quiz');
 
   useEffect(() => {
     if (!productId || !user) return;
     let cancelled = false;
 
     (async () => {
-      const quiz = quizId ? await getQuiz(quizId).catch(() => null) : null;
+      let attempt = attemptId ? await getQuizAttempt(attemptId).catch(() => null) : null;
+      if (!attemptId) {
+        // Paso "Ver resultados" de la ruta: abre el intento más reciente del producto
+        // (el que cuenta antes que una práctica).
+        const all = (await getUserAttempts(user.uid, quizId || undefined).catch(() => []))
+          .filter(a => a.productId === productId);
+        attempt = all.find(a => !a.practice) ?? all[0] ?? null;
+      }
+      const effectiveQuizId = quizId || attempt?.quizId || '';
+      const quiz = effectiveQuizId ? await getQuiz(effectiveQuizId).catch(() => null) : null;
       const ps = quiz?.assessmentConfig?.passingScore;
-      if (!cancelled) setQuizPassingScore(ps && ps > 0 ? ps : null);
+      if (!cancelled) {
+        setQuizPassingScore(ps && ps > 0 ? ps : null);
+        if (!titleParam && quiz?.title) setQuizTitle(quiz.title);
+      }
 
       let result: ResultData | null = null;
-      const attempt = attemptId ? await getQuizAttempt(attemptId).catch(() => null) : null;
       if (attempt && attempt.userId === user.uid) {
         const details = await getAttemptDetails(attempt.id).catch(() => null);
         result = {

@@ -6,9 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getKioscos, getProducts } from '@/lib/firestore-service';
+import { getCertificateSigners, getKioscos, getProducts } from '@/lib/firestore-service';
 import type { Course, RecurrenceType } from '@/lib/types-lms';
-import type { Kiosko, Product } from '@/lib/types-scalable';
+import type { CertificateSigner, Kiosko, Product } from '@/lib/types-scalable';
 
 /** Campos de audiencia, requisitos, plazos, certificado y re-certificación del curso. */
 export interface CourseRulesForm {
@@ -19,6 +19,7 @@ export interface CourseRulesForm {
   durationDays: string;
   expiresAt: string;      // YYYY-MM-DD o ''
   certificate: boolean;
+  certificateSignerIds: string[];
   recertEnabled: boolean;
   recurrenceType: RecurrenceType;
   notifyDaysBefore: string;
@@ -27,7 +28,7 @@ export interface CourseRulesForm {
 
 export const DEFAULT_COURSE_RULES: CourseRulesForm = {
   prerequisiteCourseIds: [], targetRoles: [], productIds: [], branchIds: [],
-  durationDays: '', expiresAt: '', certificate: false,
+  durationDays: '', expiresAt: '', certificate: false, certificateSignerIds: [],
   recertEnabled: false, recurrenceType: 'annual', notifyDaysBefore: '14', autoReassign: false,
 };
 
@@ -41,6 +42,7 @@ export function courseRulesFromCourse(course: Course): CourseRulesForm {
     durationDays: course.durationDays ? String(course.durationDays) : '',
     expiresAt: expires ? expires.toISOString().slice(0, 10) : '',
     certificate: !!course.certificateTemplate,
+    certificateSignerIds: course.certificateSignerIds ?? [],
     recertEnabled: !!course.recertification?.enabled,
     recurrenceType: course.recertification?.recurrenceType && course.recertification.recurrenceType !== 'none'
       ? course.recertification.recurrenceType : 'annual',
@@ -63,6 +65,7 @@ export function courseRulesToUpdate(form: CourseRulesForm): Partial<Course> {
     // Cierra al final del día elegido.
     expiresAt: (form.expiresAt ? new Date(y, m - 1, d, 23, 59, 59) : null) as unknown as Course['expiresAt'],
     certificateTemplate: (form.certificate ? 'default' : null) as unknown as string,
+    certificateSignerIds: form.certificateSignerIds,
     recertification: {
       enabled: form.recertEnabled,
       recurrenceType: form.recertEnabled ? form.recurrenceType : 'none',
@@ -106,9 +109,11 @@ export function CourseRulesCard({ courseId, allCourses, form, onChange }: {
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [kioscos, setKioscos] = useState<Kiosko[]>([]);
+  const [signers, setSigners] = useState<CertificateSigner[]>([]);
   useEffect(() => {
     getProducts().then(setProducts).catch(() => {});
     getKioscos(true).then(setKioscos).catch(() => {});
+    getCertificateSigners().then(setSigners).catch(() => {});
   }, []);
   const set = (patch: Partial<CourseRulesForm>) => onChange({ ...form, ...patch });
 
@@ -155,6 +160,17 @@ export function CourseRulesCard({ courseId, allCourses, form, onChange }: {
           </div>
           <Switch checked={form.certificate} onCheckedChange={v => set({ certificate: v })} />
         </div>
+        {form.certificate && (
+          <div className="space-y-1.5 pl-1">
+            <Label className="text-xs">Firmantes <span className="font-normal text-muted-foreground">(máximo 2; sin elegir = los dos primeros activos)</span></Label>
+            <Chips
+              options={signers.map(s => [s.id, s.position ? `${s.name} · ${s.position}` : s.name])}
+              value={form.certificateSignerIds}
+              onChange={v => set({ certificateSignerIds: v.slice(-2) })}
+              empty="No hay firmantes. Agrégalos en Certificados."
+            />
+          </div>
+        )}
 
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-3">

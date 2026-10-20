@@ -71,6 +71,7 @@ import { DEFAULT_CERTIFICATE_CONFIG, DEFAULT_PULSE_CATEGORIES } from './types-sc
 import { withOptionIds } from './question-options';
 import { resolveNotificationConfig, type NotificationConfig, type NotificationLogEntry } from './notifications';
 import { addDaysStr, buildAutoPool, DEFAULT_PULSE_CONFIG, lastUsedByQuestion, pulseDateStr, RECENT_USE_WINDOW_DAYS } from './pulse-utils';
+import { DEFAULT_BRANDING, normalizeBranding, type BrandingConfig } from './branding';
 import type {
   Course,
   CourseEnrollment,
@@ -1772,36 +1773,15 @@ export function getLevelFromConfig(xp: number, levels: LevelConfig[]) {
 // CONFIGURACIÓN DE MARCA (LOGOS)
 // ============================================================================
 
-export interface BrandingConfig {
-  /** Logo completo (ícono + wordmark), usado en pantallas grandes como login. */
-  logoUrl: string | null;
-  /** Símbolo/ícono únicamente, usado en espacios reducidos como el header. */
-  iconUrl: string | null;
-  /** Color primario de marca (hex, ej. "#16B877"). null = usar el default de la plataforma. */
-  primaryColor?: string | null;
-  /** Color de acento de marca (hex). null = usar el default de la plataforma. */
-  accentColor?: string | null;
-  updatedAt?: unknown;
-}
+export type { BrandingConfig } from './branding';
 
 const BRANDING_DOC_ID = 'branding';
-
-const DEFAULT_BRANDING: BrandingConfig = { logoUrl: null, iconUrl: null, primaryColor: null, accentColor: null };
 
 /** Devuelve la configuración de marca (logos) desde Firestore. Si no existe, retorna los defaults. */
 export async function getBrandingConfig(): Promise<BrandingConfig> {
   try {
-    const docRef = getDocRef(COLLECTIONS.CONFIG, BRANDING_DOC_ID);
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      const data = snap.data();
-      return {
-        logoUrl: typeof data.logoUrl === 'string' ? data.logoUrl : null,
-        iconUrl: typeof data.iconUrl === 'string' ? data.iconUrl : null,
-        primaryColor: typeof data.primaryColor === 'string' ? data.primaryColor : null,
-        accentColor: typeof data.accentColor === 'string' ? data.accentColor : null,
-      };
-    }
+    const snap = await getDoc(getDocRef(COLLECTIONS.CONFIG, BRANDING_DOC_ID));
+    if (snap.exists()) return normalizeBranding(snap.data());
   } catch (error) {
     console.error('Error getting branding config:', error);
   }

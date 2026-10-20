@@ -34,6 +34,7 @@ import {
   Search,
   MousePointerClick,
   Lock,
+  ListChecks,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -80,6 +81,7 @@ const navigation: (NavItem | NavSection)[] = [
     items: [
       { name: 'Productos', href: '/admin/products', icon: Package },
       { name: 'Kioscos', href: '/admin/kioscos', icon: Store },
+      { name: 'Campos de Ingreso', href: '/admin/onboarding-fields', icon: ListChecks },
       { name: 'Niveles XP', href: '/admin/levels', icon: Layers },
       { name: 'Marca', href: '/admin/branding', icon: ImageIcon },
       { name: 'Inscripciones', href: '/admin/enrollments', icon: UserCheck },
@@ -130,8 +132,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
     return entry;
   }).filter(entry => {
-    // "Mi Equipo" solo tiene sentido para el rol capacitador
-    if (!('section' in entry) && entry.href === '/admin/team') return profile?.rol === 'trainer';
     if ('section' in entry) return entry.items.length > 0;
     return true;
   });

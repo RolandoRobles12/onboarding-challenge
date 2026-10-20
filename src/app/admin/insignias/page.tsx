@@ -9,8 +9,11 @@ import {
   deleteBadge,
   awardBadge,
   getAllUsers,
+  getAllUserBadges,
+  revokeBadge,
 } from '@/lib/firestore-service';
-import type { Badge, BadgeCriteria, UserProfile } from '@/lib/types-scalable';
+import type { Badge, BadgeCriteria, UserBadge, UserProfile } from '@/lib/types-scalable';
+import { useConfirm } from '@/components/ConfirmDialog';
 import { BadgeDisplay } from '@/components/BadgeDisplay';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -86,18 +89,37 @@ export default function InsigniasPage() {
   const [awardUserId, setAwardUserId] = useState('');
   const [awardReason, setAwardReason] = useState('');
   const [awarding, setAwarding] = useState(false);
+  // Insignias otorgadas (para poder quitarlas)
+  const [awarded, setAwarded] = useState<UserBadge[]>([]);
+  const [awardedFilter, setAwardedFilter] = useState('');
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => {
-    Promise.all([getAllBadges(), getAllUsers()]).then(([b, u]) => {
-      setBadges(b);
-      setUsers(u);
-      setLoading(false);
-    });
+    Promise.all([load(), getAllUsers().then(setUsers)]).finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function load() {
-    const b = await getAllBadges();
+    const [b, ub] = await Promise.all([getAllBadges(), getAllUserBadges().catch(() => [] as UserBadge[])]);
     setBadges(b);
+    setAwarded(ub.sort((x, y) => (y.earnedAt?.toMillis?.() ?? 0) - (x.earnedAt?.toMillis?.() ?? 0)));
+  }
+
+  async function handleRevoke(ub: UserBadge) {
+    const who = users.find(u => u.uid === ub.userId);
+    const ok = await confirm({
+      title: `¿Quitar "${ub.badgeName}"?`,
+      description: `${who?.nombre || who?.email || 'La persona'} dejará de verla en su perfil.`,
+      confirmLabel: 'Quitar',
+    });
+    if (!ok) return;
+    try {
+      await revokeBadge(ub.id);
+      setAwarded(prev => prev.filter(x => x.id !== ub.id));
+      toast({ title: 'Insignia retirada' });
+    } catch {
+      toast({ variant: 'destructive', title: 'No se pudo quitar la insignia' });
+    }
   }
 
   // ── Badge CRUD ───────────────────────────────────────────────────────────
@@ -183,6 +205,7 @@ export default function InsigniasPage() {
       setAwardBadgeId('');
       setAwardUserId('');
       setAwardReason('');
+      await load();
     } catch {
       toast({ variant: 'destructive', title: 'Error al otorgar insignia' });
     } finally {
@@ -241,7 +264,61 @@ export default function InsigniasPage() {
         <TabsList>
           <TabsTrigger value="activas">Activas ({activeBadges.length})</TabsTrigger>
           <TabsTrigger value="inactivas">Inactivas ({inactiveBadges.length})</TabsTrigger>
+          <TabsTrigger value="otorgadas">Otorgadas ({awarded.length})</TabsTrigger>
         </TabsList>
+
+        {/* ── Otorgadas: quién tiene cada insignia, con opción de quitarla ── */}
+        <TabsContent value="otorgadas" className="mt-4 space-y-3">
+          <Input
+            placeholder="Buscar por persona o insignia…"
+            value={awardedFilter}
+            onChange={e => setAwardedFilter(e.target.value)}
+            className="max-w-sm"
+          />
+          {(() => {
+            const q = awardedFilter.trim().toLowerCase();
+            const userById = new Map(users.map(u => [u.uid, u]));
+            const rows = awarded.filter(ub => {
+              if (!q) return true;
+              const u = userById.get(ub.userId);
+              return [ub.badgeName, u?.nombre, u?.email].some(v => v?.toLowerCase().includes(q));
+            });
+            if (rows.length === 0) {
+              return (
+                <Card>
+                  <CardContent className="py-8 text-center text-muted-foreground text-sm">
+                    {awarded.length === 0 ? 'Todavía no se ha otorgado ninguna insignia' : 'Sin resultados'}
+                  </CardContent>
+                </Card>
+              );
+            }
+            return (
+              <Card>
+                <CardContent className="p-0 divide-y">
+                  {rows.slice(0, 200).map(ub => {
+                    const u = userById.get(ub.userId);
+                    return (
+                      <div key={ub.id} className="flex items-center gap-3 px-4 py-2.5">
+                        <span className="text-xl" aria-hidden>{ub.badgeEmoji}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{ub.badgeName}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {u?.nombre || u?.email || ub.userId}
+                            {ub.earnedAt?.toDate && ` · ${ub.earnedAt.toDate().toLocaleDateString('es-MX')}`}
+                            {ub.awardedBy === 'system' ? ' · automática' : ''}
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive gap-1" onClick={() => handleRevoke(ub)}>
+                          <Trash2 className="h-3.5 w-3.5" /> Quitar
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            );
+          })()}
+        </TabsContent>
 
         {/* ── Active badges ── */}
         <TabsContent value="activas" className="mt-4">
@@ -281,6 +358,8 @@ export default function InsigniasPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {confirmDialog}
 
       {/* ── Create / Edit badge dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

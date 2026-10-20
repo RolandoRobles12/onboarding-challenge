@@ -12,7 +12,7 @@ import {
   getQuizzes,
 } from '@/lib/firestore-service';
 import type { Quiz } from '@/lib/types-scalable';
-import type { Course, CourseModule, Lesson, LessonType, ContentNavigation } from '@/lib/types-lms';
+import type { Course, CourseModule, Lesson, LessonType, ContentNavigation, LessonAttachment } from '@/lib/types-lms';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge as UiBadge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -76,6 +77,7 @@ import {
   CheckCircle2,
   Link,
   HelpCircle,
+  Paperclip,
 } from 'lucide-react';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { storage } from '@/lib/firebase';
@@ -137,6 +139,7 @@ interface LessonForm {
   assessmentQuizId: string; // quiz al finalizar esta lección (ID o '' para ninguno)
   isRequired: boolean;      // false = no cuenta para completar el curso
   scormVersion?: '1.2' | '2004';
+  attachments: LessonAttachment[]; // "Recursos adicionales" que ve el vendedor debajo de la lección
 }
 
 const DEFAULT_COURSE_FORM: CourseForm = {
@@ -156,6 +159,7 @@ const DEFAULT_LESSON_FORM: LessonForm = {
   description: '',
   assessmentQuizId: '',
   isRequired: true,
+  attachments: [],
 };
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -423,6 +427,7 @@ export default function AdminCoursesPage() {
       assessmentQuizId: lesson.assessmentQuizId ?? '',
       isRequired: lesson.isRequired !== false,
       scormVersion: lesson.content.scormVersion,
+      attachments: lesson.content.attachments ?? [],
     } : DEFAULT_LESSON_FORM);
   }
 
@@ -1516,6 +1521,86 @@ function LessonFormFields({
           El vendedor completará esta evaluación justo después de ver esta lección.
         </p>
       </div>
+
+      <LessonAttachmentsField
+        attachments={form.attachments}
+        courseId={courseId}
+        onChange={attachments => setForm(p => ({ ...p, attachments }))}
+      />
+    </div>
+  );
+}
+
+// ─── Sub-componente: recursos adicionales de la lección ─────────────────────
+
+function LessonAttachmentsField({ attachments, courseId, onChange }: {
+  attachments: LessonAttachment[];
+  courseId: string;
+  onChange: (attachments: LessonAttachment[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !storage) return;
+    setError(null);
+    setProgress(0);
+    const path = `courses/${courseId || 'draft'}/attachments/${Date.now()}_${file.name}`;
+    const task = uploadBytesResumable(ref(storage, path), file, { contentType: file.type || undefined });
+    task.on(
+      'state_changed',
+      snap => setProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+      err => {
+        console.error('Upload error:', err);
+        setError('No se pudo subir el archivo. Intenta de nuevo.');
+        setProgress(null);
+      },
+      async () => {
+        const url = await getDownloadURL(task.snapshot.ref);
+        onChange([...attachments, {
+          name: file.name,
+          url,
+          type: file.type || file.name.split('.').pop() || 'archivo',
+          sizeKb: Math.round(file.size / 1024),
+        }]);
+        setProgress(null);
+        if (inputRef.current) inputRef.current.value = '';
+      },
+    );
+  }
+
+  return (
+    <div className="space-y-2 border-t pt-4">
+      <div>
+        <Label>Recursos adicionales</Label>
+        <p className="text-[11px] text-muted-foreground">Archivos que el vendedor puede descargar debajo de la lección (guías, formatos, PDFs).</p>
+      </div>
+      {attachments.length > 0 && (
+        <div className="space-y-1.5">
+          {attachments.map((att, i) => (
+            <div key={`${att.url}_${i}`} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm">
+              <Paperclip className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <Input
+                value={att.name}
+                onChange={e => onChange(attachments.map((a, j) => j === i ? { ...a, name: e.target.value } : a))}
+                className="h-7 text-sm border-0 px-1 focus-visible:ring-1"
+                aria-label="Nombre del recurso"
+              />
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => onChange(attachments.filter((_, j) => j !== i))} aria-label="Quitar recurso">
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {progress !== null && <Progress value={progress} className="h-1.5" />}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <input ref={inputRef} type="file" className="hidden" onChange={handleFile} />
+      <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={progress !== null} onClick={() => inputRef.current?.click()}>
+        <Paperclip className="h-3.5 w-3.5" /> Agregar archivo
+      </Button>
     </div>
   );
 }
@@ -1539,6 +1624,11 @@ function toFigmaEmbedUrl(url: string): string {
 }
 
 function buildLessonContent(form: LessonForm) {
+  const attachments = form.attachments.length > 0 ? { attachments: form.attachments } : {};
+  return { ...buildMainContent(form), ...attachments };
+}
+
+function buildMainContent(form: LessonForm) {
   const url = form.contentUrl.trim();
   switch (form.type) {
     case 'video':    return { videoUrl: url || undefined };

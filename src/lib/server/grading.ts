@@ -44,6 +44,7 @@ export function toPlayQuestion(q: Question, opts: { shuffleOptions?: boolean } =
     type: q.type,
     module: q.module,
     isTricky: !!q.isTricky || q.type === 'tricky',
+    hint: (q.isTricky || q.type === 'tricky') && q.trickyHint?.trim() ? q.trickyHint.trim() : undefined,
     isMultiSelect: q.type === 'multiple_choice',
     isOpenText: q.type === 'open_text',
     isFillInBlank: q.type === 'fill_in_the_blank',
