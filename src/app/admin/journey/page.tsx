@@ -1327,7 +1327,7 @@ export default function JourneyPage() {
         .sort((a, b) => a.order - b.order || a.dayOffset - b.dayOffset)
         .map((m, i) => ({ ...m, order: i }));
 
-      await saveJourney(
+      const savedId = await saveJourney(
         {
           organizationId: 'aviva-credito',
           productId: selectedProductId,
@@ -1343,6 +1343,11 @@ export default function JourneyPage() {
         userId,
         journey?.id
       );
+      // Una ruta nueva queda con su id: los guardados siguientes la actualizan
+      // en lugar de crear otra ruta cada vez.
+      if (!journey?.id) {
+        setJourney({ id: savedId, organizationId: 'aviva-credito', productId: selectedProductId, name: journeyName, stages: stagesWithOrder, steps: flatSteps, active: true } as Journey);
+      }
       setHasUnsaved(false);
       setLastSavedAt(new Date());
       if (!silent) toast({ title: 'Ruta guardada' });
