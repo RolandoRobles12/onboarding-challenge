@@ -18,9 +18,12 @@ import {
   getJourneyByProduct,
   getLevelsConfig,
   getLevelFromConfig,
+  getUserCertificates,
   type LevelConfig,
 } from '@/lib/firestore-service';
-import type { UserBadge, QuizAttempt, JourneyStep } from '@/lib/types-scalable';
+import { syncCertificates } from '@/lib/api-client';
+import { certificateHref } from '@/lib/certificates';
+import type { UserBadge, QuizAttempt, JourneyStep, UserCertificate } from '@/lib/types-scalable';
 import {
   LogOut, Zap, Star, Medal, Award, CheckCircle2, Swords, TrendingUp, BookOpen, GraduationCap, ChevronRight,
 } from 'lucide-react';
@@ -47,6 +50,7 @@ function StatCard({ icon: Icon, label, value, color, bg }: {
 export default function PerfilPage() {
   const { user, profile, logout } = useAuth();
   const [badges, setBadges] = useState<UserBadge[]>([]);
+  const [certs, setCerts] = useState<UserCertificate[]>([]);
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
   const [completedCount, setCompletedCount] = useState(0);
   const [xp, setXp] = useState(0);
@@ -57,6 +61,12 @@ export default function PerfilPage() {
 
   useEffect(() => {
     if (!user || !profile) return;
+
+    // Certificados ligados al perfil (se registran los que falten y se muestran los vigentes).
+    syncCertificates()
+      .then(() => getUserCertificates(user.uid))
+      .then(all => setCerts(all.filter(c => c.status === 'active')))
+      .catch(() => {});
 
     Promise.all([
       getUserBadges(user.uid).catch(() => [] as UserBadge[]),
@@ -266,12 +276,40 @@ export default function PerfilPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border bg-card divide-y overflow-hidden">
-              <Link href="/certifications" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+            {/* Certificados */}
+            <div className="rounded-2xl border bg-card overflow-hidden">
+              <div className="px-4 py-3 border-b flex items-center gap-2">
                 <GraduationCap className="h-4 w-4 text-primary" />
-                <span className="flex-1 text-sm font-semibold">Mis certificados</span>
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </Link>
+                <span className="font-semibold text-sm">Mis Certificados</span>
+                <Link href="/certifications" className="ml-auto text-xs text-primary hover:underline">Ver todos</Link>
+              </div>
+              {certs.length === 0 ? (
+                <div className="py-6 text-center text-muted-foreground">
+                  <p className="text-sm font-medium">Aún no tienes certificados</p>
+                  <p className="text-xs mt-1">Los obtienes al terminar tu ruta o un curso con certificado</p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {certs.map(c => (
+                    <Link key={c.id} href={certificateHref(c)} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
+                      <div className={`h-9 w-9 rounded-lg bg-gradient-to-br ${c.kind === 'course' ? 'from-sky-500 to-blue-600' : 'from-amber-500 to-orange-500'} flex items-center justify-center shrink-0`}>
+                        <Award className="h-4 w-4 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{c.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {c.kind === 'course' ? 'Curso' : 'Ruta Aviva'}
+                          {c.issuedAt?.toDate && ` · ${c.issuedAt.toDate().toLocaleDateString('es-MX')}`}
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border bg-card divide-y overflow-hidden">
               <Link href="/courses" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40 transition-colors">
                 <BookOpen className="h-4 w-4 text-emerald-600" />
                 <span className="flex-1 text-sm font-semibold">Mis cursos</span>

@@ -17,6 +17,7 @@ import {
   limit,
   Timestamp,
   serverTimestamp,
+  deleteField,
   writeBatch,
   increment,
   arrayUnion,
@@ -48,6 +49,7 @@ import type {
   CertificateConfig,
   Badge,
   UserBadge,
+  UserCertificate,
   JourneyForm,
   FormResponse,
   Video,
@@ -106,6 +108,7 @@ const COLLECTIONS = {
   CERTIFICATE_CONFIG: 'certificate_config',
   BADGES: 'badges',
   USER_BADGES: 'user_badges',
+  USER_CERTIFICATES: 'user_certificates',
   // --- Módulo: Cursos (Course Module) ---
   COURSES: 'courses',
   ENROLLMENTS: 'enrollments',
@@ -1474,6 +1477,37 @@ export async function getUserBadges(userId: string): Promise<UserBadge[]> {
     console.error('Error getting user badges:', error);
     return [];
   }
+}
+
+// ── Certificados ligados al perfil (los crea el servidor) ─────────────────
+
+/** Certificados vigentes y vencidos de un usuario, más recientes primero. */
+export async function getUserCertificates(userId: string): Promise<UserCertificate[]> {
+  const snap = await getDocs(query(getCollectionRef(COLLECTIONS.USER_CERTIFICATES), where('userId', '==', userId)));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }) as UserCertificate)
+    .sort((a, b) => (b.issuedAt?.toMillis?.() ?? 0) - (a.issuedAt?.toMillis?.() ?? 0));
+}
+
+/** Un certificado por id (null si no existe). */
+export async function getUserCertificate(certId: string): Promise<UserCertificate | null> {
+  const snap = await getDoc(getDocRef(COLLECTIONS.USER_CERTIFICATES, certId));
+  return snap.exists() ? ({ id: snap.id, ...snap.data() } as UserCertificate) : null;
+}
+
+/** Todos los certificados emitidos (staff). */
+export async function getAllUserCertificates(): Promise<UserCertificate[]> {
+  const snap = await getDocs(getCollectionRef(COLLECTIONS.USER_CERTIFICATES));
+  return snap.docs
+    .map(d => ({ id: d.id, ...d.data() }) as UserCertificate)
+    .sort((a, b) => (b.issuedAt?.toMillis?.() ?? 0) - (a.issuedAt?.toMillis?.() ?? 0));
+}
+
+/** Revoca o restaura un certificado (staff). */
+export async function setCertificateStatus(certId: string, status: 'active' | 'revoked', byUid: string): Promise<void> {
+  await updateDoc(getDocRef(COLLECTIONS.USER_CERTIFICATES, certId), status === 'revoked'
+    ? { status, revokedAt: serverTimestamp(), revokedBy: byUid, updatedAt: serverTimestamp() }
+    : { status, revokedAt: deleteField(), revokedBy: deleteField(), updatedAt: serverTimestamp() });
 }
 
 /** Revoca una insignia otorgada a un usuario */

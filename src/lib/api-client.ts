@@ -16,6 +16,12 @@ export async function authFetch(input: string, init: RequestInit = {}): Promise<
  * Avisa al servidor de un evento de la capacitación (/api/events) para que
  * mande avisos y entregue insignias. No bloquea ni falla la acción del usuario.
  */
+/** Registra en el perfil los certificados ya ganados (all: todos los embajadores, solo staff). */
+export async function syncCertificates(all = false): Promise<void> {
+  await authFetch('/api/certificates/sync', { method: 'POST', body: JSON.stringify({ all }) })
+    .catch(err => console.error('[certificates]', err));
+}
+
 export function postEvent(event: Record<string, unknown> & { type: string }): Promise<void> {
   // keepalive: el aviso no se pierde si el usuario sale de la página justo después.
   return authFetch('/api/events', { method: 'POST', body: JSON.stringify(event), keepalive: true })

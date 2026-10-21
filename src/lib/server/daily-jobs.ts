@@ -8,6 +8,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { adminDb } from './firebase-admin';
 import { getNotificationConfig, notifyUser } from './notifications';
 import { getJourneyForProduct } from './progress';
+import { expireCourseCertificate } from './certificates';
 import { journeyStages } from '@/lib/journey-progress';
 import { getEntryDate, getStageSchedule } from '@/lib/journey-schedule';
 import { addDaysStr } from '@/lib/pulse-utils';
@@ -138,8 +139,11 @@ export async function runDailyNotifications(today: string): Promise<string[]> {
             assignedAt: FieldValue.serverTimestamp(),
             enrolledAt: FieldValue.serverTimestamp(),
             renewalDueAt: FieldValue.delete(),
+            // El certificado renovado tendrá su propia fecha de emisión.
+            certificateIssuedAt: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
           });
+          await expireCourseCertificate(user.uid, course.id);
           await notifyUser({
             type: 'recertification_due', user, config,
             message: { title: '🔁 Toca renovar tu curso', body: `Tu certificación de «${course.title}» venció y se te volvió a asignar.`, path: `/courses/${course.id}` },
@@ -148,6 +152,7 @@ export async function runDailyNotifications(today: string): Promise<string[]> {
           reassigned++;
         } else {
           await doc.ref.update({ status: 'expired', updatedAt: FieldValue.serverTimestamp() });
+          await expireCourseCertificate(user.uid, course.id);
         }
       }
     }

@@ -13,9 +13,11 @@ import {
   getCertificateConfig,
   getCertificateSigners,
   getCourse,
+  getUserCertificate,
   getUserEnrollments,
   updateEnrollmentProgress,
 } from '@/lib/firestore-service';
+import { courseCertificateId } from '@/lib/certificates';
 import { postEvent } from '@/lib/api-client';
 import { toMillis } from '@/lib/course-access';
 import type { CertificateConfig } from '@/lib/types-scalable';
@@ -29,6 +31,7 @@ export default function CourseCertificatePage() {
   const { profile } = useAuth();
   const [data, setData] = useState<{ name: string; title: string; date: Date; lessons: number } | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
+  const [revoked, setRevoked] = useState(false);
   const [signers, setSigners] = useState<CertificateSignerData[]>([]);
   const [config, setConfig] = useState<Partial<CertificateConfig>>({});
 
@@ -36,12 +39,17 @@ export default function CourseCertificatePage() {
     if (!profile || !courseId) return;
     let cancelled = false;
     (async () => {
-      const [course, enrollments, allSigners, cfg] = await Promise.all([
+      const [course, enrollments, allSigners, cfg, record] = await Promise.all([
         getCourse(courseId),
         getUserEnrollments(profile.uid).catch(() => []),
         getCertificateSigners().catch(() => []),
         getCertificateConfig().catch(() => null),
+        getUserCertificate(courseCertificateId(profile.uid, courseId)).catch(() => null),
       ]);
+      if (record?.status === 'revoked') {
+        if (!cancelled) setRevoked(true);
+        return;
+      }
       const enr = enrollments.find(e => e.courseId === courseId && e.status === 'completed');
       if (!course?.certificateTemplate || !enr) {
         if (!cancelled) setNotAvailable(true);
@@ -76,7 +84,15 @@ export default function CourseCertificatePage() {
 
   return (
     <ProtectedRoute>
-      {notAvailable ? (
+      {revoked ? (
+        <Card className="rounded-lg max-w-md mx-auto mt-10 text-center">
+          <CardHeader><CardTitle>Certificado revocado</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">Este certificado fue revocado. Si crees que es un error, habla con tu capacitador.</p>
+            <Button asChild variant="outline"><Link href="/certifications">Mis certificados</Link></Button>
+          </CardContent>
+        </Card>
+      ) : notAvailable ? (
         <Card className="rounded-lg max-w-md mx-auto mt-10 text-center">
           <CardHeader><CardTitle>Certificado no disponible</CardTitle></CardHeader>
           <CardContent className="space-y-4">

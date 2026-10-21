@@ -225,6 +225,16 @@ service cloud.firestore {
       allow delete: if isStaff();
     }
 
+    // Certificados ligados al perfil: los crea el servidor al emitirse; el
+    // staff solo puede revocarlos o restaurarlos.
+    match /user_certificates/{certId} {
+      allow get: if isStaff() || (isMember() && ownsId(certId));
+      allow list: if isStaff() || (isMember() && ownsExisting());
+      allow update: if isStaff() && onlyChanges(['status', 'revokedAt', 'revokedBy', 'updatedAt'])
+        && request.resource.data.status in ['active', 'revoked'];
+      allow create, delete: if false;
+    }
+
     match /user_badges/{userBadgeId} {
       allow read: if isMember();
       allow write: if isStaff();

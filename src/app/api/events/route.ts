@@ -21,6 +21,7 @@ import { authErrorResponse, requireUser, STAFF_ROLES } from '@/lib/server/auth';
 import { notifyUser, notifyUsers } from '@/lib/server/notifications';
 import { awardBadgesFor, notifyBadge } from '@/lib/server/badges';
 import { markJourneySteps } from '@/lib/server/progress';
+import { syncUserCertificates } from '@/lib/server/certificates';
 import type { Course, CourseEnrollment } from '@/lib/types-lms';
 import type { Quiz, UserProfile } from '@/lib/types-scalable';
 
@@ -79,6 +80,7 @@ export async function POST(req: NextRequest) {
         if (body.courseId) {
           const [enrollment, course] = await Promise.all([getEnrollment(profile.uid, body.courseId), getCourse(body.courseId)]);
           if (!course?.certificateTemplate || enrollment?.status !== 'completed') return bad('El certificado no está disponible.', 409);
+          await syncUserCertificates(profile);
           await notifyUser({
             type: 'certificate_issued',
             user: profile,
@@ -90,6 +92,7 @@ export async function POST(req: NextRequest) {
         if (!body.journeyId || !body.stepId) return bad('Falta la ruta.');
         const progress = await db.collection('journey_progress').doc(`${profile.uid}_${body.journeyId}`).get();
         if (!progress.data()?.certificateIssuedAt?.[body.stepId]) return bad('El certificado no se ha emitido.', 409);
+        await syncUserCertificates(profile);
         const journey = await db.collection('journeys').doc(body.journeyId).get();
         const name = journey.data()?.name || 'tu ruta';
         await notifyUser({

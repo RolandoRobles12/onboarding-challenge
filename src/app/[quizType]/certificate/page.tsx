@@ -16,7 +16,9 @@ import {
   getProduct,
   getUserJourneyProgress,
   issueJourneyCertificate,
+  getUserCertificate,
 } from '@/lib/firestore-service';
+import { journeyCertificateId } from '@/lib/certificates';
 import type { CertificateConfig, Journey } from '@/lib/types-scalable';
 import { isJourneyStepUnlocked, journeySteps } from '@/lib/journey-progress';
 import { useAuth } from '@/context/AuthContext';
@@ -47,6 +49,7 @@ function CertificateContent() {
 
   const [data, setData] = useState<CertificateData | null>(null);
   const [notAvailable, setNotAvailable] = useState(false);
+  const [revoked, setRevoked] = useState(false);
   const [signers, setSigners] = useState<CertificateSignerData[]>([]);
   const [certConfig, setCertConfig] = useState<Partial<CertificateConfig>>({});
 
@@ -76,6 +79,12 @@ function CertificateContent() {
         // El staff puede ver el certificado para revisarlo, aunque no haya hecho la ruta.
         if (!isJourneyStepUnlocked(journey, certStep.id, completed) && !isTrainer) {
           if (!cancelled) setNotAvailable(true);
+          return;
+        }
+
+        const record = await getUserCertificate(journeyCertificateId(user.uid, journey.id, certStep.id)).catch(() => null);
+        if (record?.status === 'revoked') {
+          if (!cancelled) setRevoked(true);
           return;
         }
 
@@ -120,6 +129,20 @@ function CertificateContent() {
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId, journeyId, stepId, user?.uid, profile?.uid]);
+
+  if (revoked) {
+    return (
+      <Card className="rounded-lg max-w-md mx-auto mt-10 text-center">
+        <CardHeader>
+          <CardTitle>Certificado revocado</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">Este certificado fue revocado. Si crees que es un error, habla con tu capacitador.</p>
+          <Button asChild variant="outline"><Link href="/certifications">Mis certificados</Link></Button>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (notAvailable) {
     return (

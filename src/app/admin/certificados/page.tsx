@@ -38,6 +38,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
+import { IssuedCertificatesTab } from '@/components/admin/IssuedCertificatesTab';
 import { Certificate } from '@/components/Certificate';
 import {
   Award,
@@ -342,7 +343,7 @@ export default function CertificadosPage() {
           <Award className="h-6 w-6" /> Certificados
         </h1>
         <p className="text-muted-foreground">
-          Administra los firmantes y la plantilla visual de los certificados
+          Administra los firmantes, la plantilla visual y los certificados emitidos
         </p>
       </div>
 
@@ -354,7 +355,15 @@ export default function CertificadosPage() {
           <TabsTrigger value="plantilla" className="gap-2">
             <LayoutTemplate className="h-4 w-4" /> Plantilla
           </TabsTrigger>
+          <TabsTrigger value="emitidos" className="gap-2">
+            <Award className="h-4 w-4" /> Emitidos
+          </TabsTrigger>
         </TabsList>
+
+        {/* TAB: EMITIDOS — certificados de los embajadores, con revocar/restaurar */}
+        <TabsContent value="emitidos">
+          <IssuedCertificatesTab />
+        </TabsContent>
 
         {/* ══════════════════════════════════════════════════════════════════
             TAB: FIRMANTES

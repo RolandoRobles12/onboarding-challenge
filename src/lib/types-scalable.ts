@@ -849,6 +849,32 @@ export interface Badge {
   updatedAt: Timestamp;
 }
 
+/**
+ * Certificado obtenido por un usuario (colección user_certificates). Lo crea el
+ * servidor al emitirse; id fijo `<uid>_journey_<journeyId>_<stepId>` o
+ * `<uid>_course_<courseId>` (ver src/lib/certificates.ts).
+ */
+export interface UserCertificate {
+  id: string;
+  organizationId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  kind: 'journey' | 'course';
+  /** Nombre que aparece en el certificado (producto, ruta o curso). */
+  title: string;
+  journeyId?: string;
+  stepId?: string;
+  productId?: string;
+  courseId?: string;
+  issuedAt: Timestamp;
+  /** expired: el curso venció por re-certificación; vuelve a active al renovarlo. */
+  status: 'active' | 'revoked' | 'expired';
+  revokedAt?: Timestamp;
+  revokedBy?: string;
+  updatedAt?: Timestamp;
+}
+
 /** Registro de que un usuario ganó un badge (con datos denormalizados para no hacer joins) */
 export interface UserBadge {
   id: string;
